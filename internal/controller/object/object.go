@@ -19,6 +19,9 @@ package object
 import (
 	"context"
 
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+
 	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
 
 	"github.com/pkg/errors"
@@ -111,20 +114,18 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	var err error
 	cd := pc.Spec.Credentials
 
-	switch cd.Source { //nolint:exhaustive
-	case xpv1.CredentialsSourceInjectedIdentity:
+	if cd.Source == xpv1.CredentialsSourceInjectedIdentity {
 		rc, err = rest.InClusterConfig()
 		if err != nil {
 			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
 		}
-	default:
-		kc, err := resource.CommonCredentialExtractor(ctx, cd.Source, c.kube, cd.CommonCredentialSelectors)
-		if err != nil {
+	} else {
+		var kc []byte
+		if kc, err = resource.CommonCredentialExtractor(ctx, cd.Source, c.kube, cd.CommonCredentialSelectors); err != nil {
 			return nil, errors.Wrap(err, errGetCreds)
 		}
 
-		rc, err = c.newRestConfigFn(kc)
-		if err != nil {
+		if rc, err = c.newRestConfigFn(kc); err != nil {
 			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
 		}
 	}
@@ -150,15 +151,17 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	c.logger.Debug("Observing", "resource", cr)
 
-	t := &unstructured.Unstructured{}
-	if err := json.Unmarshal(cr.Spec.ForProvider.Object.Raw, t); err != nil {
+	desired := &unstructured.Unstructured{}
+	if err := json.Unmarshal(cr.Spec.ForProvider.Manifest.Raw, desired); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errUnmarshalTemplate)
 	}
 
+	existing := desired.DeepCopy()
+
 	err := c.client.Get(ctx, types.NamespacedName{
-		Namespace: t.GetNamespace(),
-		Name:      t.GetName(),
-	}, t)
+		Namespace: existing.GetNamespace(),
+		Name:      existing.GetName(),
+	}, existing)
 
 	if kerrors.IsNotFound(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
@@ -166,12 +169,32 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	if err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, "failed to get")
 	}
-	cr.Status.AtProvider.Object.Raw, err = t.MarshalJSON()
-	if err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, "failed to marshal")
+
+	if cr.Status.AtProvider.Manifest.Raw, err = existing.MarshalJSON(); err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(err, "failed to marshal existing resource")
 	}
 
-	// TODO(hasan): check if resource is up-to-date
+	lastApplied, ok := existing.GetAnnotations()[v1.LastAppliedConfigAnnotation]
+	if !ok {
+		return managed.ExternalObservation{
+			ResourceExists:   true,
+			ResourceUpToDate: false,
+		}, nil
+	}
+
+	last := &unstructured.Unstructured{}
+	if err := json.Unmarshal([]byte(lastApplied), last); err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(err, errUnmarshalTemplate)
+	}
+
+	if equality.Semantic.DeepEqual(last, desired) {
+		c.logger.Debug("Up-to-date!!!")
+		return managed.ExternalObservation{
+			ResourceExists:   true,
+			ResourceUpToDate: true,
+		}, nil
+	}
+
 	return managed.ExternalObservation{
 		ResourceExists:   true,
 		ResourceUpToDate: false,
@@ -186,19 +209,23 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	c.logger.Debug("Creating", "resource", cr)
 	t := &unstructured.Unstructured{}
-	if err := json.Unmarshal(cr.Spec.ForProvider.Object.Raw, t); err != nil {
+	if err := json.Unmarshal(cr.Spec.ForProvider.Manifest.Raw, t); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errUnmarshalTemplate)
 	}
 
+	t.SetAnnotations(map[string]string{
+		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
+	})
 	if err := c.client.Create(ctx, t); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, "failed to create")
 	}
 
 	var err error
-	if cr.Status.AtProvider.Object.Raw, err = t.MarshalJSON(); err != nil {
+	if cr.Status.AtProvider.Manifest.Raw, err = t.MarshalJSON(); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, "failed to marshal object for atProvider")
 	}
 
+	cr.Status.SetConditions(xpv1.Available())
 	return managed.ExternalCreation{}, nil
 }
 
@@ -211,16 +238,19 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	c.logger.Debug("Updating", "resource", cr)
 
 	t := &unstructured.Unstructured{}
-	if err := json.Unmarshal(cr.Spec.ForProvider.Object.Raw, t); err != nil {
+	if err := json.Unmarshal(cr.Spec.ForProvider.Manifest.Raw, t); err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(err, errUnmarshalTemplate)
 	}
 
-	if err := resource.NewAPIPatchingApplicator(c.client).Apply(ctx, t); err != nil {
+	t.SetAnnotations(map[string]string{
+		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
+	})
+	if err := resource.NewAPIUpdatingApplicator(c.client).Apply(ctx, t); err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(err, "failed to apply")
 	}
 
 	var err error
-	if cr.Status.AtProvider.Object.Raw, err = t.MarshalJSON(); err != nil {
+	if cr.Status.AtProvider.Manifest.Raw, err = t.MarshalJSON(); err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(err, "failed to marshal object for atProvider")
 	}
 
@@ -235,7 +265,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	c.logger.Debug("Deleting", "resource", cr)
 	t := &unstructured.Unstructured{}
-	if err := json.Unmarshal(cr.Spec.ForProvider.Object.Raw, t); err != nil {
+	if err := json.Unmarshal(cr.Spec.ForProvider.Manifest.Raw, t); err != nil {
 		return errors.Wrap(err, errUnmarshalTemplate)
 	}
 

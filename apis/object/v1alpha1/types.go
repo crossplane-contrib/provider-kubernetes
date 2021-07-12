@@ -24,18 +24,18 @@ import (
 
 // ObjectParameters are the configurable fields of a Object.
 type ObjectParameters struct {
-	// A Template for a Kubernetes object to be submitted to the
-	// KubernetesCluster to which this application object is scheduled. The
-	// object must be understood by the KubernetesCluster. Crossplane requires
-	// only that the object contains standard Kubernetes type and object
-	// metadata.
-	Object runtime.RawExtension `json:"object"`
+	// Raw JSON representation of the kubernetes object to be created.
+	// +kubebuilder:validation:EmbeddedResource
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Manifest runtime.RawExtension `json:"manifest"`
 }
 
 // ObjectObservation are the observable fields of a Object.
 type ObjectObservation struct {
-	// Raw JSON representation of the remote status as a byte array.
-	Object runtime.RawExtension `json:"object,omitempty"`
+	// Raw JSON representation of the remote object.
+	// +kubebuilder:validation:EmbeddedResource
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Manifest runtime.RawExtension `json:"manifest,omitempty"`
 }
 
 // A ObjectSpec defines the desired state of a Object.
@@ -54,7 +54,8 @@ type ObjectStatus struct {
 
 // A Object is an example API type
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="STATE",type="string",JSONPath=".status.atProvider.state"
+// +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
+// +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:scope=Cluster
 type Object struct {

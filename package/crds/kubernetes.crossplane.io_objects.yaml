@@ -17,8 +17,11 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.atProvider.state
-      name: STATE
+    - jsonPath: .status.conditions[?(@.type=='Synced')].status
+      name: SYNCED
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: READY
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: AGE
@@ -48,11 +51,13 @@ spec:
               forProvider:
                 description: ObjectParameters are the configurable fields of a Object.
                 properties:
-                  object:
-                    description: A Template for a Kubernetes object to be submitted to the KubernetesCluster to which this application object is scheduled. The object must be understood by the KubernetesCluster. Crossplane requires only that the object contains standard Kubernetes type and object metadata.
+                  manifest:
+                    description: Raw JSON representation of the kubernetes object to be created.
                     type: object
+                    x-kubernetes-embedded-resource: true
+                    x-kubernetes-preserve-unknown-fields: true
                 required:
-                - object
+                - manifest
                 type: object
               providerConfigRef:
                 description: ProviderConfigReference specifies how the provider that will be used to create, observe, update, and delete this managed resource should be configured.
@@ -94,9 +99,11 @@ spec:
               atProvider:
                 description: ObjectObservation are the observable fields of a Object.
                 properties:
-                  object:
-                    description: Raw JSON representation of the remote status as a byte array.
+                  manifest:
+                    description: Raw JSON representation of the remote object.
                     type: object
+                    x-kubernetes-embedded-resource: true
+                    x-kubernetes-preserve-unknown-fields: true
                 type: object
               conditions:
                 description: Conditions of the resource.
