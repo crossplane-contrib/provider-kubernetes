@@ -25,7 +25,7 @@ import (
 
 // Package type metadata.
 const (
-	Group   = "object.kubernetes.crossplane.io"
+	Group   = "kubernetes.crossplane.io"
 	Version = "v1alpha1"
 )
 

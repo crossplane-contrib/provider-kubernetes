@@ -10,4 +10,4 @@ spec:
       metadata:
         name: hello-world
   providerConfigRef:
-    name: example
+    name: kubernetes-provider

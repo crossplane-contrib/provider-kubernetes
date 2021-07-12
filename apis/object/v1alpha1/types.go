@@ -41,13 +41,13 @@ type ObjectObservation struct {
 // A ObjectSpec defines the desired state of a Object.
 type ObjectSpec struct {
 	xpv1.ResourceSpec `json:",inline"`
-	ForProvider                  ObjectParameters `json:"forProvider"`
+	ForProvider       ObjectParameters `json:"forProvider"`
 }
 
 // A ObjectStatus represents the observed state of a Object.
 type ObjectStatus struct {
 	xpv1.ResourceStatus `json:",inline"`
-	AtProvider                     ObjectObservation `json:"atProvider,omitempty"`
+	AtProvider          ObjectObservation `json:"atProvider,omitempty"`
 }
 
 // +kubebuilder:object:root=true
