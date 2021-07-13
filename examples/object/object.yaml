@@ -4,7 +4,7 @@ metadata:
   name: sample-namespace
 spec:
   forProvider:
-    object:
+    manifest:
       apiVersion: v1
       kind: Namespace
       metadata:

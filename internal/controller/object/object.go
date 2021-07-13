@@ -135,12 +135,18 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errNewKubernetesClient)
 	}
 
-	return &external{client: k, logger: c.logger}, nil
+	return &external{
+		logger: c.logger,
+		client: resource.ClientApplicator{
+			Client:     k,
+			Applicator: resource.NewAPIPatchingApplicator(k),
+		},
+	}, nil
 }
 
 type external struct {
-	client client.Client
 	logger logging.Logger
+	client resource.ClientApplicator
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -188,7 +194,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	if equality.Semantic.DeepEqual(last, desired) {
-		c.logger.Debug("Up-to-date!!!")
+		c.logger.Debug("Up to date!")
 		return managed.ExternalObservation{
 			ResourceExists:   true,
 			ResourceUpToDate: true,
@@ -245,7 +251,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	t.SetAnnotations(map[string]string{
 		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
-	if err := resource.NewAPIUpdatingApplicator(c.client).Apply(ctx, t); err != nil {
+	if err := c.client.Apply(ctx, t); err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(err, "failed to apply")
 	}
 
