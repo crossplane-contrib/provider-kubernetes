@@ -211,9 +211,6 @@ spec:
                 project: default
                 syncPolicy:
                   automated: {}
-                source:
-                  path: guestbook
-                  repoURL: https://github.com/argoproj/argocd-example-apps.git
                 destination:
                   namespace: argocd
                   server: https://kubernetes.default.svc

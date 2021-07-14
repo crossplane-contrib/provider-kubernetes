@@ -19,12 +19,9 @@ package object
 import (
 	"context"
 
+	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-
-	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
-
-	"github.com/pkg/errors"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -44,18 +41,24 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
 )
 
 const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
 	errGetCreds     = "cannot get credentials"
+	errGetObject    = "cannot get object"
+	errCreateObject = "cannot create object"
+	errApplyObject  = "cannot apply object"
+	errDeleteObject = "cannot delete object"
 
 	errNotKubernetesObject      = "managed resource is not a Object custom resource"
 	errNewKubernetesClient      = "cannot create new Kubernetes client"
 	errFailedToCreateRestConfig = "cannot create new rest config using provider secret"
 
-	errUnmarshalTemplate = "cannot unmarshal template"
+	errUnmarshalTemplate       = "cannot unmarshal template"
+	errFailedToMarshalExisting = "cannot marshal existing resource"
 )
 
 // Setup adds a controller that reconciles Object managed resources.
@@ -173,11 +176,11 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 	if err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, "failed to get")
+		return managed.ExternalObservation{}, errors.Wrap(err, errGetObject)
 	}
 
 	if cr.Status.AtProvider.Manifest.Raw, err = existing.MarshalJSON(); err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, "failed to marshal existing resource")
+		return managed.ExternalObservation{}, errors.Wrap(err, errFailedToMarshalExisting)
 	}
 
 	lastApplied, ok := existing.GetAnnotations()[v1.LastAppliedConfigAnnotation]
@@ -223,7 +226,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
 	if err := c.client.Create(ctx, t); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, "failed to create")
+		return managed.ExternalCreation{}, errors.Wrap(err, errCreateObject)
 	}
 
 	var err error
@@ -252,7 +255,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
 	if err := c.client.Apply(ctx, t); err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, "failed to apply")
+		return managed.ExternalUpdate{}, errors.Wrap(err, errApplyObject)
 	}
 
 	var err error
@@ -276,7 +279,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	if err := c.client.Delete(ctx, t); resource.IgnoreNotFound(err) != nil {
-		return errors.Wrap(err, "failed to delete")
+		return errors.Wrap(err, errDeleteObject)
 	}
 
 	return nil

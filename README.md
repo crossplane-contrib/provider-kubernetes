@@ -1,7 +1,7 @@
 # provider-kubernetes
 
 `provider-kubernetes` is a Crossplane Provider that enables deployment and management
-of Object on Kubernetes clusters typically provisioned by Crossplane:
+of Objects on Kubernetes clusters typically provisioned by Crossplane:
 
 - A `Provider` resource type that only points to a credentials `Secret`.
 - An `Object` resource type that is to manage Kubernetes Objects.
@@ -51,7 +51,7 @@ sudo kubectl proxy --port=8081
 ### Testing in Local Cluster
 
 1. Prepare provider config for local cluster:
-  1. If helm provider running in cluster (e.g. provider installed with crossplane):
+  1. If provider kubernetes running in cluster (e.g. provider installed with crossplane):
 
       ```
       SA=$(kubectl -n crossplane-system get sa -o name | grep provider-kubernetes | sed -e 's|serviceaccount\/|crossplane-system:|g')
