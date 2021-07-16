@@ -160,14 +160,14 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	c.logger.Debug("Observing", "resource", cr)
 
-	desired := &unstructured.Unstructured{}
-	if err := json.Unmarshal(cr.Spec.ForProvider.Manifest.Raw, desired); err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errUnmarshalTemplate)
+	desired, err := getDesired(cr)
+	if err != nil {
+		return managed.ExternalObservation{}, err
 	}
 
 	existing := desired.DeepCopy()
 
-	err := c.client.Get(ctx, types.NamespacedName{
+	err = c.client.Get(ctx, types.NamespacedName{
 		Namespace: existing.GetNamespace(),
 		Name:      existing.GetName(),
 	}, existing)
@@ -179,8 +179,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObject)
 	}
 
-	if cr.Status.AtProvider.Manifest.Raw, err = existing.MarshalJSON(); err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errFailedToMarshalExisting)
+	if err = setObserved(cr, existing); err != nil {
+		return managed.ExternalObservation{}, err
 	}
 
 	lastApplied, ok := existing.GetAnnotations()[v1.LastAppliedConfigAnnotation]
@@ -217,25 +217,20 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	c.logger.Debug("Creating", "resource", cr)
-	t := &unstructured.Unstructured{}
-	if err := json.Unmarshal(cr.Spec.ForProvider.Manifest.Raw, t); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errUnmarshalTemplate)
+	obj, err := getDesired(cr)
+	if err != nil {
+		return managed.ExternalCreation{}, err
 	}
 
-	t.SetAnnotations(map[string]string{
+	obj.SetAnnotations(map[string]string{
 		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
-	if err := c.client.Create(ctx, t); err != nil {
+	if err := c.client.Create(ctx, obj); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateObject)
 	}
 
-	var err error
-	if cr.Status.AtProvider.Manifest.Raw, err = t.MarshalJSON(); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, "failed to marshal object for atProvider")
-	}
-
 	cr.Status.SetConditions(xpv1.Available())
-	return managed.ExternalCreation{}, nil
+	return managed.ExternalCreation{}, setObserved(cr, obj)
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
@@ -246,24 +241,20 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	c.logger.Debug("Updating", "resource", cr)
 
-	t := &unstructured.Unstructured{}
-	if err := json.Unmarshal(cr.Spec.ForProvider.Manifest.Raw, t); err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, errUnmarshalTemplate)
+	obj, err := getDesired(cr)
+	if err != nil {
+		return managed.ExternalUpdate{}, err
 	}
 
-	t.SetAnnotations(map[string]string{
+	obj.SetAnnotations(map[string]string{
 		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
-	if err := c.client.Apply(ctx, t); err != nil {
+	if err := c.client.Apply(ctx, obj); err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(err, errApplyObject)
 	}
 
-	var err error
-	if cr.Status.AtProvider.Manifest.Raw, err = t.MarshalJSON(); err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, "failed to marshal object for atProvider")
-	}
-
-	return managed.ExternalUpdate{}, nil
+	cr.Status.SetConditions(xpv1.Available())
+	return managed.ExternalUpdate{}, setObserved(cr, obj)
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
@@ -273,14 +264,26 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	c.logger.Debug("Deleting", "resource", cr)
-	t := &unstructured.Unstructured{}
-	if err := json.Unmarshal(cr.Spec.ForProvider.Manifest.Raw, t); err != nil {
-		return errors.Wrap(err, errUnmarshalTemplate)
+	obj, err := getDesired(cr)
+	if err != nil {
+		return err
 	}
 
-	if err := c.client.Delete(ctx, t); resource.IgnoreNotFound(err) != nil {
-		return errors.Wrap(err, errDeleteObject)
-	}
+	return errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, obj)), errDeleteObject)
+}
 
+func getDesired(obj *v1alpha1.Object) (*unstructured.Unstructured, error) {
+	desired := &unstructured.Unstructured{}
+	if err := json.Unmarshal(obj.Spec.ForProvider.Manifest.Raw, desired); err != nil {
+		return nil, errors.Wrap(err, errUnmarshalTemplate)
+	}
+	return desired, nil
+}
+
+func setObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
+	var err error
+	if obj.Status.AtProvider.Manifest.Raw, err = observed.MarshalJSON(); err != nil {
+		return errors.Wrap(err, errFailedToMarshalExisting)
+	}
 	return nil
 }
