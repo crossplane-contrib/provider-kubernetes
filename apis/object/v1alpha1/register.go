@@ -37,7 +37,7 @@ var (
 	SchemeBuilder = &scheme.Builder{GroupVersion: SchemeGroupVersion}
 )
 
-// MyType type metadata.
+// Object type metadata.
 var (
 	ObjectKind             = reflect.TypeOf(Object{}).Name()
 	ObjectGroupKind        = schema.GroupKind{Group: Group, Kind: ObjectKind}.String()

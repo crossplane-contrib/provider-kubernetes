@@ -52,7 +52,7 @@ type ObjectStatus struct {
 
 // +kubebuilder:object:root=true
 
-// A Object is an example API type
+// A Object is an provider Kubernetes API type
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
 // +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
