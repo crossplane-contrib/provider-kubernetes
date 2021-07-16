@@ -8,6 +8,9 @@ spec:
       apiVersion: v1
       kind: Namespace
       metadata:
-        name: hello-world
+        # name in manifest is optional and defaults to Object name
+        # name: some-other-name
+        labels:
+          example: "true"
   providerConfigRef:
     name: kubernetes-provider

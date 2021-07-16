@@ -439,6 +439,38 @@ func Test_helmExternal_Observe(t *testing.T) {
 				err: nil,
 			},
 		},
+		"UpToDateNameDefaultsToObjectName": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = []byte(`{
+				    "apiVersion": "v1",
+				    "kind": "Namespace" }`)
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = unstructured.Unstructured{
+								Object: map[string]interface{}{
+									"apiVersion": "v1",
+									"kind":       "Namespace",
+									"metadata": map[string]interface{}{
+										"name": testObjectName,
+										"annotations": map[string]interface{}{
+											corev1.LastAppliedConfigAnnotation: `{"apiVersion":"v1","kind":"Namespace"}`,
+										},
+									},
+								},
+							}
+							return nil
+						}),
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true},
+				err: nil,
+			},
+		},
 		"UpToDate": {
 			args: args{
 				mg: kubernetesObject(),
@@ -530,6 +562,32 @@ func Test_helmExternal_Create(t *testing.T) {
 				err: errors.Wrap(errBoom, errCreateObject),
 			},
 		},
+		"SuccessDefaultsToObjectName": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = []byte(`{
+				    "apiVersion": "v1",
+				    "kind": "Namespace" }`)
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockCreate: test.NewMockCreateFn(nil, func(obj client.Object) error {
+							_, ok := obj.GetAnnotations()[corev1.LastAppliedConfigAnnotation]
+							if !ok {
+								t.Errorf("Last applied annotation not set with create")
+							}
+							if obj.GetName() != testObjectName {
+								t.Errorf("Name should default to object name when not provider in manifest")
+							}
+							return nil
+						}),
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
 		"Success": {
 			args: args{
 				mg: kubernetesObject(),
@@ -612,6 +670,26 @@ func Test_helmExternal_Update(t *testing.T) {
 				err: errors.Wrap(errBoom, errApplyObject),
 			},
 		},
+		"SuccessDefaultsToObjectName": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = []byte(`{
+				    "apiVersion": "v1",
+				    "kind": "Namespace" }`)
+				}),
+				client: resource.ClientApplicator{
+					Applicator: resource.ApplyFn(func(ctx context.Context, obj client.Object, op ...resource.ApplyOption) error {
+						if obj.GetName() != testObjectName {
+							t.Errorf("Name should default to object name when not provider in manifest")
+						}
+						return nil
+					}),
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
 		"Success": {
 			args: args{
 				mg: kubernetesObject(),
@@ -685,6 +763,28 @@ func Test_helmExternal_Delete(t *testing.T) {
 			},
 			want: want{
 				err: errors.Wrap(errBoom, errDeleteObject),
+			},
+		},
+		"SuccessDefaultsToObjectName": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = []byte(`{
+				    "apiVersion": "v1",
+				    "kind": "Namespace" }`)
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockDelete: test.NewMockDeleteFn(nil, func(obj client.Object) error {
+							if obj.GetName() != testObjectName {
+								t.Errorf("Name should default to object name when not provider in manifest")
+							}
+							return nil
+						}),
+					},
+				},
+			},
+			want: want{
+				err: nil,
 			},
 		},
 		"Success": {

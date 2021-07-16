@@ -1,11 +1,11 @@
 # provider-kubernetes
 
 `provider-kubernetes` is a Crossplane Provider that enables deployment and management
-of Objects on Kubernetes clusters typically provisioned by Crossplane:
+of arbitrary Kubernetes objects on clusters typically provisioned by Crossplane:
 
 - A `Provider` resource type that only points to a credentials `Secret`.
 - An `Object` resource type that is to manage Kubernetes Objects.
-- A managed resource controller that reconciles `Object` resources and manages Kubernetes Objects.
+- A managed resource controller that reconciles `Object` typed resources and manages arbitrary Kubernetes Objects.
 
 ## Install
 
@@ -42,7 +42,7 @@ Run controller against the cluster:
 make run
 ```
 
-Since controller is running outside of the Kind cluster, you need to make api server accessible (on a separate terminal):
+Since the controller is running outside the Kind cluster, you need to make api server accessible (on a separate terminal):
 
 ```
 sudo kubectl proxy --port=8081
@@ -50,15 +50,15 @@ sudo kubectl proxy --port=8081
 
 ### Testing in Local Cluster
 
-1. Prepare provider config for local cluster:
-  1. If provider kubernetes running in cluster (e.g. provider installed with crossplane):
+1. Prepare provider config for the local cluster:
+  1. If provider kubernetes running in the cluster (e.g. provider installed with crossplane):
 
       ```
       SA=$(kubectl -n crossplane-system get sa -o name | grep provider-kubernetes | sed -e 's|serviceaccount\/|crossplane-system:|g')
       kubectl create clusterrolebinding provider-kubernetes-admin-binding --clusterrole cluster-admin --serviceaccount="${SA}"
       kubectl apply -f examples/provider/config-incluster.yaml
       ```
-  1. If provider kubernetes running outside of the cluster (e.g. running locally with `make run`)
+  1. If provider kubernetes running outside the cluster (e.g. running locally with `make run`)
 
       ```
       KUBECONFIG=$(kind get kubeconfig --name local-dev | sed -e 's|server:\s*.*$|server: http://localhost:8081|g')

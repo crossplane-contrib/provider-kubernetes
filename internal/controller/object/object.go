@@ -57,6 +57,7 @@ const (
 	errNewKubernetesClient      = "cannot create new Kubernetes client"
 	errFailedToCreateRestConfig = "cannot create new rest config using provider secret"
 
+	errGetLastApplied          = "cannot get last applied"
 	errUnmarshalTemplate       = "cannot unmarshal template"
 	errFailedToMarshalExisting = "cannot marshal existing resource"
 )
@@ -165,12 +166,12 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, err
 	}
 
-	existing := desired.DeepCopy()
+	observed := desired.DeepCopy()
 
 	err = c.client.Get(ctx, types.NamespacedName{
-		Namespace: existing.GetNamespace(),
-		Name:      existing.GetName(),
-	}, existing)
+		Namespace: observed.GetNamespace(),
+		Name:      observed.GetName(),
+	}, observed)
 
 	if kerrors.IsNotFound(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
@@ -179,21 +180,19 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObject)
 	}
 
-	if err = setObserved(cr, existing); err != nil {
+	if err = setObserved(cr, observed); err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
-	lastApplied, ok := existing.GetAnnotations()[v1.LastAppliedConfigAnnotation]
-	if !ok {
+	var last *unstructured.Unstructured
+	if last, err = getLastApplied(cr, observed); err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(err, errGetLastApplied)
+	}
+	if last == nil {
 		return managed.ExternalObservation{
 			ResourceExists:   true,
 			ResourceUpToDate: false,
 		}, nil
-	}
-
-	last := &unstructured.Unstructured{}
-	if err := json.Unmarshal([]byte(lastApplied), last); err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errUnmarshalTemplate)
 	}
 
 	if equality.Semantic.DeepEqual(last, desired) {
@@ -277,7 +276,29 @@ func getDesired(obj *v1alpha1.Object) (*unstructured.Unstructured, error) {
 	if err := json.Unmarshal(obj.Spec.ForProvider.Manifest.Raw, desired); err != nil {
 		return nil, errors.Wrap(err, errUnmarshalTemplate)
 	}
+
+	if desired.GetName() == "" {
+		desired.SetName(obj.Name)
+	}
 	return desired, nil
+}
+
+func getLastApplied(obj *v1alpha1.Object, observed *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	lastApplied, ok := observed.GetAnnotations()[v1.LastAppliedConfigAnnotation]
+	if !ok {
+		return nil, nil
+	}
+
+	last := &unstructured.Unstructured{}
+	if err := json.Unmarshal([]byte(lastApplied), last); err != nil {
+		return nil, errors.Wrap(err, errUnmarshalTemplate)
+	}
+
+	if last.GetName() == "" {
+		last.SetName(obj.Name)
+	}
+
+	return last, nil
 }
 
 func setObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
