@@ -18,6 +18,7 @@ package object
 
 import (
 	"context"
+	"time"
 
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
@@ -53,7 +54,7 @@ const (
 	errApplyObject  = "cannot apply object"
 	errDeleteObject = "cannot delete object"
 
-	errNotKubernetesObject      = "managed resource is not a Object custom resource"
+	errNotKubernetesObject      = "managed resource is not an Object custom resource"
 	errNewKubernetesClient      = "cannot create new Kubernetes client"
 	errFailedToCreateRestConfig = "cannot create new rest config using provider secret"
 
@@ -63,7 +64,7 @@ const (
 )
 
 // Setup adds a controller that reconciles Object managed resources.
-func Setup(mgr ctrl.Manager, l logging.Logger, rl workqueue.RateLimiter) error {
+func Setup(mgr ctrl.Manager, l logging.Logger, rl workqueue.RateLimiter, poll time.Duration) error {
 	name := managed.ControllerName(v1alpha1.ObjectGroupKind)
 
 	logger := l.WithValues("controller", name)
@@ -82,6 +83,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger, rl workqueue.RateLimiter) error {
 			newKubeClientFn: clients.NewKubeClient,
 		}),
 		managed.WithLogger(logger),
+		managed.WithPollInterval(poll),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).
