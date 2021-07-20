@@ -36,7 +36,7 @@ USE_HELM3 = true
 # ====================================================================================
 # Setup Images
 
-DOCKER_REGISTRY = turkenh
+DOCKER_REGISTRY = crossplane
 IMAGES = provider-kubernetes provider-kubernetes-controller
 -include build/makelib/image.mk
 
