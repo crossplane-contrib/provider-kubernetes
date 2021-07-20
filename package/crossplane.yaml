@@ -1,0 +1,10 @@
+apiVersion: meta.pkg.crossplane.io/v1alpha1
+kind: Provider
+metadata:
+  name: provider-kubernetes
+  annotations:
+    descriptionShort: |
+      The Crossplane Kubernetes provider enables management of Kubernetes Objects.
+spec:
+  controller:
+    image: crossplane/provider-kubernetes-controller:VERSION
