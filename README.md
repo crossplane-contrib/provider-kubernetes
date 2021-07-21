@@ -14,7 +14,7 @@ so using the Crossplane CLI in a Kubernetes cluster where Crossplane is
 installed:
 
 ```console
-kubectl crossplane install provider crossplane/provider-kubernetes:master
+kubectl crossplane install provider crossplane/provider-kubernetes:main
 ```
 
 You may also manually install `provider-kubernetes` by creating a `Provider` directly:
@@ -25,7 +25,7 @@ kind: Provider
 metadata:
   name: provider-kubernetes
 spec:
-  package: "crossplane/provider-kubernetes:master"
+  package: "crossplane/provider-kubernetes:main"
 ```
 
 ## Developing locally
