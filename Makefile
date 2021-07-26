@@ -72,7 +72,7 @@ crds.clean:
 	@find package/crds -name *.yaml.sed -delete || $(FAIL)
 	@$(OK) cleaned generated CRDs
 
-generate: crds.clean
+generate.done: crds.clean
 
 # integration tests
 e2e.run: test-integration
