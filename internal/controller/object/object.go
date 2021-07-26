@@ -36,6 +36,7 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
+	"github.com/crossplane/crossplane-runtime/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
@@ -223,9 +224,10 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, err
 	}
 
-	obj.SetAnnotations(map[string]string{
+	meta.AddAnnotations(obj, map[string]string{
 		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
+
 	if err := c.client.Create(ctx, obj); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateObject)
 	}
@@ -247,9 +249,10 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, err
 	}
 
-	obj.SetAnnotations(map[string]string{
+	meta.AddAnnotations(obj, map[string]string{
 		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
+
 	if err := c.client.Apply(ctx, obj); err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(err, errApplyObject)
 	}

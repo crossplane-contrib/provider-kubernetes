@@ -3,7 +3,12 @@ PROJECT_NAME := provider-kubernetes
 PROJECT_REPO := github.com/crossplane-contrib/$(PROJECT_NAME)
 
 PLATFORMS ?= linux_amd64 linux_arm64
-include build/makelib/common.mk
+
+# -include will silently skip missing files, which allows us
+# to load those files with a target in the Makefile. If only
+# "include" was used, the make command would fail and refuse
+# to run a target until the include commands succeeded.
+-include build/makelib/common.mk
 
 # ====================================================================================
 # Setup Output

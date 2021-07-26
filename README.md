@@ -20,7 +20,7 @@ kubectl crossplane install provider crossplane/provider-kubernetes:main
 You may also manually install `provider-kubernetes` by creating a `Provider` directly:
 
 ```yaml
-apiVersion: pkg.crossplane.io/v1alpha1
+apiVersion: pkg.crossplane.io/v1
 kind: Provider
 metadata:
   name: provider-kubernetes
