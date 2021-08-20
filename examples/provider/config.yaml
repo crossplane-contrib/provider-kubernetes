@@ -16,5 +16,5 @@ spec:
     source: Secret
     secretRef:
       namespace: crossplane-system
-      name: example-provider-secret
+      name: cluster-config
       key: kubeconfig
