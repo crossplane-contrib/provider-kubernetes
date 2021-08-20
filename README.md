@@ -56,14 +56,14 @@ sudo kubectl proxy --port=8081
       ```
       SA=$(kubectl -n crossplane-system get sa -o name | grep provider-kubernetes | sed -e 's|serviceaccount\/|crossplane-system:|g')
       kubectl create clusterrolebinding provider-kubernetes-admin-binding --clusterrole cluster-admin --serviceaccount="${SA}"
-      kubectl apply -f examples/provider/config-incluster.yaml
+      kubectl apply -f examples/provider/config-in-cluster.yaml
       ```
   1. If provider kubernetes running outside the cluster (e.g. running locally with `make run`)
 
       ```
       KUBECONFIG=$(kind get kubeconfig --name local-dev | sed -e 's|server:\s*.*$|server: http://localhost:8081|g')
       kubectl -n crossplane-system create secret generic cluster-config --from-literal=kubeconfig="${KUBECONFIG}" 
-      kubectl apply -f examples/provider-config/provider-config-with-secret.yaml
+      kubectl apply -f examples/provider/config.yaml
       ```
 
 1. Now you can create `Object` resources with provider reference, see [sample object.yaml](examples/object/object.yaml).
