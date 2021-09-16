@@ -33,6 +33,7 @@ spec:
 Start a local development environment with Kind where `crossplane` is installed:
 
 ```
+make
 make local-dev
 ```
 

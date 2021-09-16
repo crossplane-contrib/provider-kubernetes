@@ -49,7 +49,6 @@ IMAGES = provider-kubernetes provider-kubernetes-controller
 # Setup Local Dev
 -include build/makelib/local.mk
 
-local-dev: local.up local.deploy.crossplane
 # ====================================================================================
 # Targets
 
@@ -81,6 +80,8 @@ generate.done: crds.clean
 
 # integration tests
 e2e.run: test-integration
+
+local-dev: local.up local.deploy.crossplane
 
 # Run integration tests.
 test-integration: $(KIND) $(KUBECTL) $(HELM3)
