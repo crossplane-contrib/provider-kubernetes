@@ -101,17 +101,9 @@ func providerConfig(pm ...providerConfigModifier) *kubernetesv1alpha1.ProviderCo
 	pc := &kubernetesv1alpha1.ProviderConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: providerName},
 		Spec: kubernetesv1alpha1.ProviderConfigSpec{
-			Credentials: kubernetesv1alpha1.ProviderCredentials{
-				Source: xpv1.CredentialsSourceSecret,
-				CommonCredentialSelectors: xpv1.CommonCredentialSelectors{
-					SecretRef: &xpv1.SecretKeySelector{
-						SecretReference: xpv1.SecretReference{
-							Name:      providerSecretName,
-							Namespace: providerSecretNamespace,
-						},
-						Key: providerSecretKey,
-					},
-				},
+			Credentials: kubernetesv1alpha1.ProviderCredentials{},
+			Identity: &kubernetesv1alpha1.Identity{
+				Type: kubernetesv1alpha1.IdentityTypeGoogleApplicationCredentials,
 			},
 		},
 	}
@@ -131,7 +123,10 @@ func Test_connector_Connect(t *testing.T) {
 
 	type args struct {
 		client          client.Client
-		newRestConfigFn func(kubeconfig []byte) (*rest.Config, error)
+		kcfgExtractorFn func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
+		gcpExtractorFn  func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
+		gcpInjectorFn   func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error
+		newRESTConfigFn func(kubeconfig []byte) (*rest.Config, error)
 		newKubeClientFn func(config *rest.Config) (client.Client, error)
 		usage           resource.Tracker
 		mg              resource.Managed
@@ -178,68 +173,7 @@ func Test_connector_Connect(t *testing.T) {
 				err: errors.Wrap(errBoom, errGetPC),
 			},
 		},
-		"UnsupportedCredentialSource": {
-			args: args{
-				client: &test.MockClient{
-					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-						if key.Name == providerName {
-							pc := providerConfig().DeepCopy()
-							pc.Spec.Credentials.Source = "non-existing-source"
-							*obj.(*kubernetesv1alpha1.ProviderConfig) = *pc
-							return nil
-						}
-						return nil
-					},
-				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
-				mg:    kubernetesObject(),
-			},
-			want: want{
-				err: errors.Wrap(errors.Errorf("no extraction handler registered for source: non-existing-source"), errGetCreds),
-			},
-		},
-		"NoSecretRef": {
-			args: args{
-				client: &test.MockClient{
-					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-						if key.Name == providerName {
-							pc := providerConfig().DeepCopy()
-							pc.Spec.Credentials.SecretRef = nil
-							*obj.(*kubernetesv1alpha1.ProviderConfig) = *pc
-							return nil
-						}
-						return nil
-					},
-				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
-				mg:    kubernetesObject(),
-			},
-			want: want{
-				err: errors.Wrap(errors.Errorf("cannot extract from secret key when none specified"), errGetCreds),
-			},
-		},
-		"FailedToGetProviderSecret": {
-			args: args{
-				client: &test.MockClient{
-					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-						if key.Name == providerName {
-							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfig()
-							return nil
-						}
-						if key.Name == providerSecretName && key.Namespace == providerSecretNamespace {
-							return errBoom
-						}
-						return errBoom
-					},
-				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
-				mg:    kubernetesObject(),
-			},
-			want: want{
-				err: errors.Wrap(errors.Wrap(errBoom, "cannot get credentials secret"), errGetCreds),
-			},
-		},
-		"FailedToCreateRestConfig": {
+		"FailedToExtractKubeconfig": {
 			args: args{
 				client: &test.MockClient{
 					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
@@ -254,7 +188,35 @@ func Test_connector_Connect(t *testing.T) {
 						return errBoom
 					},
 				},
-				newRestConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
+				kcfgExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, errBoom
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				mg:    kubernetesObject(),
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errGetCreds),
+			},
+		},
+		"FailedToCreateRESTConfig": {
+			args: args{
+				client: &test.MockClient{
+					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if key.Name == providerName {
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfig()
+							return nil
+						}
+						if key.Name == providerSecretName && key.Namespace == providerSecretNamespace {
+							*obj.(*corev1.Secret) = secret
+							return nil
+						}
+						return errBoom
+					},
+				},
+				kcfgExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				newRESTConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
 					return nil, errBoom
 				},
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
@@ -262,6 +224,71 @@ func Test_connector_Connect(t *testing.T) {
 			},
 			want: want{
 				err: errors.Wrap(errBoom, errFailedToCreateRestConfig),
+			},
+		},
+		"FailedToExtractGoogleAppCreds": {
+			args: args{
+				client: &test.MockClient{
+					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if key.Name == providerName {
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfig()
+							return nil
+						}
+						if key.Name == providerSecretName && key.Namespace == providerSecretNamespace {
+							*obj.(*corev1.Secret) = secret
+							return nil
+						}
+						return errBoom
+					},
+				},
+				kcfgExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				newRESTConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
+					return nil, nil
+				},
+				gcpExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, errBoom
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				mg:    kubernetesObject(),
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errFailedToExtractGoogleCredentials),
+			},
+		},
+		"FailedToInjectGoogleAppCreds": {
+			args: args{
+				client: &test.MockClient{
+					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if key.Name == providerName {
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfig()
+							return nil
+						}
+						if key.Name == providerSecretName && key.Namespace == providerSecretNamespace {
+							*obj.(*corev1.Secret) = secret
+							return nil
+						}
+						return errBoom
+					},
+				},
+				kcfgExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				newRESTConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
+					return nil, nil
+				},
+				gcpExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				gcpInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+					return errBoom
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				mg:    kubernetesObject(),
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errFailedToInjectGoogleCredentials),
 			},
 		},
 		"FailedToCreateNewKubernetesClient": {
@@ -282,8 +309,18 @@ func Test_connector_Connect(t *testing.T) {
 						return nil
 					},
 				},
-				newRestConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
+				kcfgExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				newRESTConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
 					return &rest.Config{}, nil
+				},
+
+				gcpExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				gcpInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+					return nil
 				},
 				newKubeClientFn: func(config *rest.Config) (c client.Client, err error) {
 					return nil, errBoom
@@ -313,8 +350,17 @@ func Test_connector_Connect(t *testing.T) {
 						return nil
 					},
 				},
-				newRestConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
+				kcfgExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				newRESTConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
 					return &rest.Config{}, nil
+				},
+				gcpExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				gcpInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+					return nil
 				},
 				newKubeClientFn: func(config *rest.Config) (c client.Client, err error) {
 					return &test.MockClient{}, nil
@@ -332,7 +378,10 @@ func Test_connector_Connect(t *testing.T) {
 			c := &connector{
 				logger:          logging.NewNopLogger(),
 				kube:            tc.args.client,
-				newRestConfigFn: tc.args.newRestConfigFn,
+				kcfgExtractorFn: tc.args.kcfgExtractorFn,
+				gcpExtractorFn:  tc.args.gcpExtractorFn,
+				gcpInjectorFn:   tc.args.gcpInjectorFn,
+				newRESTConfigFn: tc.args.newRESTConfigFn,
 				newKubeClientFn: tc.args.newKubeClientFn,
 				usage:           tc.usage,
 			}
