@@ -39,7 +39,7 @@ spec:
             description: A ProviderConfigSpec defines the desired state of a ProviderConfig.
             properties:
               credentials:
-                description: Credentials required to authenticate to this provider.
+                description: Credentials used to connect to the Kubernetes API. Typically a kubeconfig file. Use InjectedIdentity for in-cluster config.
                 properties:
                   env:
                     description: Env is a reference to an environment variable that contains credentials that must be used to connect to the provider.
@@ -87,6 +87,62 @@ spec:
                     type: string
                 required:
                 - source
+                type: object
+              identity:
+                description: Identity used to authenticate to the Kubernetes API. The identity credentials can be used to supplement kubeconfig 'credentials', for example by configuring a bearer token source such as OAuth.
+                properties:
+                  env:
+                    description: Env is a reference to an environment variable that contains credentials that must be used to connect to the provider.
+                    properties:
+                      name:
+                        description: Name is the name of an environment variable.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  fs:
+                    description: Fs is a reference to a filesystem location that contains credentials that must be used to connect to the provider.
+                    properties:
+                      path:
+                        description: Path is a filesystem path.
+                        type: string
+                    required:
+                    - path
+                    type: object
+                  secretRef:
+                    description: A SecretRef is a reference to a secret key that contains the credentials that must be used to connect to the provider.
+                    properties:
+                      key:
+                        description: The key to select.
+                        type: string
+                      name:
+                        description: Name of the secret.
+                        type: string
+                      namespace:
+                        description: Namespace of the secret.
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                  source:
+                    description: Source of the provider credentials.
+                    enum:
+                    - None
+                    - Secret
+                    - InjectedIdentity
+                    - Environment
+                    - Filesystem
+                    type: string
+                  type:
+                    description: Type of identity.
+                    enum:
+                    - GoogleApplicationCredentials
+                    type: string
+                required:
+                - source
+                - type
                 type: object
             required:
             - credentials

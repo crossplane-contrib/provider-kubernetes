@@ -44,6 +44,7 @@ import (
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/gke"
 )
 
 const (
@@ -55,9 +56,11 @@ const (
 	errApplyObject  = "cannot apply object"
 	errDeleteObject = "cannot delete object"
 
-	errNotKubernetesObject      = "managed resource is not an Object custom resource"
-	errNewKubernetesClient      = "cannot create new Kubernetes client"
-	errFailedToCreateRestConfig = "cannot create new rest config using provider secret"
+	errNotKubernetesObject              = "managed resource is not an Object custom resource"
+	errNewKubernetesClient              = "cannot create new Kubernetes client"
+	errFailedToCreateRestConfig         = "cannot create new REST config using provider secret"
+	errFailedToExtractGoogleCredentials = "cannot extract Google Application Credentials"
+	errFailedToInjectGoogleCredentials  = "cannot wrap REST client with Google Application Credentials"
 
 	errGetLastApplied          = "cannot get last applied"
 	errUnmarshalTemplate       = "cannot unmarshal template"
@@ -80,7 +83,10 @@ func Setup(mgr ctrl.Manager, l logging.Logger, rl workqueue.RateLimiter, poll ti
 			logger:          logger,
 			kube:            mgr.GetClient(),
 			usage:           resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
-			newRestConfigFn: clients.NewRestConfig,
+			kcfgExtractorFn: resource.CommonCredentialExtractor,
+			gcpExtractorFn:  resource.CommonCredentialExtractor,
+			gcpInjectorFn:   gke.WrapRESTConfig,
+			newRESTConfigFn: clients.NewRESTConfig,
 			newKubeClientFn: clients.NewKubeClient,
 		}),
 		managed.WithLogger(logger),
@@ -95,14 +101,21 @@ func Setup(mgr ctrl.Manager, l logging.Logger, rl workqueue.RateLimiter, poll ti
 }
 
 type connector struct {
-	kube            client.Client
-	usage           resource.Tracker
-	logger          logging.Logger
-	newRestConfigFn func(kubeconfig []byte) (*rest.Config, error)
+	kube   client.Client
+	usage  resource.Tracker
+	logger logging.Logger
+
+	kcfgExtractorFn func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
+	gcpExtractorFn  func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
+	gcpInjectorFn   func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error
+	newRESTConfigFn func(kubeconfig []byte) (*rest.Config, error)
 	newKubeClientFn func(config *rest.Config) (client.Client, error)
 }
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
+func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) { //nolint:gocyclo
+	// This method is currently a little over our complexity goal - be wary
+	// of making it more complex.
+
 	cr, ok := mg.(*v1alpha1.Object)
 	if !ok {
 		return nil, errors.New(errNotKubernetesObject)
@@ -119,21 +132,35 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 
 	var rc *rest.Config
 	var err error
-	cd := pc.Spec.Credentials
 
-	if cd.Source == xpv1.CredentialsSourceInjectedIdentity {
+	switch cd := pc.Spec.Credentials; cd.Source { //nolint:exhaustive
+	case xpv1.CredentialsSourceInjectedIdentity:
 		rc, err = rest.InClusterConfig()
 		if err != nil {
 			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
 		}
-	} else {
-		var kc []byte
-		if kc, err = resource.CommonCredentialExtractor(ctx, cd.Source, c.kube, cd.CommonCredentialSelectors); err != nil {
+	default:
+		kc, err := c.kcfgExtractorFn(ctx, cd.Source, c.kube, cd.CommonCredentialSelectors)
+		if err != nil {
 			return nil, errors.Wrap(err, errGetCreds)
 		}
 
-		if rc, err = c.newRestConfigFn(kc); err != nil {
+		if rc, err = c.newRESTConfigFn(kc); err != nil {
 			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
+		}
+	}
+
+	// NOTE(negz): We don't currently check the identity type because at the
+	// time of writing there's only one valid value (Google App Creds), and
+	// that value is required.
+	if id := pc.Spec.Identity; id != nil {
+		creds, err := c.gcpExtractorFn(ctx, id.Source, c.kube, id.CommonCredentialSelectors)
+		if err != nil {
+			return nil, errors.Wrap(err, errFailedToExtractGoogleCredentials)
+		}
+
+		if err := c.gcpInjectorFn(ctx, rc, creds, gke.DefaultScopes...); err != nil {
+			return nil, errors.Wrap(err, errFailedToInjectGoogleCredentials)
 		}
 	}
 

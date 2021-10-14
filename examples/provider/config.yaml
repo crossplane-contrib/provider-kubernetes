@@ -18,3 +18,10 @@ spec:
       namespace: crossplane-system
       name: cluster-config
       key: kubeconfig
+# identity:
+#   type: GoogleApplicationCredentials
+#   source: Secret
+#   secretRef:
+#     name: gcp-credentials
+#     namespace: crossplane-system
+#     key: credentials.json

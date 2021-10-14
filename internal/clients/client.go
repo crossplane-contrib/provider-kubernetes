@@ -14,8 +14,6 @@ limitations under the License.
 package clients
 
 import (
-	"fmt"
-
 	"github.com/pkg/errors"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -23,8 +21,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// NewRestConfig returns a rest config given a secret with connection information.
-func NewRestConfig(kubeconfig []byte) (*rest.Config, error) {
+// NewRESTConfig returns a rest config given a secret with connection information.
+func NewRESTConfig(kubeconfig []byte) (*rest.Config, error) {
 	ac, err := clientcmd.Load(kubeconfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load kubeconfig")
@@ -50,11 +48,14 @@ func restConfigFromAPIConfig(c *api.Config) (*rest.Config, error) {
 	ctx := c.Contexts[c.CurrentContext]
 	cluster := c.Clusters[ctx.Cluster]
 	if cluster == nil {
-		return nil, errors.New(fmt.Sprintf("cluster for currentContext (%s) not found", c.CurrentContext))
+		return nil, errors.Errorf("cluster for currentContext (%s) not found", c.CurrentContext)
 	}
 	user := c.AuthInfos[ctx.AuthInfo]
 	if user == nil {
-		return nil, errors.New(fmt.Sprintf("auth info for currentContext (%s) not found", c.CurrentContext))
+		// We don't require a user because it's possible user
+		// authorization configuration will be loaded from a separate
+		// set of identity credentials (e.g. Google Application Creds).
+		user = &api.AuthInfo{}
 	}
 	return &rest.Config{
 		Host:            cluster.Server,
