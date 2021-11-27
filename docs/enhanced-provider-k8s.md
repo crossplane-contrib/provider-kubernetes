@@ -57,11 +57,13 @@ By convention in Crossplane, we usually call `Object` as managed resource, and t
 
 ## Why Provider Kubernetes
 
-When using Provider Kubernetes, you may think that it does not add too much value if it just wraps Kubernetes resource manifest as `Object` then does the transformation between the `Object` resource and the actual Kubernetes resource. This is because user can manage Kubernetes resource directly without using `Object` and the provider. They can manage Kubernetes resource either manually using command line tool such as kubectl or programmatically using normal Kubernetes controller.
+The major usage scenario of Provider Kubernetes is to provision and manage Kubernetes objects on Kubernetes clusters, especially on remote clusters. It wraps Kubernetes resource manifest in `Object` resource, then does transformation from the `Object` resource to the actual Kubernetes resource on target clusters. With that, you can apply arbitrary Kubernetes resources on target clusters.
 
-It also does not add too much value when we compose `Object` with other resources managed by other providers in a Crossplane `Composition` resource. This is because, instead of defining `Object` resources in a `Composition`, we can define the actual Kubernetes resources in `Composition` directly.
+Of course you can manage Kubernetes resource directly without leveraging the provider and its `Object`, e.g.: using command line tool such as kubectl manually or normal Kubernetes controller programmatically. However, if you are using Crossplane and want to rely on Crossplane to deliver such a capability, Provider Kubernetes is the best choice.
 
-Now the question comes up. Why we need Provider Kubernetes and `Object` if we can manipulate Kubernetes resource directly? The answer is no you needn't, unless you need more powerful features to manage Kubernetes resource. Start from next section, I will share with you my recent research findings on how an enhanced version of Provider Kubernetes can bring more values to the deployment and management of arbitrary Kubernetes resources, by leveraging some new features such as resource management policy and resource reference.
+On the other hand, when composing arbitrary Kubernetes resources with other resources managed by other providers in a Crossplane `Composition` resource, you can use `Object` to wrap those Kubernetes resources so that you don't need to worry about the restriction that the Kubernetes resources appeared in `Composition` has to be cluster scoped. 
+
+Moreover, start from next section, I will share with you my recent research findings on how an enhanced version of Provider Kubernetes can bring more values to the deployment and management of arbitrary Kubernetes resources, by leveraging some new features such as resource management policy and resource reference.
 
 ## Enhanced Provider Kubernetes
 
@@ -139,12 +141,12 @@ The resource management policy is used to instruct the provider to manage Kubern
 
 We only need 4 types of management policies:
 
-| Observe | Create & Update | Delete | Management Policy      | Memo
-|:--------|:----------------|:-------|:-----------------------|:----
-| Y       | Y               | Y      | Default                | The provider can fully manage the resource. This is the default policy.
-| Y       | Y               | N      | Undeletable            | The provider can observe, create, or update the resource, but can not delete it. 
-| Y       | N               | Y      | ObservableAndDeletable | The provider can observe or delete the resource, but can not create and update it.
-| Y       | N               | N      | Observable             | The provider can only observe the resource. This maps to the read-only scenario where the resource is fully controlled by third party application and the provider only reads the status of the resource.
+| Observe | Create & Update | Delete | Management Policy   | Memo
+|:--------|:----------------|:-------|:--------------------|:----
+| Y       | Y               | Y      | Default             | The provider can fully manage the resource. This is the default policy.
+| Y       | Y               | N      | ObserveCreateUpdate | The provider can observe, create, or update the resource, but can not delete it. 
+| Y       | N               | Y      | ObserveDelete       | The provider can observe or delete the resource, but can not create and update it.
+| Y       | N               | N      | Observe             | The provider can only observe the resource. This maps to the read-only scenario where the resource is fully controlled by third party application and the provider only reads the status of the resource.
 
 The idea of Resource Management Policy is actually expanded from the concept of `DeletionPolicy` in Crossplane which can be found in Crossplane code:
 
@@ -160,9 +162,16 @@ const (
 )
 ```
 
-The `DeletionOrphan` policy is actually equivalent to the `Undeletable` resource management policy.
+The `DeletionOrphan` policy is actually equivalent to the `ObserveCreateUpdate` resource management policy.
 
-Now, let's define policy for our `Object` resource that represents the `ClusterServiceVersion` resource. In our case, we should use `ObservableAndDeletable` policy. Because the policies in the enhanced provider are implemented as Kubernetes annotations, you just need to specify the policy by adding an annotation to the `Object` resource. For example:
+Please note that currently the resource management policy and DeletionPolicy are two separate mechanisms to declare the resource policy at different level: Crossplane runtime level vs. provider level. To avoid the potential conflict or confusion, it is highly recommended to use the policy at provider level over Crossplane runtime level when you use Provider Kubernetes as the provider level policy is a super set of Crossplane runtime level policy and has more options.
+
+When both are defined, to determine if the resource can be deleted or not, both policies need to be considered, and the one at Crossplane runtime level will be taken into account at first. That means:
+
+* If `DeletionPolicy` is defined, then the resource will not be deleted by provider, no matter what policy is defined at provider level.
+* If `DeletionDelete` is defined, then relying on the policy defined at provider level, if `ObserveCreateUpdate` or `Observe` is specified, then the resource will not be deleted, otherwise, it will be deleted by the provider.
+
+Now, let's define policy for our `Object` resource that represents the `ClusterServiceVersion` resource. In our case, we should use `ObserveDelete` policy. Because the policies in the enhanced provider are implemented as Kubernetes annotations, you just need to specify the policy by adding an annotation to the `Object` resource. For example:
 
 ```yaml
 apiVersion: kubernetes.crossplane.io/v1alpha1
@@ -170,7 +179,7 @@ kind: Object
 metadata:
   name: csv-kong
   annotations:
-    kubernetes.crossplane.io/managementType: "ObservableAndDeletable"
+    kubernetes.crossplane.io/managementType: "ObserveDelete"
 spec:
   forProvider:
     manifest:
@@ -233,7 +242,7 @@ kind: Object
 metadata:
   name: csv-kong
   annotations:
-    kubernetes.crossplane.io/managementType: "ObservableAndDeletable"
+    kubernetes.crossplane.io/managementType: "ObserveDelete"
 spec:
   references:
   - fromObject:
