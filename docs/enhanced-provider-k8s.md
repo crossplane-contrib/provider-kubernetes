@@ -61,9 +61,9 @@ The major usage scenario of Provider Kubernetes is to provision and manage Kuber
 
 Of course you can manage Kubernetes resource directly without leveraging the provider and its `Object`, e.g.: using command line tool such as kubectl manually or normal Kubernetes controller programmatically. However, if you are using Crossplane and want to rely on Crossplane to deliver such a capability, Provider Kubernetes is the best choice.
 
-On the other hand, when composing arbitrary Kubernetes resources with other resources managed by other providers in a Crossplane `Composition` resource, you can use `Object` to wrap those Kubernetes resources so that you don't need to worry about the restriction that the Kubernetes resources appeared in `Composition` has to be cluster scoped. 
+On the other hand, when composing arbitrary Kubernetes resources with other resources managed by other providers in a Crossplane `Composition` resource, you can use `Object` to wrap those Kubernetes resources so that you don't need to worry about the restriction that the Kubernetes resources appeared in `Composition` has to be cluster scoped. See [this issue](https://github.com/crossplane/crossplane/issues/1730) for more detailed discussion on this topic.
 
-Moreover, start from next section, I will share with you my recent research findings on how an enhanced version of Provider Kubernetes can bring more values to the deployment and management of arbitrary Kubernetes resources, by leveraging some new features such as resource management policy and resource reference.
+Moreover, start from next section, I will explain how an enhanced version of Provider Kubernetes can bring more values to the provisioning and management of arbitrary Kubernetes resources, by leveraging some new features such as resource management policy and resource reference.
 
 ## Enhanced Provider Kubernetes
 
@@ -72,7 +72,7 @@ The enhanced Provider Kubernetes provides a couple of new features to help you m
 * It allows you to define fine-grained resource management policy to instruct the provider how to manage Kubernetes resources.
 * It allows you to define resource references for current `Object` as dependencies to retrieve values from dependant resources at runtime and guarantee the resource rendering in a specified order.
 
-Note: These new features are implemented in [my personal git repository](https://github.com/morningspace/provider-kubernetes) now which is forked from [the upstream repository](https://github.com/crossplane-contrib/provider-kubernetes) in Crossplane community. It
+Note: These new features are implemented in [this git repository](https://github.com/morningspace/provider-kubernetes) at the moment which is forked from [the upstream repository](https://github.com/crossplane-contrib/provider-kubernetes) in Crossplane community. It
 has not been merged into the community version yet.
 
 In order to better understand how these features can help to manage Kubernetes resources, I will use a demo project called [capabilities-shim](https://github.com/morningspace/capabilities-shim) to describe the problems that I experienced and how the enhanced provider can help to address these problems.
@@ -88,6 +88,8 @@ The project defined a couple of sample capabilities that can be installed:
 * `All` capability to compose all the above capabilities as an all-in-one delivery.
 
 ![](images/architecture.png)
+
+Please note, although the above diagram shows the capabilities are provisioned on the same cluster that runs Crossplane and Provider Kubernetes, it does not mean it can only be applied to the local cluster. The same idea should be applicable to both local and remote cluster, depending on what kubeconfig that you use to access the target cluster. Also, to let Provider Kubernetes talk to the target cluster, it is always your responsibility to feed the proper kubeconfig to Provider Kubernetes. For example, it should include the service account with properly configured RBAC.
 
 In this document, I will use `capabilities-shim` with the help of Provider Kubernetes and OLM to provision `Networking` capability.
 
@@ -122,7 +124,7 @@ kubectl delete networkingclaim my-networking-stack
 
 This triggers the deletion of managed resources, i.e. the `Object` resources, then the deletion of external resources, in this case, the `Subscription` and `Kong` resource. This triggers the deletion of the Kong pod since `Kong` resource is deleted.
 
-However, as the `ClusterServiceVersion` resource still exists, so does the `InstallPlan` resource, the Kong operator pod still remains. This is considered as not a clean uninstall since some garbage resources remain in the cluster.
+However, as the `ClusterServiceVersion` resource still exists, so does the `InstallPlan` resource, the Kong operator pod still remains. This is not considered as a clean uninstall since some garbage resources remain in the cluster. For more details on why it is designed in such a way, you can refer to [this issue](https://github.com/operator-framework/operator-lifecycle-manager/issues/1168) from OLM community.
 
 ![](images/unmanaged-resource.png)
 
@@ -166,7 +168,7 @@ The `DeletionOrphan` policy is actually equivalent to the `ObserveCreateUpdate` 
 
 Please note that currently the resource management policy and DeletionPolicy are two separate mechanisms to declare the resource policy at different level: Crossplane runtime level vs. provider level. To avoid the potential conflict or confusion, it is highly recommended to use the policy at provider level over Crossplane runtime level when you use Provider Kubernetes as the provider level policy is a super set of Crossplane runtime level policy and has more options.
 
-When both are defined, to determine if the resource can be deleted or not, both policies need to be considered, and the one at Crossplane runtime level will be taken into account at first. That means:
+In case both are defined, to determine if the resource can be deleted or not, both policies need to be considered, and the one at Crossplane runtime level will be taken into account at first. That means:
 
 * If `DeletionPolicy` is defined, then the resource will not be deleted by provider, no matter what policy is defined at provider level.
 * If `DeletionDelete` is defined, then relying on the policy defined at provider level, if `ObserveCreateUpdate` or `Observe` is specified, then the resource will not be deleted, otherwise, it will be deleted by the provider.
@@ -232,7 +234,7 @@ spec:
     toFieldPath: spec.forProvider.region
 ```
 
-Although this design has not been closed yet, a similar idea has been implemented in the enhanced provider. When define an `Object` resource, it allows you to specify one or more references in `spec.references` using exactly the same syntax as it is defined in the above design.
+Although this design has not been closed yet, a similar idea has been implemented in the enhanced Provider Kubernetes. When defining an `Object` resource, it allows you to specify one or more references in `spec.references` using exactly the same syntax as it is defined in the above design.
 
 In our case, when define `Object` for `ClusterServiceVersion` resource, you need to define a reference to `Subscription` so that the `ClusterServiceVersion` name can be retrieved from `Subscription` at the field path `status.atProvider.manifest.status.currentCSV` when it is created, then apply the value to `Object` as the `ClusterServiceVersion` name at `spec.forProvider.manifest.metadata.name`:
 
