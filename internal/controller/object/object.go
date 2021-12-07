@@ -32,6 +32,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
@@ -191,7 +192,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	c.logger.Debug("Observing", "resource", cr)
 
-	desired, err := getDesired(cr)
+	desired, err := c.getDesired(cr)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
@@ -246,7 +247,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	c.logger.Debug("Creating", "resource", cr)
-	obj, err := getDesired(cr)
+	obj, err := c.getDesired(cr)
 	if err != nil {
 		return managed.ExternalCreation{}, err
 	}
@@ -271,7 +272,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	c.logger.Debug("Updating", "resource", cr)
 
-	obj, err := getDesired(cr)
+	obj, err := c.getDesired(cr)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
@@ -295,7 +296,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	c.logger.Debug("Deleting", "resource", cr)
-	obj, err := getDesired(cr)
+	obj, err := c.getDesired(cr)
 	if err != nil {
 		return err
 	}
@@ -303,7 +304,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	return errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, obj)), errDeleteObject)
 }
 
-func getDesired(obj *v1alpha1.Object) (*unstructured.Unstructured, error) {
+func (c *external) getDesired(obj *v1alpha1.Object) (*unstructured.Unstructured, error) {
 	desired := &unstructured.Unstructured{}
 	if err := json.Unmarshal(obj.Spec.ForProvider.Manifest.Raw, desired); err != nil {
 		return nil, errors.Wrap(err, errUnmarshalTemplate)
@@ -312,6 +313,11 @@ func getDesired(obj *v1alpha1.Object) (*unstructured.Unstructured, error) {
 	if desired.GetName() == "" {
 		desired.SetName(obj.Name)
 	}
+
+	if err := controllerutil.SetControllerReference(obj, desired, c.client.Scheme()); err != nil {
+		return nil, err
+	}
+
 	return desired, nil
 }
 
