@@ -148,7 +148,7 @@ We only need 4 types of management policies:
 | Y       | Y               | Y      | Default             | The provider can fully manage the resource. This is the default policy.
 | Y       | Y               | N      | ObserveCreateUpdate | The provider can observe, create, or update the resource, but can not delete it. 
 | Y       | N               | Y      | ObserveDelete       | The provider can observe or delete the resource, but can not create and update it.
-| Y       | N               | N      | Observe             | The provider can only observe the resource. This maps to the read-only scenario where the resource is fully controlled by third party application and the provider only reads the status of the resource.
+| Y       | N               | N      | Observe             | The provider can only observe the resource. This maps to the read-only scenario where the resource is fully controlled by third party application. The provider reads the resource manifest and stores in `Object` at `status.atProvider`.
 
 The idea of Resource Management Policy is actually expanded from the concept of `DeletionPolicy` in Crossplane which can be found in Crossplane code:
 
@@ -170,20 +170,19 @@ Please note that currently the resource management policy and DeletionPolicy are
 
 In case both are defined, to determine if the resource can be deleted or not, both policies need to be considered, and the one at Crossplane runtime level will be taken into account at first. That means:
 
-* If `DeletionPolicy` is defined, then the resource will not be deleted by provider, no matter what policy is defined at provider level.
+* If `DeletionOrphan` is defined, then the resource will not be deleted by provider, no matter what policy is defined at provider level.
 * If `DeletionDelete` is defined, then relying on the policy defined at provider level, if `ObserveCreateUpdate` or `Observe` is specified, then the resource will not be deleted, otherwise, it will be deleted by the provider.
 
-Now, let's define policy for our `Object` resource that represents the `ClusterServiceVersion` resource. In our case, we should use `ObserveDelete` policy. Because the policies in the enhanced provider are implemented as Kubernetes annotations, you just need to specify the policy by adding an annotation to the `Object` resource. For example:
+Now, let's define policy for our `Object` resource that represents the `ClusterServiceVersion` resource. In our case, we should use `ObserveDelete` policy, which can be done by setting the policy value in `Object` resource at `spec.forProvider.managementPolicy`. For example:
 
 ```yaml
 apiVersion: kubernetes.crossplane.io/v1alpha1
 kind: Object
 metadata:
   name: csv-kong
-  annotations:
-    kubernetes.crossplane.io/managementType: "ObserveDelete"
 spec:
   forProvider:
+    managementPolicy: ObserveDelete
     manifest:
       apiVersion: operators.coreos.com/v1alpha1
       kind: ClusterServiceVersion
@@ -243,8 +242,6 @@ apiVersion: kubernetes.crossplane.io/v1alpha1
 kind: Object
 metadata:
   name: csv-kong
-  annotations:
-    kubernetes.crossplane.io/managementType: "ObserveDelete"
 spec:
   references:
   - fromObject:
@@ -254,6 +251,7 @@ spec:
       fieldPath: status.atProvider.manifest.status.currentCSV
     toFieldPath: spec.forProvider.manifest.metadata.name
   forProvider:
+    managementPolicy: ObserveDelete
     manifest:
       apiVersion: operators.coreos.com/v1alpha1
       kind: ClusterServiceVersion
