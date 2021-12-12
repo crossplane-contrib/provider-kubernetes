@@ -173,7 +173,7 @@ In case both are defined, to determine if the resource can be deleted or not, bo
 * If `DeletionOrphan` is defined, then the resource will not be deleted by provider, no matter what policy is defined at provider level.
 * If `DeletionDelete` is defined, then relying on the policy defined at provider level, if `ObserveCreateUpdate` or `Observe` is specified, then the resource will not be deleted, otherwise, it will be deleted by the provider.
 
-Now, let's define policy for our `Object` resource that represents the `ClusterServiceVersion` resource. In our case, we should use `ObserveDelete` policy, which can be done by setting the policy value in `Object` resource at `spec.forProvider.managementPolicy`. For example:
+Now, let's define policy for our `Object` resource that represents the `ClusterServiceVersion` resource. In our case, we should use `ObserveDelete` policy, which can be done by setting the policy value in `Object` resource at `spec.managementPolicy`. For example:
 
 ```yaml
 apiVersion: kubernetes.crossplane.io/v1alpha1
@@ -181,8 +181,8 @@ kind: Object
 metadata:
   name: csv-kong
 spec:
+  managementPolicy: ObserveDelete
   forProvider:
-    managementPolicy: ObserveDelete
     manifest:
       apiVersion: operators.coreos.com/v1alpha1
       kind: ClusterServiceVersion
@@ -250,8 +250,8 @@ spec:
       name: sub-kong
       fieldPath: status.atProvider.manifest.status.currentCSV
     toFieldPath: spec.forProvider.manifest.metadata.name
+  managementPolicy: ObserveDelete
   forProvider:
-    managementPolicy: ObserveDelete
     manifest:
       apiVersion: operators.coreos.com/v1alpha1
       kind: ClusterServiceVersion
