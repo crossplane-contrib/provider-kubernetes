@@ -70,8 +70,12 @@ const (
 	errPatchFromReferencedResource = "cannot patch from referenced resource"
 	errResolveResourceReferences   = "cannot resolve resource references"
 
-	errFailedToAddFinalizer    = "Failed to add finalizer to referenced resource"
-	errFailedToRemoveFinalizer = "Failed to remove finalizer to referenced resource"
+	errAddFinalizer             = "cannot add finalizer to Object"
+	errRemoveFinalizer          = "cannot remove finalizer from Object"
+	errAddReferenceFinalizer    = "cannot add finalizer to referenced resource"
+	errRemoveReferenceFinalizer = "cannot remove finalizer from referenced resource"
+	objFinalizerName            = "finalizer.managedresource.crossplane.io"
+	refFinalizerNamePrefix      = "kubernetes.crossplane.io/referred-by-object-"
 )
 
 // Setup adds a controller that reconciles Object managed resources.
@@ -96,6 +100,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger, rl workqueue.RateLimiter, poll ti
 			newRESTConfigFn: clients.NewRESTConfig,
 			newKubeClientFn: clients.NewKubeClient,
 		}),
+		managed.WithFinalizer(&objFinalizer{client: mgr.GetClient()}),
 		managed.WithLogger(logger),
 		managed.WithPollInterval(poll),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
@@ -244,7 +249,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	c.logger.Debug("Creating", "resource", cr)
 
-	if policy := cr.Spec.ManagementPolicy; policy == v1alpha1.ObserveDelete || policy == v1alpha1.Observe {
+	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.CreateObject) {
 		c.logger.Debug("External resource should not be created by provider, skip creating.")
 		return managed.ExternalCreation{}, nil
 	}
@@ -262,7 +267,6 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateObject)
 	}
 
-	cr.Status.SetConditions(xpv1.Available())
 	return managed.ExternalCreation{}, setObserved(cr, obj)
 }
 
@@ -274,7 +278,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	c.logger.Debug("Updating", "resource", cr)
 
-	if policy := cr.Spec.ManagementPolicy; policy == v1alpha1.ObserveDelete || policy == v1alpha1.Observe {
+	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.UpdateObject) {
 		c.logger.Debug("External resource should not be updated by provider, skip updating.")
 		return managed.ExternalUpdate{}, nil
 	}
@@ -292,7 +296,6 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.Wrap(err, errApplyObject)
 	}
 
-	cr.Status.SetConditions(xpv1.Available())
 	return managed.ExternalUpdate{}, setObserved(cr, obj)
 }
 
@@ -304,8 +307,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	c.logger.Debug("Deleting", "resource", cr)
 
-	if policy := cr.Spec.ManagementPolicy; policy == v1alpha1.ObserveCreateUpdate || policy == v1alpha1.Observe {
-		c.logger.Debug("External resource should not be deleted by provider, skip updating.")
+	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.DeleteObject) {
+		c.logger.Debug("External resource should not be deleted by provider, skip deleting.")
 		return nil
 	}
 
@@ -363,22 +366,11 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 
 	// Loop through references to resolve each referenced resource
 	for _, ref := range obj.Spec.References {
-		var kubeClient client.Client
-
-		if ref.FromObject.APIVersion == obj.APIVersion && ref.FromObject.Kind == obj.Kind {
-			// Object resource handled by provider on local cluster
-			kubeClient = c.localClient
-		} else {
-			// Other resource usually handled on remote cluster
-			// But could also be handled on local cluster
-			kubeClient = c.client
-		}
-
 		res := &unstructured.Unstructured{}
 		res.SetAPIVersion(ref.FromObject.APIVersion)
 		res.SetKind(ref.FromObject.Kind)
 		// Try to get referenced resource
-		err := kubeClient.Get(ctx, client.ObjectKey{
+		err := c.localClient.Get(ctx, client.ObjectKey{
 			Namespace: ref.FromObject.Namespace,
 			Name:      ref.FromObject.Name,
 		}, res)
@@ -388,64 +380,14 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 		}
 
 		// Patch fields if any
-		if err := ref.ApplyFromFieldPathPatch(res, obj); err != nil {
-			return errors.Wrap(err, errPatchFromReferencedResource)
-		}
-
-		// Add finalizer if not exists
-		finalizer := "object/" + string(obj.UID)
-		if !meta.FinalizerExists(res, finalizer) {
-			meta.AddFinalizer(res, finalizer)
-			if err := kubeClient.Update(ctx, res); err != nil {
-				return errors.Wrap(err, errFailedToAddFinalizer)
+		if ref.FromObject.FieldPath != nil {
+			if err := ref.ApplyFromFieldPathPatch(res, obj); err != nil {
+				return errors.Wrap(err, errPatchFromReferencedResource)
 			}
 		}
 	}
 
 	return nil
-}
-
-// removeReferenceFinalizers removes finalizers previously added to references.
-func (c *external) removeReferenceFinalizers(ctx context.Context, obj *v1alpha1.Object) {
-	c.logger.Debug("Removing finalizers from referencies.")
-
-	// Loop through references to resolve each referenced resource
-	for _, ref := range obj.Spec.References {
-		var kubeClient client.Client
-
-		if ref.FromObject.APIVersion == obj.APIVersion && ref.FromObject.Kind == obj.Kind {
-			// Object resource handled by provider on local cluster
-			kubeClient = c.localClient
-		} else {
-			// Other resource usually handled on remote cluster
-			// But could also be handled on local cluster
-			kubeClient = c.client
-		}
-
-		res := &unstructured.Unstructured{}
-		res.SetAPIVersion(ref.FromObject.APIVersion)
-		res.SetKind(ref.FromObject.Kind)
-		// Try to get referenced resource
-		err := kubeClient.Get(ctx, client.ObjectKey{
-			Namespace: ref.FromObject.Namespace,
-			Name:      ref.FromObject.Name,
-		}, res)
-
-		if err != nil {
-			c.logger.Debug(errGetReferencedResource, "error", err)
-			continue
-		}
-
-		// Remove finalizer if exists
-		finalizer := "object/" + string(obj.UID)
-		if meta.FinalizerExists(res, finalizer) {
-			meta.RemoveFinalizer(res, finalizer)
-			if err := kubeClient.Update(ctx, res); err != nil {
-				c.logger.Debug(errFailedToRemoveFinalizer, "error", err)
-				continue
-			}
-		}
-	}
 }
 
 func (c *external) isNotFound(ctx context.Context, obj *v1alpha1.Object, err error) bool {
@@ -459,27 +401,19 @@ func (c *external) isNotFound(ctx context.Context, obj *v1alpha1.Object, err err
 		// external resource not found, so that Object can be deleted by managed
 		// resource reconciler. Otherwise, the reconciler will try to delete the
 		// external resource which breaks the management policy.
-		if policy := obj.Spec.ManagementPolicy; policy == v1alpha1.ObserveCreateUpdate || policy == v1alpha1.Observe {
+		if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.DeleteObject) {
 			c.logger.Debug("Managed resource was deleted but external resource is undeletable.")
 			isNotFound = true
 		}
-	}
-
-	if meta.WasDeleted(obj) && isNotFound {
-		// If the external resource is not found, we should remove the finalizer
-		// that was previously added to the references of this Object, since the
-		// Object, as the dependant resource, was deleted.
-		c.removeReferenceFinalizers(ctx, obj)
 	}
 
 	return isNotFound
 }
 
 func (c *external) handleLastApplied(obj *v1alpha1.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
-	policy := obj.Spec.ManagementPolicy
 	isUpToDate := false
 
-	if policy == v1alpha1.ObserveDelete || policy == v1alpha1.Observe {
+	if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.UpdateObject) {
 		// Treated as up-to-date to skip last applied annotation update since we
 		// do not create or update the external resource.
 		isUpToDate = true
@@ -491,14 +425,7 @@ func (c *external) handleLastApplied(obj *v1alpha1.Object, last, desired *unstru
 	if isUpToDate {
 		c.logger.Debug("Up to date!")
 
-		// We usually set condition available after create or update is invoked.
-		// However, it will never happen when policy ObserveDelete or Observe is
-		// specified since it does not allow us to create or update the external
-		// resource. In such a case, let's set condition available explicitly if
-		// the resource has been up to date.
-		if policy == v1alpha1.ObserveDelete || policy == v1alpha1.Observe {
-			obj.Status.SetConditions(xpv1.Available())
-		}
+		obj.Status.SetConditions(xpv1.Available())
 
 		return managed.ExternalObservation{
 			ResourceExists:   true,
@@ -510,4 +437,97 @@ func (c *external) handleLastApplied(obj *v1alpha1.Object, last, desired *unstru
 		ResourceExists:   true,
 		ResourceUpToDate: false,
 	}, nil
+}
+
+type objFinalizer struct {
+	resource.Finalizer
+	client client.Client
+}
+
+type refFinalizerFn func(context.Context, *unstructured.Unstructured, string) error
+
+func (f *objFinalizer) handleRefFinalizer(ctx context.Context, obj *v1alpha1.Object, finalizerFn refFinalizerFn) error {
+	// Loop through references to resolve each referenced resource
+	for _, ref := range obj.Spec.References {
+		res := &unstructured.Unstructured{}
+		res.SetAPIVersion(ref.FromObject.APIVersion)
+		res.SetKind(ref.FromObject.Kind)
+		// Try to get referenced resource
+		err := f.client.Get(ctx, client.ObjectKey{
+			Namespace: ref.FromObject.Namespace,
+			Name:      ref.FromObject.Name,
+		}, res)
+
+		if err != nil {
+			return errors.Wrap(err, errGetReferencedResource)
+		}
+
+		finalizerName := refFinalizerNamePrefix + string(obj.UID)
+		if err = finalizerFn(ctx, res, finalizerName); err != nil {
+			return err
+		}
+	}
+
+	return nil
+
+}
+
+func (f *objFinalizer) AddFinalizer(ctx context.Context, res resource.Object) error {
+	obj, ok := res.(*v1alpha1.Object)
+	if !ok {
+		return errors.New(errNotKubernetesObject)
+	}
+
+	if meta.FinalizerExists(obj, objFinalizerName) {
+		return nil
+	}
+	meta.AddFinalizer(obj, objFinalizerName)
+
+	err := f.client.Update(ctx, obj)
+	if err != nil {
+		return errors.Wrap(err, errAddFinalizer)
+	}
+
+	// Add finalizer to referenced resources if not exists
+	err = f.handleRefFinalizer(ctx, obj, func(
+		ctx context.Context, res *unstructured.Unstructured, finalizer string) error {
+		if !meta.FinalizerExists(res, finalizer) {
+			meta.AddFinalizer(res, finalizer)
+			if err := f.client.Update(ctx, res); err != nil {
+				return errors.Wrap(err, errAddReferenceFinalizer)
+			}
+		}
+		return nil
+	})
+	return errors.Wrap(err, errAddFinalizer)
+}
+
+func (f *objFinalizer) RemoveFinalizer(ctx context.Context, res resource.Object) error {
+	obj, ok := res.(*v1alpha1.Object)
+	if !ok {
+		return errors.New(errNotKubernetesObject)
+	}
+
+	if !meta.FinalizerExists(obj, objFinalizerName) {
+		return nil
+	}
+	meta.RemoveFinalizer(obj, objFinalizerName)
+
+	err := f.client.Update(ctx, obj)
+	if err != nil {
+		return errors.Wrap(err, errRemoveFinalizer)
+	}
+
+	// Remove finalizer from referenced resources if exists
+	err = f.handleRefFinalizer(ctx, obj, func(
+		ctx context.Context, res *unstructured.Unstructured, finalizer string) error {
+		if meta.FinalizerExists(res, finalizer) {
+			meta.RemoveFinalizer(res, finalizer)
+			if err := f.client.Update(ctx, res); err != nil {
+				return errors.Wrap(err, errRemoveReferenceFinalizer)
+			}
+		}
+		return nil
+	})
+	return errors.Wrap(err, errRemoveFinalizer)
 }

@@ -145,21 +145,7 @@ func objectReferences() []v1alpha1.Reference {
 	return ref
 }
 
-func arbitraryResourceReferences() []v1alpha1.Reference {
-	ref := []v1alpha1.Reference{
-		{
-			FromObject: v1alpha1.FromObject{
-				APIVersion: "v1",
-				Kind:       "ConfigMap",
-				Name:       testReferenceObjectName,
-				Namespace:  testNamespace,
-			},
-		},
-	}
-	return ref
-}
-
-func referenceObject() *unstructured.Unstructured {
+func referenceObject(rm ...externalResourceModifier) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": v1alpha1.SchemeGroupVersion.String(),
@@ -184,20 +170,19 @@ func referenceObject() *unstructured.Unstructured {
 			},
 		},
 	}
+
+	for _, m := range rm {
+		m(obj)
+	}
+
 	return obj
 }
 
-func referenceArbitraryResource() *unstructured.Unstructured {
-	res := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "ConfigMap",
-			"metadata": map[string]interface{}{
-				"name":       testReferenceObjectName,
-				"finalizers": []interface{}{"object/some-uid"},
-			},
-		},
-	}
+func referenceObjectWithFinalizer(val interface{}) *unstructured.Unstructured {
+	res := referenceObject(func(res *unstructured.Unstructured) {
+		metadata := res.Object["metadata"].(map[string]interface{})
+		metadata["finalizers"] = []interface{}{val}
+	})
 	return res
 }
 
@@ -678,26 +663,6 @@ func Test_helmExternal_Observe(t *testing.T) {
 						errPatchFromReferencedResource), errResolveResourceReferences),
 			},
 		},
-		"FailedToAddFinalizerToReferenceObject": {
-			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
-					obj.Spec.References = objectReferences()
-				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) = *referenceObject()
-							return nil
-						}),
-						MockUpdate: test.NewMockUpdateFn(errBoom),
-					},
-				},
-			},
-			want: want{
-				err: errors.Wrap(errors.Wrap(
-					errBoom, errFailedToAddFinalizer), errResolveResourceReferences),
-			},
-		},
 		"NoReferenceObjectExists": {
 			args: args{
 				mg: kubernetesObject(func(obj *v1alpha1.Object) {
@@ -745,15 +710,14 @@ func Test_helmExternal_Observe(t *testing.T) {
 			args: args{
 				mg: kubernetesObject(func(obj *v1alpha1.Object) {
 					obj.ObjectMeta.DeletionTimestamp = &metav1.Time{Time: time.Now()}
-					obj.ObjectMeta.UID = "some-uid"
 					obj.Spec.ManagementPolicy = "ObserveCreateUpdate"
-					obj.Spec.References = arbitraryResourceReferences()
+					obj.Spec.References = objectReferences()
 				}),
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
 						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 							if key.Name == testReferenceObjectName {
-								*obj.(*unstructured.Unstructured) = *referenceArbitraryResource()
+								*obj.(*unstructured.Unstructured) = *referenceObject()
 								return nil
 							} else if key.Name == "crossplane-system" {
 								*obj.(*unstructured.Unstructured) = *externalResource()
@@ -780,35 +744,6 @@ func Test_helmExternal_Observe(t *testing.T) {
 						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 							if key.Name == testReferenceObjectName {
 								*obj.(*unstructured.Unstructured) = *referenceObject()
-								return nil
-							} else if key.Name == "crossplane-system" {
-								*obj.(*unstructured.Unstructured) =
-									*externalResourceWithLastAppliedConfigAnnotation(
-										`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"crossplane-system"}}`,
-									)
-								return nil
-							}
-							return errBoom
-						},
-						MockUpdate: test.NewMockUpdateFn(nil),
-					},
-				},
-			},
-			want: want{
-				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true},
-				err: nil,
-			},
-		},
-		"ReferenceToArbitraryResource": {
-			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
-					obj.Spec.References = arbitraryResourceReferences()
-				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-							if key.Name == testReferenceObjectName {
-								*obj.(*unstructured.Unstructured) = *referenceArbitraryResource()
 								return nil
 							} else if key.Name == "crossplane-system" {
 								*obj.(*unstructured.Unstructured) =
@@ -1172,6 +1107,251 @@ func Test_helmExternal_Delete(t *testing.T) {
 			gotErr := e.Delete(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
 				t.Fatalf("e.Delete(...): -want error, +got error: %s", diff)
+			}
+		})
+	}
+}
+
+func Test_objFinalizer_AddFinalizer(t *testing.T) {
+	type args struct {
+		client resource.ClientApplicator
+		mg     resource.Managed
+	}
+	type want struct {
+		err error
+	}
+	cases := map[string]struct {
+		args
+		want
+	}{
+		"NotKubernetesObject": {
+			args: args{
+				mg: notKubernetesObject{},
+			},
+			want: want{
+				err: errors.New(errNotKubernetesObject),
+			},
+		},
+		"FailedToAddObjectFinalizer": {
+			args: args{
+				mg: kubernetesObject(),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockUpdate: test.NewMockUpdateFn(errBoom),
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errAddFinalizer),
+			},
+		},
+		"ObjectFinalizerExists": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
+				}),
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"NoReferenceObjectExists": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.Spec.References = objectReferences()
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet:    test.NewMockGetFn(errBoom),
+						MockUpdate: test.NewMockUpdateFn(nil),
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(
+					errors.Wrap(errBoom,
+						errGetReferencedResource), errAddFinalizer),
+			},
+		},
+		"FailedToAddReferenceFinalizer": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.Spec.References = objectReferences()
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *referenceObject()
+							return nil
+						}),
+						MockUpdate: test.NewMockUpdateFn(nil, func(obj client.Object) error {
+							name := obj.GetName()
+							if name == testReferenceObjectName {
+								return errBoom
+							}
+							return nil
+						}),
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(
+					errors.Wrap(errBoom,
+						errAddReferenceFinalizer), errAddFinalizer),
+			},
+		},
+		"Success": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.Spec.References = objectReferences()
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet:    test.NewMockGetFn(nil),
+						MockUpdate: test.NewMockUpdateFn(nil),
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := &objFinalizer{
+				client: tc.args.client,
+			}
+			gotErr := f.AddFinalizer(context.Background(), tc.args.mg)
+			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
+				t.Fatalf("f.AddFinalizer(...): -want error, +got error: %s", diff)
+			}
+		})
+	}
+}
+
+func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
+	type args struct {
+		client resource.ClientApplicator
+		mg     resource.Managed
+	}
+	type want struct {
+		err error
+	}
+	cases := map[string]struct {
+		args
+		want
+	}{
+		"NotKubernetesObject": {
+			args: args{
+				mg: notKubernetesObject{},
+			},
+			want: want{
+				err: errors.New(errNotKubernetesObject),
+			},
+		},
+		"FailedToRemoveObjectFinalizer": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockUpdate: test.NewMockUpdateFn(errBoom),
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errRemoveFinalizer),
+			},
+		},
+		"NoObjectFinalizerExists": {
+			args: args{
+				mg: kubernetesObject(),
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"NoReferenceFinalizerExists": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
+					obj.Spec.References = objectReferences()
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *referenceObject()
+							return nil
+						}),
+						MockUpdate: test.NewMockUpdateFn(nil),
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"FailedToRemoveReferenceFinalizer": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
+					obj.Spec.References = objectReferences()
+					obj.ObjectMeta.UID = "some-uid"
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *referenceObjectWithFinalizer(refFinalizerNamePrefix + "some-uid")
+							return nil
+						},
+						MockUpdate: test.NewMockUpdateFn(nil, func(obj client.Object) error {
+							name := obj.GetName()
+							if name == testReferenceObjectName {
+								return errBoom
+							}
+							return nil
+						}),
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(
+					errors.Wrap(errBoom,
+						errRemoveReferenceFinalizer), errRemoveFinalizer),
+			},
+		},
+		"Success": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
+					obj.Spec.References = objectReferences()
+					obj.ObjectMeta.UID = "some-uid"
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *referenceObjectWithFinalizer(refFinalizerNamePrefix + "some-uid")
+							return nil
+						}),
+						MockUpdate: test.NewMockUpdateFn(nil),
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := &objFinalizer{
+				client: tc.args.client,
+			}
+			gotErr := f.RemoveFinalizer(context.Background(), tc.args.mg)
+			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
+				t.Fatalf("f.RemoveFinalizer(...): -want error, +got error: %s", diff)
 			}
 		})
 	}

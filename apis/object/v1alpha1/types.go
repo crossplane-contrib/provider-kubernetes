@@ -23,6 +23,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+// ObjectAction defines actions applicable to Object
+type ObjectAction string
+
 // A ManagementPolicy determines what should happen to the underlying external
 // resource when a managed resource is created, updated, deleted, or observed.
 // +kubebuilder:validation:Enum=Default;ObserveCreateUpdate;ObserveDelete;Observe
@@ -39,6 +42,10 @@ const (
 	ObserveDelete ManagementPolicy = "ObserveDelete"
 	// Observe means the provider can only observe the resource.
 	Observe ManagementPolicy = "Observe"
+
+	CreateObject ObjectAction = "CreateObject"
+	UpdateObject ObjectAction = "UpdateObject"
+	DeleteObject ObjectAction = "DeleteObject"
 )
 
 // FromObject refers to an object by Name, Kind, APIVersion, etc. It is used
@@ -68,7 +75,7 @@ type Reference struct {
 	FromObject `json:"fromObject"`
 	// ToFieldPath is the path of the field on the resource whose value will
 	// be changed with the result of transforms. Leave empty if you'd like to
-	// propagate to the same path as fieldPath.
+	// propagate to the same path as fromObject.fieldPath.
 	// +optional
 	ToFieldPath *string `json:"toFieldPath,omitempty"`
 }
@@ -131,21 +138,17 @@ type ObjectList struct {
 // ApplyFromFieldPathPatch patches the "to" resource, using a source field
 // on the "from" resource.
 func (r *Reference) ApplyFromFieldPathPatch(from, to runtime.Object) error {
-	if r.FromObject.FieldPath == nil {
-		return nil
-	}
-
 	// Default to patch the same field on the "to" resource.
 	if r.ToFieldPath == nil {
 		r.ToFieldPath = r.FromObject.FieldPath
 	}
 
-	fromMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(from)
+	paved, err := fieldpath.PaveObject(from)
 	if err != nil {
 		return err
 	}
 
-	out, err := fieldpath.Pave(fromMap).GetValue(*r.FromObject.FieldPath)
+	out, err := paved.GetValue(*r.FromObject.FieldPath)
 	if err != nil {
 		return err
 	}
@@ -157,16 +160,27 @@ func (r *Reference) ApplyFromFieldPathPatch(from, to runtime.Object) error {
 // apply the value to the "to" object at the given path, returning
 // any errors as they occur.
 func patchFieldValueToObject(path string, value interface{}, to runtime.Object) error {
-	if u, ok := to.(interface{ UnstructuredContent() map[string]interface{} }); ok {
-		return fieldpath.Pave(u.UnstructuredContent()).SetValue(path, value)
-	}
-
-	toMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(to)
+	paved, err := fieldpath.PaveObject(to)
 	if err != nil {
 		return err
 	}
-	if err := fieldpath.Pave(toMap).SetValue(path, value); err != nil {
+
+	err = paved.SetValue(path, value)
+	if err != nil {
 		return err
 	}
-	return runtime.DefaultUnstructuredConverter.FromUnstructured(toMap, to)
+
+	return runtime.DefaultUnstructuredConverter.FromUnstructured(paved.UnstructuredContent(), to)
+}
+
+func (p *ManagementPolicy) IsActionAllowed(action ObjectAction) bool {
+	if *p == "" {
+		*p = Default
+	}
+
+	if action == CreateObject || action == UpdateObject {
+		return *p == Default || *p == ObserveCreateUpdate
+	} else {
+		return *p == Default || *p == ObserveDelete
+	}
 }
