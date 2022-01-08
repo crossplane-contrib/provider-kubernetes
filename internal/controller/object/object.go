@@ -222,7 +222,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		Name:      observed.GetName(),
 	}, observed)
 
-	if c.isNotFound(ctx, cr, err) {
+	if c.isNotFound(cr, err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
@@ -390,7 +390,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 	return nil
 }
 
-func (c *external) isNotFound(ctx context.Context, obj *v1alpha1.Object, err error) bool {
+func (c *external) isNotFound(obj *v1alpha1.Object, err error) bool {
 	isNotFound := false
 
 	if kerrors.IsNotFound(err) {

@@ -43,8 +43,11 @@ const (
 	// Observe means the provider can only observe the resource.
 	Observe ManagementPolicy = "Observe"
 
+	// CreateObject means to create an Object
 	CreateObject ObjectAction = "CreateObject"
+	// UpdateObject means to update an Object
 	UpdateObject ObjectAction = "UpdateObject"
+	// DeleteObject means to delete an Object
 	DeleteObject ObjectAction = "DeleteObject"
 )
 
@@ -173,6 +176,7 @@ func patchFieldValueToObject(path string, value interface{}, to runtime.Object) 
 	return runtime.DefaultUnstructuredConverter.FromUnstructured(paved.UnstructuredContent(), to)
 }
 
+// IsActionAllowed determines if action is allowed to be performed on Object
 func (p *ManagementPolicy) IsActionAllowed(action ObjectAction) bool {
 	if *p == "" {
 		*p = Default
@@ -180,7 +184,7 @@ func (p *ManagementPolicy) IsActionAllowed(action ObjectAction) bool {
 
 	if action == CreateObject || action == UpdateObject {
 		return *p == Default || *p == ObserveCreateUpdate
-	} else {
-		return *p == Default || *p == ObserveDelete
 	}
+
+	return *p == Default || *p == ObserveDelete
 }

@@ -115,7 +115,7 @@ spec:
                       - name
                       type: object
                     toFieldPath:
-                      description: ToFieldPath is the path of the field on the resource whose value will be changed with the result of transforms. Leave empty if you'd like to propagate to the same path as fieldPath.
+                      description: ToFieldPath is the path of the field on the resource whose value will be changed with the result of transforms. Leave empty if you'd like to propagate to the same path as fromObject.fieldPath.
                       type: string
                   required:
                   - fromObject
