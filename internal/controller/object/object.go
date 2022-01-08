@@ -249,7 +249,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	c.logger.Debug("Creating", "resource", cr)
 
-	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.CreateObject) {
+	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionCreate) {
 		c.logger.Debug("External resource should not be created by provider, skip creating.")
 		return managed.ExternalCreation{}, nil
 	}
@@ -278,7 +278,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	c.logger.Debug("Updating", "resource", cr)
 
-	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.UpdateObject) {
+	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionUpdate) {
 		c.logger.Debug("External resource should not be updated by provider, skip updating.")
 		return managed.ExternalUpdate{}, nil
 	}
@@ -307,7 +307,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	c.logger.Debug("Deleting", "resource", cr)
 
-	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.DeleteObject) {
+	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionDelete) {
 		c.logger.Debug("External resource should not be deleted by provider, skip deleting.")
 		return nil
 	}
@@ -401,7 +401,7 @@ func (c *external) isNotFound(obj *v1alpha1.Object, err error) bool {
 		// external resource not found, so that Object can be deleted by managed
 		// resource reconciler. Otherwise, the reconciler will try to delete the
 		// external resource which breaks the management policy.
-		if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.DeleteObject) {
+		if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionDelete) {
 			c.logger.Debug("Managed resource was deleted but external resource is undeletable.")
 			isNotFound = true
 		}
@@ -413,7 +413,7 @@ func (c *external) isNotFound(obj *v1alpha1.Object, err error) bool {
 func (c *external) handleLastApplied(obj *v1alpha1.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	isUpToDate := false
 
-	if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.UpdateObject) {
+	if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionUpdate) {
 		// Treated as up-to-date to skip last applied annotation update since we
 		// do not create or update the external resource.
 		isUpToDate = true

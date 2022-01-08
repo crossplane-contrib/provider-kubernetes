@@ -62,6 +62,7 @@ spec:
                 - manifest
                 type: object
               managementPolicy:
+                default: Default
                 description: A ManagementPolicy determines what should happen to the underlying external resource when a managed resource is created, updated, deleted, or observed.
                 enum:
                 - Default

@@ -43,12 +43,12 @@ const (
 	// Observe means the provider can only observe the resource.
 	Observe ManagementPolicy = "Observe"
 
-	// CreateObject means to create an Object
-	CreateObject ObjectAction = "CreateObject"
-	// UpdateObject means to update an Object
-	UpdateObject ObjectAction = "UpdateObject"
-	// DeleteObject means to delete an Object
-	DeleteObject ObjectAction = "DeleteObject"
+	// ObjectActionCreate means to create an Object
+	ObjectActionCreate ObjectAction = "Create"
+	// ObjectActionUpdate means to update an Object
+	ObjectActionUpdate ObjectAction = "Update"
+	// ObjectActionDelete means to delete an Object
+	ObjectActionDelete ObjectAction = "Delete"
 )
 
 // FromObject refers to an object by Name, Kind, APIVersion, etc. It is used
@@ -102,9 +102,10 @@ type ObjectObservation struct {
 // A ObjectSpec defines the desired state of a Object.
 type ObjectSpec struct {
 	xpv1.ResourceSpec `json:",inline"`
-	ManagementPolicy  `json:"managementPolicy,omitempty"`
-	References        []Reference      `json:"references,omitempty"`
-	ForProvider       ObjectParameters `json:"forProvider"`
+	// +kubebuilder:default=Default
+	ManagementPolicy `json:"managementPolicy,omitempty"`
+	References       []Reference      `json:"references,omitempty"`
+	ForProvider      ObjectParameters `json:"forProvider"`
 }
 
 // A ObjectStatus represents the observed state of a Object.
@@ -178,13 +179,10 @@ func patchFieldValueToObject(path string, value interface{}, to runtime.Object) 
 
 // IsActionAllowed determines if action is allowed to be performed on Object
 func (p *ManagementPolicy) IsActionAllowed(action ObjectAction) bool {
-	if *p == "" {
-		*p = Default
-	}
-
-	if action == CreateObject || action == UpdateObject {
+	if action == ObjectActionCreate || action == ObjectActionUpdate {
 		return *p == Default || *p == ObserveCreateUpdate
 	}
 
+	// ObjectActionDelete
 	return *p == Default || *p == ObserveDelete
 }

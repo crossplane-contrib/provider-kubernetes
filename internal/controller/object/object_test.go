@@ -78,6 +78,7 @@ func kubernetesObject(om ...kubernetesObjectModifier) *v1alpha1.Object {
 			Namespace: testNamespace,
 		},
 		Spec: v1alpha1.ObjectSpec{
+			ManagementPolicy: v1alpha1.Default,
 			ResourceSpec: xpv1.ResourceSpec{
 				ProviderConfigReference: &xpv1.Reference{
 					Name: providerName,
