@@ -358,6 +358,34 @@ func setObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) erro
 	return nil
 }
 
+func getReferenceInfo(ref *v1alpha1.Reference) (string, string, string, string) {
+	// Get referenced resource APIVersion
+	refAPIVersion := ref.DependsOn.APIVersion
+	if ref.PatchesFrom.APIVersion != "" {
+		refAPIVersion = ref.PatchesFrom.APIVersion
+	}
+
+	// Get referenced resource kind
+	refKind := ref.DependsOn.Kind
+	if ref.PatchesFrom.Kind != "" {
+		refKind = ref.PatchesFrom.Kind
+	}
+
+	// Get referenced resource namespace
+	refNamespace := ref.DependsOn.Namespace
+	if ref.PatchesFrom.Namespace != "" {
+		refNamespace = ref.PatchesFrom.Namespace
+	}
+
+	// Get referenced resource name
+	refName := ref.DependsOn.Name
+	if ref.PatchesFrom.Name != "" {
+		refName = ref.PatchesFrom.Name
+	}
+
+	return refAPIVersion, refKind, refNamespace, refName
+}
+
 // resolveReferencies resolves references for the current Object. If it fails to
 // resolve some reference, e.g.: due to reference not ready, it will then return
 // error and requeue to wait for resolving it next time.
@@ -366,13 +394,14 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 
 	// Loop through references to resolve each referenced resource
 	for _, ref := range obj.Spec.References {
+		refAPIVersion, refKind, refNamespace, refName := getReferenceInfo(&ref)
 		res := &unstructured.Unstructured{}
-		res.SetAPIVersion(ref.FromObject.APIVersion)
-		res.SetKind(ref.FromObject.Kind)
+		res.SetAPIVersion(refAPIVersion)
+		res.SetKind(refKind)
 		// Try to get referenced resource
 		err := c.localClient.Get(ctx, client.ObjectKey{
-			Namespace: ref.FromObject.Namespace,
-			Name:      ref.FromObject.Name,
+			Namespace: refNamespace,
+			Name:      refName,
 		}, res)
 
 		if err != nil {
@@ -380,7 +409,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 		}
 
 		// Patch fields if any
-		if ref.FromObject.FieldPath != nil {
+		if ref.PatchesFrom.FieldPath != nil {
 			if err := ref.ApplyFromFieldPathPatch(res, obj); err != nil {
 				return errors.Wrap(err, errPatchFromReferencedResource)
 			}
@@ -449,13 +478,14 @@ type refFinalizerFn func(context.Context, *unstructured.Unstructured, string) er
 func (f *objFinalizer) handleRefFinalizer(ctx context.Context, obj *v1alpha1.Object, finalizerFn refFinalizerFn) error {
 	// Loop through references to resolve each referenced resource
 	for _, ref := range obj.Spec.References {
+		refAPIVersion, refKind, refNamespace, refName := getReferenceInfo(&ref)
 		res := &unstructured.Unstructured{}
-		res.SetAPIVersion(ref.FromObject.APIVersion)
-		res.SetKind(ref.FromObject.Kind)
+		res.SetAPIVersion(refAPIVersion)
+		res.SetKind(refKind)
 		// Try to get referenced resource
 		err := f.client.Get(ctx, client.ObjectKey{
-			Namespace: ref.FromObject.Namespace,
-			Name:      ref.FromObject.Name,
+			Namespace: refNamespace,
+			Name:      refName,
 		}, res)
 
 		if err != nil {

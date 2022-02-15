@@ -51,34 +51,46 @@ const (
 	ObjectActionDelete ObjectAction = "Delete"
 )
 
-// FromObject refers to an object by Name, Kind, APIVersion, etc. It is used
-// to reference other Object or arbitrary Kubernetes resource which is either
+// DependsOn refers to an object by Name, Kind, APIVersion, etc. It is used to
+// reference other Object or arbitrary Kubernetes resource which is either
 // cluster or namespace scoped.
-type FromObject struct {
+type DependsOn struct {
 	// APIVersion of the referenced object.
-	APIVersion string `json:"apiVersion"`
+	// +kubebuilder:default=kubernetes.crossplane.io/v1alpha1
+	// +optional
+	APIVersion string `json:"apiVersion,omitempty"`
 	// Kind of the referenced object.
-	Kind string `json:"kind"`
+	// +kubebuilder:default=Object
+	// +optional
+	Kind string `json:"kind,omitempty"`
 	// Name of the referenced object.
 	Name string `json:"name"`
 	// Namespace of the referenced object.
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
+}
+
+// PatchesFrom refers to an object by Name, Kind, APIVersion, etc., and patch
+// fields from this object.
+type PatchesFrom struct {
+	DependsOn `json:",inline"`
 	// FieldPath is the path of the field on the resource whose value is to be
 	// used as input.
-	// +optional
-	FieldPath *string `json:"fieldPath,omitempty"`
+	FieldPath *string `json:"fieldPath"`
 }
 
 // Reference refers to an Object or arbitrary Kubernetes resource and optionally
 // patch values from that resource to the current Object.
 type Reference struct {
-	// FromObject is the reference of other Object or arbitrary Kubernetes
-	// resource
-	FromObject `json:"fromObject"`
+	// DependsOn is used to declare dependency on other Object or arbitrary
+	// Kubernetes resource.
+	DependsOn `json:"dependsOn,omitempty"`
+	// PatchesFrom is used to declare dependency on other Object or arbitrary
+	// Kubernetes resource, and also patch fields from this object.
+	PatchesFrom `json:"patchesFrom,omitempty"`
 	// ToFieldPath is the path of the field on the resource whose value will
 	// be changed with the result of transforms. Leave empty if you'd like to
-	// propagate to the same path as fromObject.fieldPath.
+	// propagate to the same path as patchesFrom.fieldPath.
 	// +optional
 	ToFieldPath *string `json:"toFieldPath,omitempty"`
 }
@@ -144,7 +156,7 @@ type ObjectList struct {
 func (r *Reference) ApplyFromFieldPathPatch(from, to runtime.Object) error {
 	// Default to patch the same field on the "to" resource.
 	if r.ToFieldPath == nil {
-		r.ToFieldPath = r.FromObject.FieldPath
+		r.ToFieldPath = r.PatchesFrom.FieldPath
 	}
 
 	paved, err := fieldpath.PaveObject(from)
@@ -152,7 +164,7 @@ func (r *Reference) ApplyFromFieldPathPatch(from, to runtime.Object) error {
 		return err
 	}
 
-	out, err := paved.GetValue(*r.FromObject.FieldPath)
+	out, err := paved.GetValue(*r.PatchesFrom.FieldPath)
 	if err != nil {
 		return err
 	}

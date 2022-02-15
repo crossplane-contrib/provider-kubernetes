@@ -133,13 +133,16 @@ func externalResourceWithLastAppliedConfigAnnotation(val interface{}) *unstructu
 }
 
 func objectReferences() []v1alpha1.Reference {
+	dependsOn := v1alpha1.DependsOn{
+		APIVersion: v1alpha1.SchemeGroupVersion.String(),
+		Kind:       v1alpha1.ObjectKind,
+		Name:       testReferenceObjectName,
+		Namespace:  testNamespace,
+	}
 	ref := []v1alpha1.Reference{
 		{
-			FromObject: v1alpha1.FromObject{
-				APIVersion: v1alpha1.SchemeGroupVersion.String(),
-				Kind:       v1alpha1.ObjectKind,
-				Name:       testReferenceObjectName,
-				Namespace:  testNamespace,
+			PatchesFrom: v1alpha1.PatchesFrom{
+				DependsOn: dependsOn,
 			},
 		},
 	}
@@ -647,7 +650,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 			args: args{
 				mg: kubernetesObject(func(obj *v1alpha1.Object) {
 					obj.Spec.References = objectReferences()
-					obj.Spec.References[0].FromObject.FieldPath = pointer.StringPtr("nonexistent_field")
+					obj.Spec.References[0].PatchesFrom.FieldPath = pointer.StringPtr("nonexistent_field")
 				}),
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{

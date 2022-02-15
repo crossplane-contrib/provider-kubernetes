@@ -92,16 +92,15 @@ spec:
                 items:
                   description: Reference refers to an Object or arbitrary Kubernetes resource and optionally patch values from that resource to the current Object.
                   properties:
-                    fromObject:
-                      description: FromObject is the reference of other Object or arbitrary Kubernetes resource
+                    dependsOn:
+                      description: DependsOn is used to declare dependency on other Object or arbitrary Kubernetes resource.
                       properties:
                         apiVersion:
+                          default: kubernetes.crossplane.io/v1alpha1
                           description: APIVersion of the referenced object.
                           type: string
-                        fieldPath:
-                          description: FieldPath is the path of the field on the resource whose value is to be used as input.
-                          type: string
                         kind:
+                          default: Object
                           description: Kind of the referenced object.
                           type: string
                         name:
@@ -111,15 +110,35 @@ spec:
                           description: Namespace of the referenced object.
                           type: string
                       required:
-                      - apiVersion
-                      - kind
+                      - name
+                      type: object
+                    patchesFrom:
+                      description: PatchesFrom is used to declare dependency on other Object or arbitrary Kubernetes resource, and also patch fields from this object.
+                      properties:
+                        apiVersion:
+                          default: kubernetes.crossplane.io/v1alpha1
+                          description: APIVersion of the referenced object.
+                          type: string
+                        fieldPath:
+                          description: FieldPath is the path of the field on the resource whose value is to be used as input.
+                          type: string
+                        kind:
+                          default: Object
+                          description: Kind of the referenced object.
+                          type: string
+                        name:
+                          description: Name of the referenced object.
+                          type: string
+                        namespace:
+                          description: Namespace of the referenced object.
+                          type: string
+                      required:
+                      - fieldPath
                       - name
                       type: object
                     toFieldPath:
-                      description: ToFieldPath is the path of the field on the resource whose value will be changed with the result of transforms. Leave empty if you'd like to propagate to the same path as fromObject.fieldPath.
+                      description: ToFieldPath is the path of the field on the resource whose value will be changed with the result of transforms. Leave empty if you'd like to propagate to the same path as patchesFrom.fieldPath.
                       type: string
-                  required:
-                  - fromObject
                   type: object
                 type: array
               writeConnectionSecretToRef:
