@@ -181,7 +181,7 @@ func patchFieldValueToObject(path string, value interface{}, to runtime.Object) 
 		return err
 	}
 
-	err = paved.SetValue(path, value)
+	err = paved.SetValue("spec.forProvider.manifest."+path, value)
 	if err != nil {
 		return err
 	}
