@@ -358,7 +358,7 @@ func setObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) erro
 	return nil
 }
 
-func getReferenceInfo(ref *v1alpha1.Reference) (string, string, string, string) {
+func getReferenceInfo(ref v1alpha1.Reference) (string, string, string, string) {
 	// Get referenced resource APIVersion
 	refAPIVersion := ref.DependsOn.APIVersion
 	if ref.PatchesFrom.APIVersion != "" {
@@ -394,7 +394,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 
 	// Loop through references to resolve each referenced resource
 	for _, ref := range obj.Spec.References {
-		refAPIVersion, refKind, refNamespace, refName := getReferenceInfo(&ref)
+		refAPIVersion, refKind, refNamespace, refName := getReferenceInfo(ref)
 		res := &unstructured.Unstructured{}
 		res.SetAPIVersion(refAPIVersion)
 		res.SetKind(refKind)
@@ -478,7 +478,7 @@ type refFinalizerFn func(context.Context, *unstructured.Unstructured, string) er
 func (f *objFinalizer) handleRefFinalizer(ctx context.Context, obj *v1alpha1.Object, finalizerFn refFinalizerFn) error {
 	// Loop through references to resolve each referenced resource
 	for _, ref := range obj.Spec.References {
-		refAPIVersion, refKind, refNamespace, refName := getReferenceInfo(&ref)
+		refAPIVersion, refKind, refNamespace, refName := getReferenceInfo(ref)
 		res := &unstructured.Unstructured{}
 		res.SetAPIVersion(refAPIVersion)
 		res.SetKind(refKind)
