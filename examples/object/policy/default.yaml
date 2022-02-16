@@ -1,0 +1,17 @@
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: foo
+spec:
+  # Use management policy Default to fully control k8s resource
+  # It is the default policy that can be omitted
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        # name in manifest is optional and defaults to Object name
+        # name: some-other-name
+        namespace: default
+  providerConfigRef:
+    name: kubernetes-provider
