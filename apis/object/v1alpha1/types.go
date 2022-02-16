@@ -84,10 +84,12 @@ type PatchesFrom struct {
 type Reference struct {
 	// DependsOn is used to declare dependency on other Object or arbitrary
 	// Kubernetes resource.
-	DependsOn `json:"dependsOn,omitempty"`
+	// +optional
+	*DependsOn `json:"dependsOn,omitempty"`
 	// PatchesFrom is used to declare dependency on other Object or arbitrary
 	// Kubernetes resource, and also patch fields from this object.
-	PatchesFrom `json:"patchesFrom,omitempty"`
+	// +optional
+	*PatchesFrom `json:"patchesFrom,omitempty"`
 	// ToFieldPath is the path of the field on the resource whose value will
 	// be changed with the result of transforms. Leave empty if you'd like to
 	// propagate to the same path as patchesFrom.fieldPath.

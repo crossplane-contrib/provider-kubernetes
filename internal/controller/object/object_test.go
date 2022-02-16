@@ -141,9 +141,12 @@ func objectReferences() []v1alpha1.Reference {
 	}
 	ref := []v1alpha1.Reference{
 		{
-			PatchesFrom: v1alpha1.PatchesFrom{
+			PatchesFrom: &v1alpha1.PatchesFrom{
 				DependsOn: dependsOn,
 			},
+		},
+		{
+			DependsOn: &dependsOn,
 		},
 	}
 	return ref
@@ -767,6 +770,22 @@ func Test_helmExternal_Observe(t *testing.T) {
 				err: nil,
 			},
 		},
+		"EmptyReference": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.Spec.References = []v1alpha1.Reference{{}}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil),
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
+				err: nil,
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -1175,6 +1194,21 @@ func Test_objFinalizer_AddFinalizer(t *testing.T) {
 				err: errors.Wrap(
 					errors.Wrap(errBoom,
 						errGetReferencedResource), errAddFinalizer),
+			},
+		},
+		"EmptyReference": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.Spec.References = []v1alpha1.Reference{{}}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockUpdate: test.NewMockUpdateFn(nil),
+					},
+				},
+			},
+			want: want{
+				err: nil,
 			},
 		},
 		"FailedToAddReferenceFinalizer": {
