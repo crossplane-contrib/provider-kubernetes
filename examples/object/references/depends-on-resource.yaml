@@ -1,0 +1,31 @@
+---
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: foo
+spec:
+  references:
+  # Use dependsOn to declare dependency on other k8s resource for this object
+  - dependsOn:
+      apiVersion: v1
+      kind: ConfigMap
+      name: bar
+      namespace: default
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        namespace: default
+      data:
+        sample-key: sample-value
+  providerConfigRef:
+    name: kubernetes-provider
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bar
+  namespace: default
+data:
+  sample-key: sample-value

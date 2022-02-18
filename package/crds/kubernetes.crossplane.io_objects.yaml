@@ -61,6 +61,15 @@ spec:
                 required:
                 - manifest
                 type: object
+              managementPolicy:
+                default: Default
+                description: A ManagementPolicy determines what should happen to the underlying external resource when a managed resource is created, updated, deleted, or observed.
+                enum:
+                - Default
+                - ObserveCreateUpdate
+                - ObserveDelete
+                - Observe
+                type: string
               providerConfigRef:
                 description: ProviderConfigReference specifies how the provider that will be used to create, observe, update, and delete this managed resource should be configured.
                 properties:
@@ -79,6 +88,59 @@ spec:
                 required:
                 - name
                 type: object
+              references:
+                items:
+                  description: Reference refers to an Object or arbitrary Kubernetes resource and optionally patch values from that resource to the current Object.
+                  properties:
+                    dependsOn:
+                      description: DependsOn is used to declare dependency on other Object or arbitrary Kubernetes resource.
+                      properties:
+                        apiVersion:
+                          default: kubernetes.crossplane.io/v1alpha1
+                          description: APIVersion of the referenced object.
+                          type: string
+                        kind:
+                          default: Object
+                          description: Kind of the referenced object.
+                          type: string
+                        name:
+                          description: Name of the referenced object.
+                          type: string
+                        namespace:
+                          description: Namespace of the referenced object.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    patchesFrom:
+                      description: PatchesFrom is used to declare dependency on other Object or arbitrary Kubernetes resource, and also patch fields from this object.
+                      properties:
+                        apiVersion:
+                          default: kubernetes.crossplane.io/v1alpha1
+                          description: APIVersion of the referenced object.
+                          type: string
+                        fieldPath:
+                          description: FieldPath is the path of the field on the resource whose value is to be used as input.
+                          type: string
+                        kind:
+                          default: Object
+                          description: Kind of the referenced object.
+                          type: string
+                        name:
+                          description: Name of the referenced object.
+                          type: string
+                        namespace:
+                          description: Namespace of the referenced object.
+                          type: string
+                      required:
+                      - fieldPath
+                      - name
+                      type: object
+                    toFieldPath:
+                      description: ToFieldPath is the path of the field on the resource whose value will be changed with the result of transforms. Leave empty if you'd like to propagate to the same path as patchesFrom.fieldPath.
+                      type: string
+                  type: object
+                type: array
               writeConnectionSecretToRef:
                 description: WriteConnectionSecretToReference specifies the namespace and name of a Secret to which any connection details for this managed resource should be written. Connection details frequently include the endpoint, username, and password required to connect to the managed resource.
                 properties:
