@@ -11,4 +11,4 @@ guidelines and responsibilities for the steering committee and maintainers.
 ## Maintainers
 
 * Hasan Turken <hasan@upbound.io> ([turkenh](https://github.com/turkenh))
-
+* Mo Ying (William) <morningspace@yahoo.com> ([morningspace](https://github.com/morningspace))
