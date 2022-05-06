@@ -232,6 +232,7 @@ func Test_connector_Connect(t *testing.T) {
 	type want struct {
 		err error
 	}
+	now := metav1.Now()
 	cases := map[string]struct {
 		args
 		want
@@ -294,6 +295,33 @@ func Test_connector_Connect(t *testing.T) {
 			},
 			want: want{
 				err: errors.Wrap(errBoom, errGetCreds),
+			},
+		},
+		"FailedToExtractKubeconfigMGWasDeleted": {
+			args: args{
+				client: &test.MockClient{
+					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if key.Name == providerName {
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfig()
+							return nil
+						}
+						if key.Name == providerSecretName && key.Namespace == providerSecretNamespace {
+							*obj.(*corev1.Secret) = secret
+							return nil
+						}
+						return errBoom
+					},
+				},
+				kcfgExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, errBoom
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.ObjectMeta.DeletionTimestamp = &now
+				}),
+			},
+			want: want{
+				err: nil,
 			},
 		},
 		"FailedToCreateRESTConfig": {
@@ -500,6 +528,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 		out managed.ExternalObservation
 		err error
 	}
+	now := metav1.Now()
 	cases := map[string]struct {
 		args
 		want
@@ -512,6 +541,21 @@ func Test_helmExternal_Observe(t *testing.T) {
 				err: errors.New(errNotKubernetesObject),
 			},
 		},
+		"DeletedWithNoKubernetesClientExists": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.ObjectMeta.DeletionTimestamp = &now
+				}),
+				client: resource.ClientApplicator{
+					Client: nil,
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: false},
+				err: nil,
+			},
+		},
+
 		"NoKubernetesObjectExists": {
 			args: args{
 				mg: kubernetesObject(),

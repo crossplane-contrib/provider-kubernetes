@@ -154,6 +154,13 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	default:
 		kc, err := c.kcfgExtractorFn(ctx, cd.Source, c.kube, cd.CommonCredentialSelectors)
 		if err != nil {
+			if meta.WasDeleted(cr) {
+				return &external{
+					logger:      c.logger,
+					client:      resource.ClientApplicator{},
+					localClient: c.kube,
+				}, nil
+			}
 			return nil, errors.Wrap(err, errGetCreds)
 		}
 
@@ -206,6 +213,13 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	c.logger.Debug("Observing", "resource", cr)
 
+	if meta.WasDeleted(cr) && c.client.Client == nil {
+		// The CR has been deleted and Connect was unable to create a Client so let the delete process finish
+		return managed.ExternalObservation{
+			ResourceExists:   false,
+			ResourceUpToDate: false,
+		}, nil
+	}
 	if err := c.resolveReferencies(ctx, cr); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errResolveResourceReferences)
 	}
