@@ -17,12 +17,9 @@ limitations under the License.
 package controller
 
 import (
-	"time"
-
-	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/crossplane/crossplane-runtime/pkg/logging"
+	"github.com/crossplane/crossplane-runtime/pkg/controller"
 
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/config"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/object"
@@ -30,12 +27,12 @@ import (
 
 // Setup creates all Template controllers with the supplied logger and adds them to
 // the supplied manager.
-func Setup(mgr ctrl.Manager, l logging.Logger, wl workqueue.RateLimiter, poll time.Duration) error {
-	for _, setup := range []func(ctrl.Manager, logging.Logger, workqueue.RateLimiter, time.Duration) error{
+func Setup(mgr ctrl.Manager, o controller.Options) error {
+	for _, setup := range []func(ctrl.Manager, controller.Options) error{
 		config.Setup,
 		object.Setup,
 	} {
-		if err := setup(mgr, l, wl, poll); err != nil {
+		if err := setup(mgr, o); err != nil {
 			return err
 		}
 	}
