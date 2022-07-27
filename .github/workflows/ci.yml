@@ -10,8 +10,8 @@ on:
 
 env:
   # Common versions
-  GO_VERSION: '1.16'
-  GOLANGCI_VERSION: 'v1.31'
+  GO_VERSION: '1.17'
+  GOLANGCI_VERSION: 'v1.43.0'
   DOCKER_BUILDX_VERSION: 'v0.4.2'
 
   # Common users. We can't run a step 'if secrets.AWS_USR != ""' but we can run
@@ -66,6 +66,13 @@ jobs:
 
       - name: Vendor Dependencies
         run: make vendor vendor.check
+      # Go version coming with golangci-lint-action may not be our desired
+      # go version. We deploy our desired go version and then skip go
+      # installation in golangci-lint-action in the next step as suggested
+      # in https://github.com/golangci/golangci-lint-action/issues/183
+      - uses: actions/setup-go@v2
+        with:
+          go-version: ${{ env.GO_VERSION }}
 
       # This action uses its own setup-go, which always seems to use the latest
       # stable version of Go. We could run 'make lint' to ensure our desired Go
@@ -75,6 +82,7 @@ jobs:
         uses: golangci/golangci-lint-action@v2
         with:
           version: ${{ env.GOLANGCI_VERSION }}
+          skip-go-installation: true
 
   check-diff:
     runs-on: ubuntu-18.04
@@ -314,4 +322,3 @@ jobs:
           CHANNEL: main
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_USR }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PSW }}
-        
