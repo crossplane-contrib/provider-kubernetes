@@ -533,18 +533,8 @@ func (f *objFinalizer) RemoveFinalizer(ctx context.Context, res resource.Object)
 		return errors.New(errNotKubernetesObject)
 	}
 
-	if !meta.FinalizerExists(obj, objFinalizerName) {
-		return nil
-	}
-	meta.RemoveFinalizer(obj, objFinalizerName)
-
-	err := f.client.Update(ctx, obj)
-	if err != nil {
-		return errors.Wrap(err, errRemoveFinalizer)
-	}
-
 	// Remove finalizer from referenced resources if exists
-	err = f.handleRefFinalizer(ctx, obj, func(
+	err := f.handleRefFinalizer(ctx, obj, func(
 		ctx context.Context, res *unstructured.Unstructured, finalizer string) error {
 		if meta.FinalizerExists(res, finalizer) {
 			meta.RemoveFinalizer(res, finalizer)
@@ -554,5 +544,15 @@ func (f *objFinalizer) RemoveFinalizer(ctx context.Context, res resource.Object)
 		}
 		return nil
 	})
+	if err != nil {
+		return errors.Wrap(err, errRemoveFinalizer)
+	}
+
+	if !meta.FinalizerExists(obj, objFinalizerName) {
+		return nil
+	}
+	meta.RemoveFinalizer(obj, objFinalizerName)
+
+	err = f.client.Update(ctx, obj)
 	return errors.Wrap(err, errRemoveFinalizer)
 }

@@ -1364,7 +1364,7 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				err: errors.Wrap(
 					errors.Wrap(errBoom,
 						errRemoveReferenceFinalizer), errRemoveFinalizer),
-				finalizers: []string{},
+				finalizers: []string{objFinalizerName},
 			},
 		},
 		"Success": {
