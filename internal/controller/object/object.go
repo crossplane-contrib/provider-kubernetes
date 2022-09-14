@@ -161,13 +161,20 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	// time of writing there's only one valid value (Google App Creds), and
 	// that value is required.
 	if id := pc.Spec.Identity; id != nil {
-		creds, err := c.gcpExtractorFn(ctx, id.Source, c.kube, id.CommonCredentialSelectors)
-		if err != nil {
-			return nil, errors.Wrap(err, errFailedToExtractGoogleCredentials)
-		}
+		switch id.Source { //nolint:exhaustive
+		case xpv1.CredentialsSourceInjectedIdentity:
+			if err := c.gcpInjectorFn(ctx, rc, nil, gke.DefaultScopes...); err != nil {
+				return nil, errors.Wrap(err, errFailedToInjectGoogleCredentials)
+			}
+		default:
+			creds, err := c.gcpExtractorFn(ctx, id.Source, c.kube, id.CommonCredentialSelectors)
+			if err != nil {
+				return nil, errors.Wrap(err, errFailedToExtractGoogleCredentials)
+			}
 
-		if err := c.gcpInjectorFn(ctx, rc, creds, gke.DefaultScopes...); err != nil {
-			return nil, errors.Wrap(err, errFailedToInjectGoogleCredentials)
+			if err := c.gcpInjectorFn(ctx, rc, creds, gke.DefaultScopes...); err != nil {
+				return nil, errors.Wrap(err, errFailedToInjectGoogleCredentials)
+			}
 		}
 	}
 
