@@ -49,6 +49,9 @@ func WrapRESTConfig(ctx context.Context, rc *rest.Config, credentials []byte, sc
 			t := oauth2.Token{
 				AccessToken: string(credentials),
 			}
+			if ok := t.Valid(); !ok {
+				return errors.New("Access token invalid")
+			}
 			ts = oauth2.StaticTokenSource(&t)
 		}
 	} else {
