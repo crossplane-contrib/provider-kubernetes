@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1274,7 +1275,8 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 		mg     resource.Managed
 	}
 	type want struct {
-		err error
+		err        error
+		finalizers []string
 	}
 	cases := map[string]struct {
 		args
@@ -1285,7 +1287,8 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				mg: notKubernetesObject{},
 			},
 			want: want{
-				err: errors.New(errNotKubernetesObject),
+				err:        errors.New(errNotKubernetesObject),
+				finalizers: []string{},
 			},
 		},
 		"FailedToRemoveObjectFinalizer": {
@@ -1300,7 +1303,8 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errRemoveFinalizer),
+				err:        errors.Wrap(errBoom, errRemoveFinalizer),
+				finalizers: []string{},
 			},
 		},
 		"NoObjectFinalizerExists": {
@@ -1308,7 +1312,8 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				mg: kubernetesObject(),
 			},
 			want: want{
-				err: nil,
+				err:        nil,
+				finalizers: nil,
 			},
 		},
 		"NoReferenceFinalizerExists": {
@@ -1328,7 +1333,8 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				},
 			},
 			want: want{
-				err: nil,
+				err:        nil,
+				finalizers: []string{},
 			},
 		},
 		"FailedToRemoveReferenceFinalizer": {
@@ -1358,6 +1364,7 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				err: errors.Wrap(
 					errors.Wrap(errBoom,
 						errRemoveReferenceFinalizer), errRemoveFinalizer),
+				finalizers: []string{objFinalizerName},
 			},
 		},
 		"Success": {
@@ -1378,7 +1385,8 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				},
 			},
 			want: want{
-				err: nil,
+				err:        nil,
+				finalizers: []string{},
 			},
 		},
 	}
@@ -1387,9 +1395,17 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 			f := &objFinalizer{
 				client: tc.args.client,
 			}
+
 			gotErr := f.RemoveFinalizer(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
-				t.Fatalf("f.RemoveFinalizer(...): -want error, +got error: %s", diff)
+				t.Errorf("f.RemoveFinalizer(...): -want error, +got error: %s", diff)
+			}
+
+			if _, ok := tc.args.mg.(*v1alpha1.Object); ok {
+				sort := cmpopts.SortSlices(func(a, b string) bool { return a < b })
+				if diff := cmp.Diff(tc.want.finalizers, tc.args.mg.GetFinalizers(), sort); diff != "" {
+					t.Errorf("managed resource finalizers: -want, +got: %s", diff)
+				}
 			}
 		})
 	}
