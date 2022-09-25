@@ -405,6 +405,14 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 				return errors.Wrap(err, errPatchFromReferencedResource)
 			}
 		}
+		// Dependencies will set a finalizer on the referenced resource.  Add an ownerReference
+		// on the Object to support Foreground Cascading Deletion.
+		if ref.DependsOn != nil {
+			or := meta.AsOwner(meta.TypedReferenceTo(res, res.GetObjectKind().GroupVersionKind()))
+			t := true
+			or.BlockOwnerDeletion = &t
+			meta.AddOwnerReference(obj, or)
+		}
 	}
 
 	return nil
