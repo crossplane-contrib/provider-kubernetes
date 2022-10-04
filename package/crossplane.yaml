@@ -1,10 +1,18 @@
-apiVersion: meta.pkg.crossplane.io/v1alpha1
+apiVersion: meta.pkg.crossplane.io/v1
 kind: Provider
 metadata:
   name: provider-kubernetes
   annotations:
-    descriptionShort: |
+    meta.crossplane.io/maintainer: Crossplane Maintainers <info@crossplane.io>
+    meta.crossplane.io/source: github.com/crossplane-contrib/provider-kubernetes
+    meta.crossplane.io/license: Apache-2.0
+    meta.crossplane.io/description: |
       The Crossplane Kubernetes provider enables management of Kubernetes Objects.
-spec:
-  controller:
-    image: crossplane/provider-kubernetes-controller:VERSION
+    meta.crossplane.io/readme: |
+      `provider-kubernetes` is a Crossplane Provider that enables deployment and management
+      of arbitrary Kubernetes objects on clusters typically provisioned by Crossplane:
+
+      - A `Provider` resource type that only points to a credentials `Secret`.
+      - An `Object` resource type that is to manage Kubernetes Objects.
+      - A managed resource controller that reconciles `Object` typed resources and manages
+      arbitrary Kubernetes Objects.
