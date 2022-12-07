@@ -466,7 +466,7 @@ type objFinalizer struct {
 
 type refFinalizerFn func(context.Context, *unstructured.Unstructured, string) error
 
-func (f *objFinalizer) handleRefFinalizer(ctx context.Context, obj *v1alpha1.Object, finalizerFn refFinalizerFn) error {
+func (f *objFinalizer) handleRefFinalizer(ctx context.Context, obj *v1alpha1.Object, finalizerFn refFinalizerFn, ignoreNotFound bool) error {
 	// Loop through references to resolve each referenced resource
 	for _, ref := range obj.Spec.References {
 		if ref.DependsOn == nil && ref.PatchesFrom == nil {
@@ -484,6 +484,10 @@ func (f *objFinalizer) handleRefFinalizer(ctx context.Context, obj *v1alpha1.Obj
 		}, res)
 
 		if err != nil {
+			if ignoreNotFound && kerrors.IsNotFound(err) {
+				continue
+			}
+
 			return errors.Wrap(err, errGetReferencedResource)
 		}
 
@@ -523,7 +527,7 @@ func (f *objFinalizer) AddFinalizer(ctx context.Context, res resource.Object) er
 			}
 		}
 		return nil
-	})
+	}, false)
 	return errors.Wrap(err, errAddFinalizer)
 }
 
@@ -543,7 +547,7 @@ func (f *objFinalizer) RemoveFinalizer(ctx context.Context, res resource.Object)
 			}
 		}
 		return nil
-	})
+	}, true)
 	if err != nil {
 		return errors.Wrap(err, errRemoveFinalizer)
 	}

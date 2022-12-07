@@ -1337,6 +1337,25 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				finalizers: []string{},
 			},
 		},
+		"ReferenceNotFound": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
+					obj.Spec.References = objectReferences()
+					obj.ObjectMeta.UID = "some-uid"
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet:    test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{}, testReferenceObjectName)),
+						MockUpdate: test.NewMockUpdateFn(nil),
+					},
+				},
+			},
+			want: want{
+				err:        nil,
+				finalizers: []string{},
+			},
+		},
 		"FailedToRemoveReferenceFinalizer": {
 			args: args{
 				mg: kubernetesObject(func(obj *v1alpha1.Object) {
