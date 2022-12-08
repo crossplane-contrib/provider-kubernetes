@@ -6,6 +6,7 @@ metadata:
     meta.crossplane.io/maintainer: Crossplane Maintainers <info@crossplane.io>
     meta.crossplane.io/source: github.com/crossplane-contrib/provider-kubernetes
     meta.crossplane.io/license: Apache-2.0
+    friendly-name.meta.crossplane.io: Provider Kubernetes
     meta.crossplane.io/description: |
       The Crossplane Kubernetes provider enables management of Kubernetes Objects.
     meta.crossplane.io/readme: |
