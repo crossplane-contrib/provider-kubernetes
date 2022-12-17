@@ -20,6 +20,24 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.forProvider.manifest.kind
+      name: KIND
+      type: string
+    - jsonPath: .spec.forProvider.manifest.apiVersion
+      name: APIVERSION
+      priority: 1
+      type: string
+    - jsonPath: .spec.forProvider.manifest.metadata.name
+      name: METANAME
+      priority: 1
+      type: string
+    - jsonPath: .spec.forProvider.manifest.metadata.namespace
+      name: METANAMESPACE
+      priority: 1
+      type: string
+    - jsonPath: .spec.providerConfigRef.name
+      name: PROVIDERCONFIG
+      type: string
     - jsonPath: .status.conditions[?(@.type=='Synced')].status
       name: SYNCED
       type: string

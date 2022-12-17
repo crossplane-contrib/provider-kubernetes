@@ -132,6 +132,11 @@ type ObjectStatus struct {
 
 // A Object is an provider Kubernetes API type
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="KIND",type="string",JSONPath=".spec.forProvider.manifest.kind"
+// +kubebuilder:printcolumn:name="APIVERSION",type="string",JSONPath=".spec.forProvider.manifest.apiVersion",priority=1
+// +kubebuilder:printcolumn:name="METANAME",type="string",JSONPath=".spec.forProvider.manifest.metadata.name",priority=1
+// +kubebuilder:printcolumn:name="METANAMESPACE",type="string",JSONPath=".spec.forProvider.manifest.metadata.namespace",priority=1
+// +kubebuilder:printcolumn:name="PROVIDERCONFIG",type="string",JSONPath=".spec.providerConfigRef.name"
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
 // +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
