@@ -37,10 +37,80 @@ type ProviderConfigSpec struct {
 // ProviderCredentials required to authenticate.
 type ProviderCredentials struct {
 	// Source of the provider credentials.
-	// +kubebuilder:validation:Enum=None;Secret;InjectedIdentity;Environment;Filesystem
-	Source xpv1.CredentialsSource `json:"source"`
+	// +kubebuilder:validation:Enum=None;Secret;ServiceAccount;InjectedIdentity;Environment;Filesystem
+	Source CredentialsSource `json:"source"`
 
-	xpv1.CommonCredentialSelectors `json:",inline"`
+	KubernetesCredentialSelectors `json:",inline"`
+}
+
+// A CredentialsSource is a source from which provider credentials may be
+// acquired.
+type CredentialsSource string
+
+const (
+	// CredentialsSourceNone indicates that a provider does not require
+	// credentials.
+	CredentialsSourceNone CredentialsSource = "None"
+
+	// CredentialsSourceSecret indicates that a provider should acquire
+	// credentials from a secret.
+	CredentialsSourceSecret CredentialsSource = "Secret"
+
+	// CredentialsSourceServiceAccount indicates that a provider should acquire
+	// credentials from a serviceaccount token.
+	CredentialsSourceServiceAccount CredentialsSource = "ServiceAccount"
+
+	// CredentialsSourceInjectedIdentity indicates that a provider should use
+	// credentials via its (pod's) identity; i.e. via IRSA for AWS,
+	// Workload Identity for GCP, Pod Identity for Azure, or in-cluster
+	// authentication for the Kubernetes API.
+	CredentialsSourceInjectedIdentity CredentialsSource = "InjectedIdentity"
+
+	// CredentialsSourceEnvironment indicates that a provider should acquire
+	// credentials from an environment variable.
+	CredentialsSourceEnvironment CredentialsSource = "Environment"
+
+	// CredentialsSourceFilesystem indicates that a provider should acquire
+	// credentials from the filesystem.
+	CredentialsSourceFilesystem CredentialsSource = "Filesystem"
+)
+
+// KubernetesCredentialSelectors provides common selectors for extracting
+// credentials.
+type KubernetesCredentialSelectors struct {
+	// Fs is a reference to a filesystem location that contains credentials that
+	// must be used to connect to the provider.
+	// +optional
+	Fs *xpv1.FsSelector `json:"fs,omitempty"`
+
+	// Env is a reference to an environment variable that contains credentials
+	// that must be used to connect to the provider.
+	// +optional
+	Env *xpv1.EnvSelector `json:"env,omitempty"`
+
+	// A SecretRef is a reference to a secret key that contains the credentials
+	// that must be used to connect to the provider.
+	// +optional
+	SecretRef *xpv1.SecretKeySelector `json:"secretRef,omitempty"`
+
+	// A ServiceAccountRef is a reference to a serviceaccount that contains the grants
+	// that must be used to connect to the provider.
+	// +optional
+	ServiceAccountRef *ServiceAccountSelector `json:"serviceAccountRef,omitempty"`
+}
+
+// A ServiceAccountSelector is a reference to a serviceaccount in an arbitrary namespace.
+type ServiceAccountSelector struct {
+	ServiceAccountReference `json:",inline"`
+}
+
+// A ServiceAccountReference is a reference to a serviceaccount in an arbitrary namespace.
+type ServiceAccountReference struct {
+	// Name of the serviceaccount.
+	Name string `json:"name"`
+
+	// Namespace of the serviceaccount.
+	Namespace string `json:"namespace"`
 }
 
 // IdentityType used to authenticate to the Kubernetes API.

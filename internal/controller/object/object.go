@@ -21,6 +21,7 @@ import (
 
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
+
 	"k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -38,6 +39,8 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
+
+	internalresource "github.com/crossplane-contrib/provider-kubernetes/internal/resource"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
@@ -141,13 +144,32 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	var err error
 
 	switch cd := pc.Spec.Credentials; cd.Source { //nolint:exhaustive
-	case xpv1.CredentialsSourceInjectedIdentity:
+	case apisv1alpha1.CredentialsSourceInjectedIdentity:
 		rc, err = rest.InClusterConfig()
 		if err != nil {
 			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
 		}
+	case apisv1alpha1.CredentialsSourceServiceAccount:
+		token, err := internalresource.ExtractServiceAccount(ctx, c.kube, cd.KubernetesCredentialSelectors)
+		if err != nil {
+			return nil, errors.Wrap(err, errGetCreds)
+		}
+		rc, err = rest.InClusterConfig()
+		if err != nil {
+			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
+		}
+		rc.BearerToken = string(token)
+		rc.BearerTokenFile = ""
 	default:
-		kc, err := c.kcfgExtractorFn(ctx, cd.Source, c.kube, cd.CommonCredentialSelectors)
+		// Needed to use upstream methods for extracting credentials.
+		ccs := xpv1.CommonCredentialSelectors{
+			Fs:        cd.KubernetesCredentialSelectors.Fs,
+			Env:       cd.KubernetesCredentialSelectors.Env,
+			SecretRef: cd.KubernetesCredentialSelectors.SecretRef,
+		}
+		src := xpv1.CredentialsSource(cd.Source)
+
+		kc, err := c.kcfgExtractorFn(ctx, src, c.kube, ccs)
 		if err != nil {
 			return nil, errors.Wrap(err, errGetCreds)
 		}
@@ -161,7 +183,15 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	// time of writing there's only one valid value (Google App Creds), and
 	// that value is required.
 	if id := pc.Spec.Identity; id != nil {
-		creds, err := c.gcpExtractorFn(ctx, id.Source, c.kube, id.CommonCredentialSelectors)
+		// Needed to use upstream methods for extracting credentials.
+		ccs := xpv1.CommonCredentialSelectors{
+			Fs:        id.ProviderCredentials.KubernetesCredentialSelectors.Fs,
+			Env:       id.ProviderCredentials.KubernetesCredentialSelectors.Env,
+			SecretRef: id.ProviderCredentials.KubernetesCredentialSelectors.SecretRef,
+		}
+		src := xpv1.CredentialsSource(id.ProviderCredentials.Source)
+
+		creds, err := c.gcpExtractorFn(ctx, src, c.kube, ccs)
 		if err != nil {
 			return nil, errors.Wrap(err, errFailedToExtractGoogleCredentials)
 		}
