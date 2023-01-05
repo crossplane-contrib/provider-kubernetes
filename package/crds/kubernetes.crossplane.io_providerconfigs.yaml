@@ -89,11 +89,27 @@ spec:
                     - name
                     - namespace
                     type: object
+                  serviceAccountRef:
+                    description: A ServiceAccountRef is a reference to a serviceaccount
+                      that contains the grants that must be used to connect to the
+                      provider.
+                    properties:
+                      name:
+                        description: Name of the serviceaccount.
+                        type: string
+                      namespace:
+                        description: Namespace of the serviceaccount.
+                        type: string
+                    required:
+                    - name
+                    - namespace
+                    type: object
                   source:
                     description: Source of the provider credentials.
                     enum:
                     - None
                     - Secret
+                    - ServiceAccount
                     - InjectedIdentity
                     - Environment
                     - Filesystem
@@ -144,11 +160,27 @@ spec:
                     - name
                     - namespace
                     type: object
+                  serviceAccountRef:
+                    description: A ServiceAccountRef is a reference to a serviceaccount
+                      that contains the grants that must be used to connect to the
+                      provider.
+                    properties:
+                      name:
+                        description: Name of the serviceaccount.
+                        type: string
+                      namespace:
+                        description: Namespace of the serviceaccount.
+                        type: string
+                    required:
+                    - name
+                    - namespace
+                    type: object
                   source:
                     description: Source of the provider credentials.
                     enum:
                     - None
                     - Secret
+                    - ServiceAccount
                     - InjectedIdentity
                     - Environment
                     - Filesystem

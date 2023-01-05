@@ -18,8 +18,16 @@ package object
 
 import (
 	"context"
+	"os"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
+
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"github.com/spf13/afero"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -88,8 +96,8 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 			logger:          o.Logger,
 			kube:            mgr.GetClient(),
 			usage:           resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
-			kcfgExtractorFn: resource.CommonCredentialExtractor,
-			gcpExtractorFn:  resource.CommonCredentialExtractor,
+			kcfgExtractorFn: CommonCredentialExtractor,
+			gcpExtractorFn:  CommonCredentialExtractor,
 			gcpInjectorFn:   gke.WrapRESTConfig,
 			newRESTConfigFn: clients.NewRESTConfig,
 			newKubeClientFn: clients.NewKubeClient,
@@ -107,13 +115,97 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 		Complete(ratelimiter.NewReconciler(name, r, o.GlobalRateLimiter))
 }
 
+const (
+	errExtractEnv            = "cannot extract from environment variable when none specified"
+	errExtractFs             = "cannot extract from filesystem when no path specified"
+	errExtractSecretKey      = "cannot extract from secret key when none specified"
+	errGetCredentialsSecret  = "cannot get credentials secret"
+	errNoHandlerForSourceFmt = "no extraction handler registered for source: %s"
+	errExtractServiceAccount = "cannot extract from service account when none specified"
+)
+
+// CommonCredentialExtractor extracts credentials from common sources.
+func CommonCredentialExtractor(ctx context.Context, source apisv1alpha1.CredentialsSource, client client.Client, selector apisv1alpha1.CommonCredentialSelectors) ([]byte, error) {
+	switch source { // nolint:exhaustive
+	case apisv1alpha1.CredentialsSourceEnvironment:
+		return ExtractEnv(ctx, os.Getenv, selector)
+	case apisv1alpha1.CredentialsSourceFilesystem:
+		return ExtractFs(ctx, afero.NewOsFs(), selector)
+	case apisv1alpha1.CredentialsSourceSecret:
+		return ExtractSecret(ctx, client, selector)
+	case apisv1alpha1.CredentialsSourceNone:
+		return nil, nil
+	}
+
+	return nil, errors.Errorf(errNoHandlerForSourceFmt, source)
+}
+
+// EnvLookupFn looks up an environment variable.
+type EnvLookupFn func(string) string
+
+// ExtractEnv extracts credentials from an environment variable.
+func ExtractEnv(ctx context.Context, e EnvLookupFn, s apisv1alpha1.CommonCredentialSelectors) ([]byte, error) {
+	if s.Env == nil {
+		return nil, errors.New(errExtractEnv)
+	}
+	return []byte(e(s.Env.Name)), nil
+}
+
+// ExtractFs extracts credentials from the filesystem.
+func ExtractFs(ctx context.Context, fs afero.Fs, s apisv1alpha1.CommonCredentialSelectors) ([]byte, error) {
+	if s.Fs == nil {
+		return nil, errors.New(errExtractFs)
+	}
+	return afero.ReadFile(fs, s.Fs.Path)
+}
+
+// ExtractSecret extracts credentials from a Kubernetes secret.
+func ExtractSecret(ctx context.Context, client client.Client, s apisv1alpha1.CommonCredentialSelectors) ([]byte, error) {
+	if s.SecretRef == nil {
+		return nil, errors.New(errExtractSecretKey)
+	}
+	secret := &corev1.Secret{}
+	if err := client.Get(ctx, types.NamespacedName{Namespace: s.SecretRef.Namespace, Name: s.SecretRef.Name}, secret); err != nil {
+		return nil, errors.Wrap(err, errGetCredentialsSecret)
+	}
+	return secret.Data[s.SecretRef.Key], nil
+}
+
+// ExtractServiceAccount extracts credentials from a Kubernetes service account.
+func ExtractServiceAccount(ctx context.Context, client client.Client, s apisv1alpha1.CommonCredentialSelectors) ([]byte, error) {
+	if s.ServiceAccountRef == nil {
+		return nil, errors.New(errExtractServiceAccount)
+	}
+	sa := &corev1.ServiceAccount{}
+	if err := client.Get(ctx, types.NamespacedName{Namespace: s.ServiceAccountRef.Namespace, Name: s.ServiceAccountRef.Name}, sa); err != nil {
+		return nil, errors.Wrap(err, errGetCredentialsSecret)
+	}
+	// Create a TokenRequest for the service account.
+	// The name must be the same as the service account name + "-token-<random suffix>".
+	tr := &authenticationv1.TokenRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: sa.Namespace,
+			Name:      sa.Name + "-token-" + uuid.New().String()[0:5],
+		},
+		Spec: authenticationv1.TokenRequestSpec{
+			Audiences:         []string{"https://kubernetes.default.svc"},
+			ExpirationSeconds: pointer.Int64Ptr(3600), // 1 hour. TODO: make this configurable.
+		},
+	}
+	if err := client.Create(ctx, tr); err != nil {
+		return nil, errors.Wrap(err, errGetCredentialsSecret)
+	}
+	// Return the token.
+	return []byte(tr.Status.Token), nil
+}
+
 type connector struct {
 	kube   client.Client
 	usage  resource.Tracker
 	logger logging.Logger
 
-	kcfgExtractorFn func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
-	gcpExtractorFn  func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
+	kcfgExtractorFn func(ctx context.Context, src apisv1alpha1.CredentialsSource, c client.Client, ccs apisv1alpha1.CommonCredentialSelectors) ([]byte, error)
+	gcpExtractorFn  func(ctx context.Context, src apisv1alpha1.CredentialsSource, c client.Client, ccs apisv1alpha1.CommonCredentialSelectors) ([]byte, error)
 	gcpInjectorFn   func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error
 	newRESTConfigFn func(kubeconfig []byte) (*rest.Config, error)
 	newKubeClientFn func(config *rest.Config) (client.Client, error)
@@ -141,8 +233,19 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	var err error
 
 	switch cd := pc.Spec.Credentials; cd.Source { //nolint:exhaustive
-	case xpv1.CredentialsSourceInjectedIdentity:
+	case apisv1alpha1.CredentialsSourceInjectedIdentity:
 		rc, err = rest.InClusterConfig()
+		if err != nil {
+			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
+		}
+	case apisv1alpha1.CredentialsSourceServiceAccount:
+		token, err := ExtractServiceAccount(ctx, c.kube, cd.CommonCredentialSelectors)
+		if err != nil {
+			return nil, errors.Wrap(err, errGetCreds)
+		}
+		rc, err = rest.InClusterConfig()
+		rc.BearerToken = string(token)
+		rc.BearerTokenFile = ""
 		if err != nil {
 			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
 		}
