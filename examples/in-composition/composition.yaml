@@ -214,6 +214,24 @@ spec:
                 destination:
                   namespace: argocd
                   server: https://kubernetes.default.svc
+          connectionDetails:
+            - apiVersion: v1
+              kind: Service
+              name: guestbook-ui
+              namespace: argocd
+              fieldPath: spec.clusterIP
+              toConnectionSecretKey: host
+            - apiVersion: v1
+              kind: Service
+              name: guestbook-ui
+              namespace: argocd
+              fieldPath: spec.ports[0].port
+              toConnectionSecretKey: port
+          writeConnectionSecretToRef:
+            namespace: crossplane-system
+      connectionDetails:
+        - fromConnectionSecretKey: host
+        - fromConnectionSecretKey: port
       patches:
         - fromFieldPath: metadata.name
           toFieldPath: spec.providerConfigRef.name
@@ -221,3 +239,9 @@ spec:
           toFieldPath: "spec.forProvider.manifest.spec.source.repoURL"
         - fromFieldPath: "spec.path"
           toFieldPath: "spec.forProvider.manifest.spec.source.path"
+        - fromFieldPath: "metadata.uid"
+          toFieldPath: "spec.writeConnectionSecretToRef.name"
+          transforms:
+            - type: string
+              string:
+                fmt: "%s-guestbook"
