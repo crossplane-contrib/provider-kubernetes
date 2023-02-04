@@ -404,7 +404,7 @@ func Test_connector_Connect(t *testing.T) {
 						}
 						return errBoom
 					},
-					MockStatusUpdate: func(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+					MockStatusUpdate: func(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 						return nil
 					},
 				},
@@ -445,7 +445,7 @@ func Test_connector_Connect(t *testing.T) {
 						}
 						return nil
 					},
-					MockStatusUpdate: func(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+					MockStatusUpdate: func(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 						return nil
 					},
 				},
@@ -654,7 +654,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 			args: args{
 				mg: kubernetesObject(func(obj *v1alpha1.Object) {
 					obj.Spec.References = objectReferences()
-					obj.Spec.References[0].PatchesFrom.FieldPath = pointer.StringPtr("nonexistent_field")
+					obj.Spec.References[0].PatchesFrom.FieldPath = pointer.String("nonexistent_field")
 				}),
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
