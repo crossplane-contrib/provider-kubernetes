@@ -30,6 +30,8 @@ spec:
 
 ## Developing locally
 
+See the header of [`go.mod`](./go.mod) for the minimum supported version of Go.
+
 Start a local development environment with Kind where `crossplane` is installed:
 
 ```
