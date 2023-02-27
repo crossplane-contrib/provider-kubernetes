@@ -57,7 +57,7 @@ func restConfigFromAPIConfig(c *api.Config) (*rest.Config, error) {
 		// set of identity credentials (e.g. Google Application Creds).
 		user = &api.AuthInfo{}
 	}
-	return &rest.Config{
+	config := &rest.Config{
 		Host:            cluster.Server,
 		Username:        user.Username,
 		Password:        user.Password,
@@ -77,5 +77,12 @@ func restConfigFromAPIConfig(c *api.Config) (*rest.Config, error) {
 			KeyData:    user.ClientKeyData,
 			CAData:     cluster.CertificateAuthorityData,
 		},
-	}, nil
+	}
+
+	// NOTE(tnthornton): these values match the burst and QPS values in kubectl.
+	// xref: https://github.com/kubernetes/kubernetes/pull/105520
+	config.Burst = 300
+	config.QPS = 50
+
+	return config, nil
 }
