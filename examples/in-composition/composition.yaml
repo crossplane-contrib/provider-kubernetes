@@ -161,19 +161,28 @@ spec:
               namespace: argocd
               fieldPath: status.loadBalancer.ingress[0].ip
               toConnectionSecretKey: argocd-ip
-             # unfortunately following is not possible today due to this limitation in provider-helm:
-             #   https://github.com/crossplane-contrib/provider-helm/blob/1d3a1c8c13a90e36c26191c70599c2e112fa10c6/pkg/controller/release/observe.go#L136
-#            - apiVersion: v1
-#              kind: Secret
-#              name: argocd-initial-admin-secret
-#              namespace: argocd
-#              fieldPath: data.password
-#              toConnectionSecretKey: argocd-password
+            - apiVersion: v1
+              kind: Secret
+              name: argocd-initial-admin-secret
+              namespace: argocd
+              fieldPath: data.password
+              toConnectionSecretKey: argocd-password
+              skipPartOfReleaseCheck: true
+          writeConnectionSecretToRef:
+            namespace: crossplane-system
       patches:
         - fromFieldPath: metadata.name
           toFieldPath: spec.providerConfigRef.name
       connectionDetails:
         - fromConnectionSecretKey: argocd-ip
+        - fromConnectionSecretKey: argocd-password
+      patches:
+        - fromFieldPath: "metadata.uid"
+          toFieldPath: "spec.writeConnectionSecretToRef.name"
+          transforms:
+            - type: string
+              string:
+                fmt: "%s-argocd"
     - base:
         apiVersion: kubernetes.crossplane.io/v1alpha1
         kind: ProviderConfig
@@ -214,6 +223,24 @@ spec:
                 destination:
                   namespace: argocd
                   server: https://kubernetes.default.svc
+          connectionDetails:
+            - apiVersion: v1
+              kind: Service
+              name: guestbook-ui
+              namespace: argocd
+              fieldPath: spec.clusterIP
+              toConnectionSecretKey: host
+            - apiVersion: v1
+              kind: Service
+              name: guestbook-ui
+              namespace: argocd
+              fieldPath: spec.ports[0].port
+              toConnectionSecretKey: port
+          writeConnectionSecretToRef:
+            namespace: crossplane-system
+      connectionDetails:
+        - fromConnectionSecretKey: host
+        - fromConnectionSecretKey: port
       patches:
         - fromFieldPath: metadata.name
           toFieldPath: spec.providerConfigRef.name
@@ -221,3 +248,9 @@ spec:
           toFieldPath: "spec.forProvider.manifest.spec.source.repoURL"
         - fromFieldPath: "spec.path"
           toFieldPath: "spec.forProvider.manifest.spec.source.path"
+        - fromFieldPath: "metadata.uid"
+          toFieldPath: "spec.writeConnectionSecretToRef.name"
+          transforms:
+            - type: string
+              string:
+                fmt: "%s-guestbook"

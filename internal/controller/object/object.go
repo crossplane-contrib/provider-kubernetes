@@ -18,6 +18,9 @@ package object
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
+	"strings"
 
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
@@ -33,6 +36,7 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
+	"github.com/crossplane/crossplane-runtime/pkg/fieldpath"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
@@ -74,6 +78,10 @@ const (
 	errRemoveReferenceFinalizer = "cannot remove finalizer from referenced resource"
 	objFinalizerName            = "finalizer.managedresource.crossplane.io"
 	refFinalizerNamePrefix      = "kubernetes.crossplane.io/referred-by-object-"
+
+	errGetConnectionDetails = "cannot get connection details"
+	errGetValueAtFieldPath  = "cannot get value at fieldPath"
+	errDecodeSecretData     = "cannot decode secret data"
 )
 
 // Setup adds a controller that reconciles Object managed resources.
@@ -233,7 +241,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	if last, err = getLastApplied(cr, observed); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetLastApplied)
 	}
-	return c.handleLastApplied(cr, last, desired)
+	return c.handleLastApplied(ctx, cr, last, desired)
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
@@ -430,7 +438,7 @@ func (c *external) isNotFound(obj *v1alpha1.Object, err error) bool {
 	return isNotFound
 }
 
-func (c *external) handleLastApplied(obj *v1alpha1.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
+func (c *external) handleLastApplied(ctx context.Context, obj *v1alpha1.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	isUpToDate := false
 
 	if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionUpdate) {
@@ -447,9 +455,15 @@ func (c *external) handleLastApplied(obj *v1alpha1.Object, last, desired *unstru
 
 		obj.Status.SetConditions(xpv1.Available())
 
+		cd, err := connectionDetails(ctx, c.client, obj.Spec.ConnectionDetails)
+		if err != nil {
+			return managed.ExternalObservation{}, errors.Wrap(err, errGetConnectionDetails)
+		}
+
 		return managed.ExternalObservation{
-			ResourceExists:   true,
-			ResourceUpToDate: true,
+			ResourceExists:    true,
+			ResourceUpToDate:  true,
+			ConnectionDetails: cd,
 		}, nil
 	}
 
@@ -559,4 +573,45 @@ func (f *objFinalizer) RemoveFinalizer(ctx context.Context, res resource.Object)
 
 	err = f.client.Update(ctx, obj)
 	return errors.Wrap(err, errRemoveFinalizer)
+}
+
+func connectionDetails(ctx context.Context, kube client.Client, connDetails []v1alpha1.ConnectionDetail) (managed.ConnectionDetails, error) {
+	mcd := managed.ConnectionDetails{}
+
+	for _, cd := range connDetails {
+		ro := unstructuredFromObjectRef(cd.ObjectReference)
+		if err := kube.Get(ctx, types.NamespacedName{Name: ro.GetName(), Namespace: ro.GetNamespace()}, &ro); err != nil {
+			return mcd, errors.Wrap(err, errGetObject)
+		}
+
+		paved := fieldpath.Pave(ro.Object)
+		v, err := paved.GetValue(cd.FieldPath)
+		if err != nil {
+			return mcd, errors.Wrap(err, errGetValueAtFieldPath)
+		}
+
+		s := fmt.Sprintf("%v", v)
+		fv := []byte(s)
+		// prevent secret data being encoded twice
+		if cd.Kind == "Secret" && cd.APIVersion == "v1" && strings.HasPrefix(cd.FieldPath, "data") {
+			fv, err = base64.StdEncoding.DecodeString(s)
+			if err != nil {
+				return mcd, errors.Wrap(err, errDecodeSecretData)
+			}
+		}
+
+		mcd[cd.ToConnectionSecretKey] = fv
+	}
+
+	return mcd, nil
+}
+
+func unstructuredFromObjectRef(r v1.ObjectReference) unstructured.Unstructured {
+	u := unstructured.Unstructured{}
+	u.SetAPIVersion(r.APIVersion)
+	u.SetKind(r.Kind)
+	u.SetName(r.Name)
+	u.SetNamespace(r.Namespace)
+
+	return u
 }

@@ -18,6 +18,8 @@ package object
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"testing"
 	"time"
 
@@ -55,9 +57,20 @@ const (
 	testObjectName          = "test-object"
 	testNamespace           = "test-namespace"
 	testReferenceObjectName = "test-ref-object"
+	testSecretName          = "testcreds"
+
+	externalResourceName = "crossplane-system"
 )
 
 var (
+	externalResourceRaw = []byte(fmt.Sprintf(`{
+		"apiVersion": "v1",
+		"kind": "Namespace",
+		"metadata": {
+			"name": %q
+		}
+	}`, externalResourceName))
+
 	errBoom = errors.New("boom")
 )
 
@@ -86,13 +99,7 @@ func kubernetesObject(om ...kubernetesObjectModifier) *v1alpha1.Object {
 				},
 			},
 			ForProvider: v1alpha1.ObjectParameters{
-				Manifest: runtime.RawExtension{Raw: []byte(`{
-				    "apiVersion": "v1",
-				    "kind": "Namespace",
-				    "metadata": {
-				        "name": "crossplane-system"
-				    }
-				}`)},
+				Manifest: runtime.RawExtension{Raw: externalResourceRaw},
 			},
 		},
 		Status: v1alpha1.ObjectStatus{},
@@ -111,7 +118,7 @@ func externalResource(rm ...externalResourceModifier) *unstructured.Unstructured
 			"apiVersion": "v1",
 			"kind":       "Namespace",
 			"metadata": map[string]interface{}{
-				"name": "crossplane-system",
+				"name": externalResourceName,
 			},
 		},
 	}
@@ -131,6 +138,10 @@ func externalResourceWithLastAppliedConfigAnnotation(val interface{}) *unstructu
 		}
 	})
 	return res
+}
+
+func upToDateExternalResource() *unstructured.Unstructured {
+	return externalResourceWithLastAppliedConfigAnnotation(string(externalResourceRaw))
 }
 
 func objectReferences() []v1alpha1.Reference {
@@ -607,7 +618,11 @@ func Test_helmExternal_Observe(t *testing.T) {
 				},
 			},
 			want: want{
-				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true},
+				out: managed.ExternalObservation{
+					ResourceExists:    true,
+					ResourceUpToDate:  true,
+					ConnectionDetails: managed.ConnectionDetails{},
+				},
 				err: nil,
 			},
 		},
@@ -617,17 +632,18 @@ func Test_helmExternal_Observe(t *testing.T) {
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
 						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) =
-								*externalResourceWithLastAppliedConfigAnnotation(
-									`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"crossplane-system"}}`,
-								)
+							*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
 							return nil
 						}),
 					},
 				},
 			},
 			want: want{
-				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true},
+				out: managed.ExternalObservation{
+					ResourceExists:    true,
+					ResourceUpToDate:  true,
+					ConnectionDetails: managed.ConnectionDetails{},
+				},
 				err: nil,
 			},
 		},
@@ -646,7 +662,11 @@ func Test_helmExternal_Observe(t *testing.T) {
 				},
 			},
 			want: want{
-				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true},
+				out: managed.ExternalObservation{
+					ResourceExists:    true,
+					ResourceUpToDate:  true,
+					ConnectionDetails: managed.ConnectionDetails{},
+				},
 				err: nil,
 			},
 		},
@@ -700,7 +720,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 							if key.Name == testReferenceObjectName {
 								*obj.(*unstructured.Unstructured) = *referenceObject()
 								return nil
-							} else if key.Name == "crossplane-system" {
+							} else if key.Name == externalResourceName {
 								return kerrors.NewNotFound(schema.GroupResource{}, "")
 							}
 							return errBoom
@@ -727,7 +747,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 							if key.Name == testReferenceObjectName {
 								*obj.(*unstructured.Unstructured) = *referenceObject()
 								return nil
-							} else if key.Name == "crossplane-system" {
+							} else if key.Name == externalResourceName {
 								*obj.(*unstructured.Unstructured) = *externalResource()
 								return nil
 							}
@@ -753,11 +773,8 @@ func Test_helmExternal_Observe(t *testing.T) {
 							if key.Name == testReferenceObjectName {
 								*obj.(*unstructured.Unstructured) = *referenceObject()
 								return nil
-							} else if key.Name == "crossplane-system" {
-								*obj.(*unstructured.Unstructured) =
-									*externalResourceWithLastAppliedConfigAnnotation(
-										`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"crossplane-system"}}`,
-									)
+							} else if key.Name == externalResourceName {
+								*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
 								return nil
 							}
 							return errBoom
@@ -767,7 +784,11 @@ func Test_helmExternal_Observe(t *testing.T) {
 				},
 			},
 			want: want{
-				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true},
+				out: managed.ExternalObservation{
+					ResourceExists:    true,
+					ResourceUpToDate:  true,
+					ConnectionDetails: managed.ConnectionDetails{},
+				},
 				err: nil,
 			},
 		},
@@ -785,6 +806,87 @@ func Test_helmExternal_Observe(t *testing.T) {
 			want: want{
 				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
 				err: nil,
+			},
+		},
+		"ConnectionDetails": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.Spec.References = objectReferences()
+					obj.Spec.ConnectionDetails = []v1alpha1.ConnectionDetail{
+						{
+							ObjectReference: corev1.ObjectReference{
+								Kind:       "Secret",
+								Namespace:  testNamespace,
+								Name:       testSecretName,
+								APIVersion: "v1",
+								FieldPath:  "data.db-password",
+							},
+							ToConnectionSecretKey: "password",
+						},
+					}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+							switch key.Name {
+							case externalResourceName:
+								*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
+							case testSecretName:
+								*obj.(*unstructured.Unstructured) = unstructured.Unstructured{
+									Object: map[string]interface{}{
+										"data": map[string]interface{}{
+											"db-password": "MTIzNDU=",
+										},
+									},
+								}
+							}
+							return nil
+						},
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{
+					ResourceExists:    true,
+					ResourceUpToDate:  true,
+					ConnectionDetails: managed.ConnectionDetails{"password": []byte("12345")},
+				},
+				err: nil,
+			},
+		},
+		"FailedToGetConnectionDetails": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.Spec.References = objectReferences()
+					obj.Spec.ConnectionDetails = []v1alpha1.ConnectionDetail{
+						{
+							ObjectReference: corev1.ObjectReference{
+								Kind:       "Secret",
+								Namespace:  testNamespace,
+								Name:       testSecretName,
+								APIVersion: "v1",
+								FieldPath:  "data.db-password",
+							},
+							ToConnectionSecretKey: "password",
+						},
+					}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+							switch key.Name {
+							case externalResourceName:
+								*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
+							case testSecretName:
+								return errBoom
+							}
+							return nil
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errors.Wrap(errBoom, errGetObject), errGetConnectionDetails),
 			},
 		},
 	}
@@ -1425,6 +1527,118 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				if diff := cmp.Diff(tc.want.finalizers, tc.args.mg.GetFinalizers(), sort); diff != "" {
 					t.Errorf("managed resource finalizers: -want, +got: %s", diff)
 				}
+			}
+		})
+	}
+}
+
+func Test_connectionDetails(t *testing.T) {
+	mockClient := func(secretData map[string]interface{}, err error) *test.MockClient {
+		return &test.MockClient{
+			MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+				if o, ok := obj.(*unstructured.Unstructured); o.GetKind() == "Secret" && ok && key.Name == testSecretName && key.Namespace == testNamespace {
+					*obj.(*unstructured.Unstructured) = unstructured.Unstructured{
+						Object: map[string]interface{}{
+							"data": secretData,
+						},
+					}
+				}
+				return err
+			},
+		}
+	}
+
+	connDetail := v1alpha1.ConnectionDetail{
+		ObjectReference: corev1.ObjectReference{
+			Kind:       "Secret",
+			Namespace:  testNamespace,
+			Name:       testSecretName,
+			APIVersion: "v1",
+			FieldPath:  "data.db-password",
+		},
+		ToConnectionSecretKey: "password",
+	}
+
+	type args struct {
+		kube        client.Client
+		connDetails []v1alpha1.ConnectionDetail
+	}
+	type want struct {
+		out managed.ConnectionDetails
+		err error
+	}
+	cases := map[string]struct {
+		args
+		want
+	}{
+		"Fail_ObjectNotExisting": {
+			args: args{
+				kube: mockClient(
+					map[string]interface{}{},
+					kerrors.NewNotFound(schema.GroupResource{Group: "", Resource: "secrets"}, testSecretName),
+				),
+				connDetails: []v1alpha1.ConnectionDetail{connDetail},
+			},
+			want: want{
+				out: managed.ConnectionDetails{},
+				err: errors.Wrap(kerrors.NewNotFound(schema.GroupResource{Group: "", Resource: "secrets"}, testSecretName), errGetObject),
+			},
+		},
+		"Fail_FieldPathNotExisting": {
+			args: args{
+				kube: mockClient(
+					map[string]interface{}{
+						"non-db-password": "MTIzNDU=",
+					},
+					nil,
+				),
+				connDetails: []v1alpha1.ConnectionDetail{connDetail},
+			},
+			want: want{
+				out: managed.ConnectionDetails{},
+				err: errors.Wrap(errors.Errorf("data.db-password: no such field"), errGetValueAtFieldPath),
+			},
+		},
+		"Fail_InvalidEncoding": {
+			args: args{
+				kube: mockClient(
+					map[string]interface{}{
+						"db-password": "_messed_up_encoding",
+					},
+					nil,
+				),
+				connDetails: []v1alpha1.ConnectionDetail{connDetail},
+			},
+			want: want{
+				out: managed.ConnectionDetails{},
+				err: errors.Wrap(base64.CorruptInputError(0), errDecodeSecretData),
+			},
+		},
+		"Success": {
+			args: args{
+				kube: mockClient(
+					map[string]interface{}{
+						"db-password": "MTIzNDU=",
+					},
+					nil,
+				),
+				connDetails: []v1alpha1.ConnectionDetail{connDetail},
+			},
+			want: want{
+				out: managed.ConnectionDetails{
+					"password": []byte("12345"),
+				},
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, gotErr := connectionDetails(context.Background(), tc.args.kube, tc.args.connDetails)
+			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
+				t.Fatalf("connectionDetails(...): -want error, +got error: %s", diff)
+			}
+			if diff := cmp.Diff(tc.want.out, got); diff != "" {
+				t.Errorf("connectionDetails(...): -want result, +got result: %s", diff)
 			}
 		})
 	}

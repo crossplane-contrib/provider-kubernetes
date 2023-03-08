@@ -17,10 +17,12 @@ limitations under the License.
 package v1alpha1
 
 import (
-	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
-	"github.com/crossplane/crossplane-runtime/pkg/fieldpath"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/pkg/fieldpath"
 )
 
 // ObjectAction defines actions applicable to Object
@@ -116,10 +118,17 @@ type ObjectObservation struct {
 // A ObjectSpec defines the desired state of a Object.
 type ObjectSpec struct {
 	xpv1.ResourceSpec `json:",inline"`
+	ConnectionDetails []ConnectionDetail `json:"connectionDetails,omitempty"`
+	ForProvider       ObjectParameters   `json:"forProvider"`
 	// +kubebuilder:default=Default
 	ManagementPolicy `json:"managementPolicy,omitempty"`
-	References       []Reference      `json:"references,omitempty"`
-	ForProvider      ObjectParameters `json:"forProvider"`
+	References       []Reference `json:"references,omitempty"`
+}
+
+// ConnectionDetail represents an entry in the connection secret for an Object
+type ConnectionDetail struct {
+	v1.ObjectReference    `json:",inline"`
+	ToConnectionSecretKey string `json:"toConnectionSecretKey,omitempty"`
 }
 
 // A ObjectStatus represents the observed state of a Object.
