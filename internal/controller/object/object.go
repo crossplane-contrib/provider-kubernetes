@@ -110,6 +110,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
+		WithEventFilter(resource.DesiredStateChanged()).
 		WithOptions(o.ForControllerRuntime()).
 		For(&v1alpha1.Object{}).
 		Complete(ratelimiter.NewReconciler(name, r, o.GlobalRateLimiter))
