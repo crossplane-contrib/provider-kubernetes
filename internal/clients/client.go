@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
 // NewRESTConfig returns a rest config given a secret with connection information.
@@ -33,7 +34,14 @@ func NewRESTConfig(kubeconfig []byte) (*rest.Config, error) {
 // NewKubeClient returns a kubernetes client given a secret with connection
 // information.
 func NewKubeClient(config *rest.Config) (client.Client, error) {
-	kc, err := client.New(config, client.Options{})
+	// in 0.15 this will be default
+	mapper, err := apiutil.NewDynamicRESTMapper(config, apiutil.WithExperimentalLazyMapper)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot create dynamic REST mapper for Kubernetes client")
+	}
+	kc, err := client.New(config, client.Options{
+		Mapper: mapper,
+	})
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot create Kubernetes client")
 	}
