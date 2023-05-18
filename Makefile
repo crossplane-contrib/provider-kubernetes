@@ -35,8 +35,9 @@ GOLANGCILINT_VERSION = 1.51.2
 
 # ====================================================================================
 # Setup Kubernetes tools
-KIND_VERSION = v0.11.1
-UP_VERSION = v0.13.0
+KIND_VERSION = v0.18.0
+UP_VERSION = v0.17.0
+UPTEST_VERSION = v0.5.0
 UP_CHANNEL = stable
 USE_HELM3 = true
 -include build/makelib/k8s_tools.mk
@@ -74,9 +75,6 @@ XPKGS = provider-kubernetes
 # NOTE(hasheddan): we force image building to happen prior to xpkg build so that
 # we ensure image is present in daemon.
 xpkg.build.provider-kubernetes: do.build.images
-# ====================================================================================
-# Setup Local Dev
--include build/makelib/local.mk
 
 # Generate a coverage report for cobertura applying exclusions on
 # - generated file
@@ -85,17 +83,26 @@ cobertura:
 		grep -v zz_generated.deepcopy | \
 		$(GOCOVER_COBERTURA) > $(GO_TEST_OUTPUT)/cobertura-coverage.xml
 
-# integration tests
-e2e.run: test-integration
+# ====================================================================================
+# End to End Testing
+CROSSPLANE_NAMESPACE = upbound-system
+-include build/makelib/local.xpkg.mk
+-include build/makelib/controlplane.mk
 
-local-dev: local.up local.deploy.crossplane
+UPTEST_EXAMPLE_LIST ?= "examples/object/object.yaml"
+uptest: $(UPTEST) $(KUBECTL) $(KUTTL)
+	@$(INFO) running automated tests
+	@KUBECTL=$(KUBECTL) KUTTL=$(KUTTL) $(UPTEST) e2e "$(UPTEST_EXAMPLE_LIST)" --setup-script=cluster/test/setup.sh || $(FAIL)
+	@$(OK) running automated tests
 
-# Run integration tests.
-test-integration: $(KIND) $(KUBECTL) $(HELM3)
-	@$(INFO) running integration tests using kind $(KIND_VERSION)
-	@$(ROOT_DIR)/cluster/integration/integration_tests.sh || $(FAIL)
-	@$(OK) integration tests passed
+local-dev: controlplane.up
+local-deploy: build controlplane.up local.xpkg.deploy.provider.$(PROJECT_NAME)
+	@$(INFO) running locally built provider
+	@$(KUBECTL) wait provider.pkg $(PROJECT_NAME) --for condition=Healthy --timeout 5m
+	@$(KUBECTL) -n upbound-system wait --for=condition=Available deployment --all --timeout=5m
+	@$(OK) running locally built provider
 
+e2e: local-deploy uptest
 # Update the submodules, such as the common build scripts.
 submodules:
 	@git submodule sync
