@@ -117,7 +117,7 @@ type ObjectObservation struct {
 
 // A ObjectSpec defines the desired state of a Object.
 type ObjectSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
+	ResourceSpec      `json:",inline"`
 	ConnectionDetails []ConnectionDetail `json:"connectionDetails,omitempty"`
 	ForProvider       ObjectParameters   `json:"forProvider"`
 	// +kubebuilder:default=Default
