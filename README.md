@@ -65,7 +65,7 @@ sudo kubectl proxy --port=8081
 
       ```
       KUBECONFIG=$(kind get kubeconfig --name local-dev | sed -e 's|server:\s*.*$|server: http://localhost:8081|g')
-      kubectl -n crossplane-system create secret generic cluster-config --from-literal=kubeconfig="${KUBECONFIG}" 
+      kubectl -n crossplane-system create secret generic cluster-config --from-literal=kubeconfig="${KUBECONFIG}"
       kubectl apply -f examples/provider/config.yaml
       ```
 
