@@ -293,6 +293,20 @@ spec:
                 required:
                 - name
                 type: object
+              readiness:
+                description: Readiness defines how the object's readiness condition
+                  should be computed, if not specified it will be considered ready
+                  as soon as the underlying external resource is considered up-to-date.
+                properties:
+                  policy:
+                    default: SuccessfulCreate
+                    description: Policy defines how the Object's readiness condition
+                      should be computed.
+                    enum:
+                    - SuccessfulCreate
+                    - DeriveFromObject
+                    type: string
+                type: object
               references:
                 items:
                   description: Reference refers to an Object or arbitrary Kubernetes
