@@ -39,22 +39,42 @@ make
 make local-dev
 ```
 
-Run controller against the cluster:
+Now you can either run the controller locally or in-cluster.
+
+### Running locally
+
+Run controller locally against the cluster:
 
 ```
 make run
 ```
 
-Since the controller is running outside the Kind cluster, you need to make api server accessible (on a separate terminal):
+Since the controller is running outside the Kind cluster, you need to make the
+API server accessible to the controller. You can do this by running a proxy:
 
 ```
+# on a separate terminal
 sudo kubectl proxy --port=8081
 ```
 
-### Testing in Local Cluster
+See [below](#required-configuration) for how to properly setup the RBAC for the
+locally running controller.
+
+### Running in-cluster
+
+Run controller in-cluster:
+
+```
+make local-deploy
+```
+
+See [below](#required-configuration) for how to properly setup the RBAC for the
+locally running controller.
+
+### Required configuration
 
 1. Prepare provider config for the local cluster:
-  1. If provider kubernetes running in the cluster (e.g. provider installed with crossplane):
+  1. If provider kubernetes running in the cluster (e.g. provider installed with crossplane or using `make local-deploy`):
 
       ```
       SA=$(kubectl -n crossplane-system get sa -o name | grep provider-kubernetes | sed -e 's|serviceaccount\/|crossplane-system:|g')
@@ -65,7 +85,7 @@ sudo kubectl proxy --port=8081
 
       ```
       KUBECONFIG=$(kind get kubeconfig --name local-dev | sed -e 's|server:\s*.*$|server: http://localhost:8081|g')
-      kubectl -n crossplane-system create secret generic cluster-config --from-literal=kubeconfig="${KUBECONFIG}" 
+      kubectl -n crossplane-system create secret generic cluster-config --from-literal=kubeconfig="${KUBECONFIG}"
       kubectl apply -f examples/provider/config.yaml
       ```
 
@@ -77,6 +97,8 @@ sudo kubectl proxy --port=8081
 
 ### Cleanup
 
+To delete the local kind cluster:
+
 ```
-make local.down
+make controlplane.down
 ```
