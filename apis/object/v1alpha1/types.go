@@ -123,6 +123,30 @@ type ObjectSpec struct {
 	// +kubebuilder:default=Default
 	ManagementPolicy `json:"managementPolicy,omitempty"`
 	References       []Reference `json:"references,omitempty"`
+	Readiness        Readiness   `json:"readiness,omitempty"`
+}
+
+// ReadinessPolicy defines how the Object's readiness condition should be computed.
+type ReadinessPolicy string
+
+const (
+	// ReadinessPolicySuccessfulCreate means the object is marked as ready when the
+	// underlying external resource is successfully created.
+	ReadinessPolicySuccessfulCreate ReadinessPolicy = "SuccessfulCreate"
+	// ReadinessPolicyDeriveFromObject means the object is marked as ready if and only if the underlying
+	// external resource is considered ready.
+	ReadinessPolicyDeriveFromObject ReadinessPolicy = "DeriveFromObject"
+)
+
+// Readiness defines how the object's readiness condition should be computed,
+// if not specified it will be considered ready as soon as the underlying external
+// resource is considered up-to-date.
+type Readiness struct {
+	// Policy defines how the Object's readiness condition should be computed.
+	// +optional
+	// +kubebuilder:validation:Enum=SuccessfulCreate;DeriveFromObject
+	// +kubebuilder:default=SuccessfulCreate
+	Policy ReadinessPolicy `json:"policy,omitempty"`
 }
 
 // ConnectionDetail represents an entry in the connection secret for an Object

@@ -233,7 +233,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObject)
 	}
 
-	if err = setObserved(cr, observed); err != nil {
+	if err = c.setObserved(cr, observed); err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
@@ -270,7 +270,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateObject)
 	}
 
-	return managed.ExternalCreation{}, setObserved(cr, obj)
+	return managed.ExternalCreation{}, c.setObserved(cr, obj)
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
@@ -299,7 +299,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.Wrap(err, errApplyObject)
 	}
 
-	return managed.ExternalUpdate{}, setObserved(cr, obj)
+	return managed.ExternalUpdate{}, c.setObserved(cr, obj)
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
@@ -353,10 +353,40 @@ func getLastApplied(obj *v1alpha1.Object, observed *unstructured.Unstructured) (
 	return last, nil
 }
 
-func setObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
+func (c *external) setObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
 	var err error
 	if obj.Status.AtProvider.Manifest.Raw, err = observed.MarshalJSON(); err != nil {
 		return errors.Wrap(err, errFailedToMarshalExisting)
+	}
+
+	if err := c.updateConditionFromObserved(obj, observed); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *external) updateConditionFromObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
+	switch obj.Spec.Readiness.Policy {
+	case v1alpha1.ReadinessPolicyDeriveFromObject:
+		conditioned := xpv1.ConditionedStatus{}
+		err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
+		if err != nil {
+			c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
+			obj.SetConditions(xpv1.Unavailable())
+			return nil
+		}
+		if status := conditioned.GetCondition(xpv1.TypeReady).Status; status != v1.ConditionTrue {
+			c.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", observed)
+			obj.SetConditions(xpv1.Unavailable())
+			return nil
+		}
+		obj.SetConditions(xpv1.Available())
+	case v1alpha1.ReadinessPolicySuccessfulCreate, "":
+		// do nothing, will be handled by c.handleLastApplied method
+		// "" should never happen, but just in case we will treat it as SuccessfulCreate for backward compatibility
+	default:
+		// should never happen
+		return errors.Errorf("unknown readiness policy %q", obj.Spec.Readiness.Policy)
 	}
 	return nil
 }
@@ -453,7 +483,9 @@ func (c *external) handleLastApplied(ctx context.Context, obj *v1alpha1.Object, 
 	if isUpToDate {
 		c.logger.Debug("Up to date!")
 
-		obj.Status.SetConditions(xpv1.Available())
+		if p := obj.Spec.Readiness.Policy; p == v1alpha1.ReadinessPolicySuccessfulCreate || p == "" {
+			obj.Status.SetConditions(xpv1.Available())
+		}
 
 		cd, err := connectionDetails(ctx, c.client, obj.Spec.ConnectionDetails)
 		if err != nil {

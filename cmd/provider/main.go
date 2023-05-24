@@ -21,21 +21,21 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/crossplane/crossplane-runtime/pkg/controller"
-	"github.com/crossplane/crossplane-runtime/pkg/feature"
 	"go.uber.org/zap/zapcore"
-
 	"gopkg.in/alecthomas/kingpin.v2"
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	"github.com/crossplane/crossplane-runtime/pkg/controller"
+	"github.com/crossplane/crossplane-runtime/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis"
 	object "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
+
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
 func main() {
