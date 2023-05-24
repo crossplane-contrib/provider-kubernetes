@@ -1643,3 +1643,187 @@ func Test_connectionDetails(t *testing.T) {
 		})
 	}
 }
+
+func Test_updateConditionFromObserved(t *testing.T) {
+	type args struct {
+		obj      *v1alpha1.Object
+		observed *unstructured.Unstructured
+	}
+	type want struct {
+		err        error
+		conditions []xpv1.Condition
+	}
+	cases := map[string]struct {
+		args
+		want
+	}{
+		"NoopIfNoPolicyDefined": {
+			args: args{
+				obj: &v1alpha1.Object{},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": xpv1.ConditionedStatus{},
+					},
+				},
+			},
+			want: want{
+				err:        nil,
+				conditions: nil,
+			},
+		},
+		"NoopIfSuccessfulCreatePolicyDefined": {
+			args: args{
+				obj: &v1alpha1.Object{
+					Spec: v1alpha1.ObjectSpec{
+						Readiness: v1alpha1.Readiness{
+							Policy: v1alpha1.ReadinessPolicySuccessfulCreate,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": xpv1.ConditionedStatus{},
+					},
+				},
+			},
+			want: want{
+				err:        nil,
+				conditions: nil,
+			},
+		},
+		"UnavailableIfDeriveFromObjectAndNotReady": {
+			args: args{
+				obj: &v1alpha1.Object{
+					Spec: v1alpha1.ObjectSpec{
+						Readiness: v1alpha1.Readiness{
+							Policy: v1alpha1.ReadinessPolicyDeriveFromObject,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": xpv1.ConditionedStatus{
+							Conditions: []xpv1.Condition{
+								{
+									Type:   xpv1.TypeReady,
+									Status: corev1.ConditionFalse,
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				conditions: []xpv1.Condition{
+					{
+						Type:   xpv1.TypeReady,
+						Status: corev1.ConditionFalse,
+						Reason: xpv1.ReasonUnavailable,
+					},
+				},
+			},
+		},
+		"UnavailableIfDerivedFromObjectAndNoCondition": {
+			args: args{
+				obj: &v1alpha1.Object{
+					Spec: v1alpha1.ObjectSpec{
+						Readiness: v1alpha1.Readiness{
+							Policy: v1alpha1.ReadinessPolicyDeriveFromObject,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": xpv1.ConditionedStatus{},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				conditions: []xpv1.Condition{
+					{
+						Type:   xpv1.TypeReady,
+						Status: corev1.ConditionFalse,
+						Reason: xpv1.ReasonUnavailable,
+					},
+				},
+			},
+		},
+		"AvailableIfDeriveFromObjectAndReady": {
+			args: args{
+				obj: &v1alpha1.Object{
+					Spec: v1alpha1.ObjectSpec{
+						Readiness: v1alpha1.Readiness{
+							Policy: v1alpha1.ReadinessPolicyDeriveFromObject,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": xpv1.ConditionedStatus{
+							Conditions: []xpv1.Condition{
+								{
+									Type:   xpv1.TypeReady,
+									Status: corev1.ConditionTrue,
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				conditions: []xpv1.Condition{
+					{
+						Type:   xpv1.TypeReady,
+						Status: corev1.ConditionTrue,
+						Reason: xpv1.ReasonAvailable,
+					},
+				},
+			},
+		},
+		"UnavailableIfDerivedFromObjectAndCantParse": {
+			args: args{
+				obj: &v1alpha1.Object{
+					Spec: v1alpha1.ObjectSpec{
+						Readiness: v1alpha1.Readiness{
+							Policy: v1alpha1.ReadinessPolicyDeriveFromObject,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": "not a conditioned status",
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				conditions: []xpv1.Condition{
+					{
+						Type:   xpv1.TypeReady,
+						Status: corev1.ConditionFalse,
+						Reason: xpv1.ReasonUnavailable,
+					},
+				},
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := &external{
+				logger: logging.NewNopLogger(),
+			}
+			gotErr := e.updateConditionFromObserved(tc.args.obj, tc.args.observed)
+			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
+				t.Fatalf("updateConditionFromObserved(...): -want error, +got error: %s", diff)
+			}
+			if diff := cmp.Diff(tc.want.conditions, tc.args.obj.Status.Conditions, cmpopts.SortSlices(func(a, b xpv1.Condition) bool {
+				return a.Type < b.Type
+			}), cmpopts.IgnoreFields(xpv1.Condition{}, "LastTransitionTime")); diff != "" {
+				t.Errorf("updateConditionFromObserved(...): -want result, +got result: %s", diff)
+			}
+		})
+	}
+}
