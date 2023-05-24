@@ -97,6 +97,8 @@ locally running controller.
 
 ### Cleanup
 
+To delete the local kind cluster:
+
 ```
-make local.down
+make controlplane.down
 ```
