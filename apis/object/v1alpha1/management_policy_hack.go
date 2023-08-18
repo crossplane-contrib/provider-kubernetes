@@ -68,14 +68,14 @@ type ResourceSpec struct {
 	DeletionPolicy xpv1.DeletionPolicy `json:"deletionPolicy,omitempty"`
 }
 
-// GetManagementPolicy of this Object.
-func (mg *Object) GetManagementPolicy() xpv1.ManagementPolicy {
+// GetManagementPolicies of this Object.
+func (mg *Object) GetManagementPolicies() xpv1.ManagementPolicies {
 	// Note(turkenh): Crossplane runtime reconciler should leave handling of
-	// ManagementPolicy to the provider controller. This is a temporary hack
+	// ManagementPolicies to the provider controller. This is a temporary hack
 	// until we remove the ManagementPolicy field from the Provider Kubernetes
 	// Object in favor of the one in the ResourceSpec.
-	return xpv1.ManagementFullControl
+	return []xpv1.ManagementAction{xpv1.ManagementActionAll}
 }
 
-// SetManagementPolicy of this Object.
-func (mg *Object) SetManagementPolicy(r xpv1.ManagementPolicy) {}
+// SetManagementPolicies of this Object.
+func (mg *Object) SetManagementPolicies(r xpv1.ManagementPolicies) {}
