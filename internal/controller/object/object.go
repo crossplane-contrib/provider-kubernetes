@@ -296,7 +296,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	})
 
 	if err := c.client.Apply(ctx, obj); err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, errApplyObject)
+		return managed.ExternalUpdate{}, errors.Wrap(CleanErr(err), errApplyObject)
 	}
 
 	return managed.ExternalUpdate{}, c.setObserved(cr, obj)
