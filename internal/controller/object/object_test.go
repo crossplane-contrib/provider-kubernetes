@@ -225,7 +225,7 @@ func providerConfig(pm ...providerConfigModifier) *kubernetesv1alpha1.ProviderCo
 	return pc
 }
 
-func Test_connector_Connect(t *testing.T) {
+func TestConnectorConnect(t *testing.T) {
 	secret := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Namespace: providerSecretNamespace, Name: providerSecretName},
 		Data:       map[string][]byte{providerSecretKey: []byte(providerSecretData)},
@@ -503,7 +503,7 @@ func Test_connector_Connect(t *testing.T) {
 	}
 }
 
-func Test_helmExternal_Observe(t *testing.T) {
+func TestExternalObserve(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -909,7 +909,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 	}
 }
 
-func Test_helmExternal_Create(t *testing.T) {
+func TestExternalCreate(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -1028,7 +1028,7 @@ func Test_helmExternal_Create(t *testing.T) {
 	}
 }
 
-func Test_helmExternal_Update(t *testing.T) {
+func TestExternalUpdate(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -1135,7 +1135,7 @@ func Test_helmExternal_Update(t *testing.T) {
 	}
 }
 
-func Test_helmExternal_Delete(t *testing.T) {
+func TestExternalDelete(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -1238,7 +1238,7 @@ func Test_helmExternal_Delete(t *testing.T) {
 	}
 }
 
-func Test_objFinalizer_AddFinalizer(t *testing.T) {
+func TestFinalizerAddFinalizer(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -1371,7 +1371,7 @@ func Test_objFinalizer_AddFinalizer(t *testing.T) {
 	}
 }
 
-func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
+func TestFinalizerRemoveFinalizer(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -1532,7 +1532,7 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 	}
 }
 
-func Test_connectionDetails(t *testing.T) {
+func TestConnectionDetails(t *testing.T) {
 	mockClient := func(secretData map[string]interface{}, err error) *test.MockClient {
 		return &test.MockClient{
 			MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
@@ -1644,7 +1644,7 @@ func Test_connectionDetails(t *testing.T) {
 	}
 }
 
-func Test_updateConditionFromObserved(t *testing.T) {
+func TestUpdateConditionFromObserved(t *testing.T) {
 	type args struct {
 		obj      *v1alpha1.Object
 		observed *unstructured.Unstructured

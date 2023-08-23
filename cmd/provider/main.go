@@ -34,6 +34,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis"
 	object "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
@@ -46,6 +47,8 @@ func main() {
 		pollInterval     = app.Flag("poll", "Poll interval controls how often an individual resource should be checked for drift.").Default("1m").Duration()
 		leaderElection   = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
 		maxReconcileRate = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("10").Int()
+
+		enableServerSideApply = app.Flag("enable-server-side-apply", "Enable server side apply to sync object manifests to k8s API.").Default("false").Envar("ENABLE_SERVER_SIDE_APPLY").Bool()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
@@ -86,6 +89,11 @@ func main() {
 		PollInterval:            *pollInterval,
 		GlobalRateLimiter:       ratelimiter.NewGlobal(*maxReconcileRate),
 		Features:                &feature.Flags{},
+	}
+
+	if *enableServerSideApply {
+		o.Features.Enable(features.EnableAlphaServerSideApply)
+		log.Info("Alpha feature enabled", "flag", features.EnableAlphaServerSideApply)
 	}
 
 	kingpin.FatalIfError(object.Setup(mgr, o), "Cannot setup controller")
