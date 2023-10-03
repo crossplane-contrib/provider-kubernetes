@@ -1,0 +1,25 @@
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: sample-service
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        # name in manifest is optional and defaults to Object name
+        # name: some-other-name
+        namespace: default
+        labels:
+          example: "true"
+      spec:
+        #type: LoadBalancer
+        selector:
+          app.kubernetes.io/name: MyApp
+        ports:
+          - protocol: TCP
+            port: 80
+            targetPort: 9376
+  providerConfigRef:
+    name: kubernetes-provider

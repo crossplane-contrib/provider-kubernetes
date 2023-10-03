@@ -29,6 +29,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
+	applymetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,6 +49,8 @@ import (
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/gke"
+	oresource "github.com/crossplane-contrib/provider-kubernetes/internal/controller/object/resource"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 )
 
 const (
@@ -58,6 +62,8 @@ const (
 	errApplyObject  = "cannot apply object"
 	errDeleteObject = "cannot delete object"
 
+	errCreateDiscoveryClient            = "cannot create discovery client"
+	errCreateApplyExtractor             = "cannot create new unstructured applyExtractor"
 	errNotKubernetesObject              = "managed resource is not an Object custom resource"
 	errNewKubernetesClient              = "cannot create new Kubernetes client"
 	errFailedToCreateRestConfig         = "cannot create new REST config using provider secret"
@@ -88,20 +94,34 @@ const (
 func Setup(mgr ctrl.Manager, o controller.Options) error {
 	name := managed.ControllerName(v1alpha1.ObjectGroupKind)
 
+	conn := &connector{
+		logger:          o.Logger,
+		kube:            mgr.GetClient(),
+		usage:           resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
+		kcfgExtractorFn: resource.CommonCredentialExtractor,
+		gcpExtractorFn:  resource.CommonCredentialExtractor,
+		gcpInjectorFn:   gke.WrapRESTConfig,
+		newRESTConfigFn: clients.NewRESTConfig,
+		newKubeClientFn: clients.NewKubeClient,
+	}
+
+	if o.Features.Enabled(features.EnableAlphaServerSideApply) {
+		dc, err := discovery.NewDiscoveryClientForConfig(mgr.GetConfig())
+		if err != nil {
+			return errors.Wrap(err, errCreateDiscoveryClient)
+		}
+		applyExtractor, err := applymetav1.NewUnstructuredExtractor(dc)
+		if err != nil {
+			return errors.Wrap(err, errCreateApplyExtractor)
+		}
+		conn.applyExtractor = applyExtractor
+	}
+
 	cps := []managed.ConnectionPublisher{managed.NewAPISecretPublisher(mgr.GetClient(), mgr.GetScheme())}
 
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.ObjectGroupVersionKind),
-		managed.WithExternalConnecter(&connector{
-			logger:          o.Logger,
-			kube:            mgr.GetClient(),
-			usage:           resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
-			kcfgExtractorFn: resource.CommonCredentialExtractor,
-			gcpExtractorFn:  resource.CommonCredentialExtractor,
-			gcpInjectorFn:   gke.WrapRESTConfig,
-			newRESTConfigFn: clients.NewRESTConfig,
-			newKubeClientFn: clients.NewKubeClient,
-		}),
+		managed.WithExternalConnecter(conn),
 		managed.WithFinalizer(&objFinalizer{client: mgr.GetClient()}),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
@@ -119,6 +139,8 @@ type connector struct {
 	kube   client.Client
 	usage  resource.Tracker
 	logger logging.Logger
+
+	applyExtractor applymetav1.UnstructuredExtractor
 
 	kcfgExtractorFn func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
 	gcpExtractorFn  func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
@@ -184,32 +206,40 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errNewKubernetesClient)
 	}
 
+	ca := resource.ClientApplicator{
+		Client:     k,
+		Applicator: resource.NewAPIPatchingApplicator(k),
+	}
+	// If applyExtractor is not nil, we will use server-side apply to apply the
+	// changes to the object.
+	if c.applyExtractor != nil {
+		ca.Applicator = oresource.NewAPIServerSideApplicator(k, "crossplane-provider-kubernetes")
+	}
 	return &external{
-		logger: c.logger,
-		client: resource.ClientApplicator{
-			Client:     k,
-			Applicator: resource.NewAPIPatchingApplicator(k),
-		},
-		localClient: c.kube,
+		logger:         c.logger,
+		client:         ca,
+		applyExtractor: c.applyExtractor,
+		localClient:    c.kube,
 	}, nil
 }
 
 type external struct {
-	logger logging.Logger
-	client resource.ClientApplicator
+	logger         logging.Logger
+	client         resource.ClientApplicator
+	applyExtractor applymetav1.UnstructuredExtractor
 	// localClient is specifically used to connect to local cluster
 	localClient client.Client
 }
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
+func (e *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.Object)
 	if !ok {
 		return managed.ExternalObservation{}, errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Observing", "resource", cr)
+	e.logger.Debug("Observing", "resource", cr)
 
-	if err := c.resolveReferencies(ctx, cr); err != nil {
+	if err := e.resolveReferencies(ctx, cr); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errResolveResourceReferences)
 	}
 
@@ -220,12 +250,12 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	observed := desired.DeepCopy()
 
-	err = c.client.Get(ctx, types.NamespacedName{
+	err = e.client.Get(ctx, types.NamespacedName{
 		Namespace: observed.GetNamespace(),
 		Name:      observed.GetName(),
 	}, observed)
 
-	if c.isNotFound(cr, err) {
+	if e.isNotFound(cr, err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
@@ -233,27 +263,33 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObject)
 	}
 
-	if err = c.setObserved(cr, observed); err != nil {
+	if err = e.setObserved(cr, observed); err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
-	var last *unstructured.Unstructured
-	if last, err = getLastApplied(cr, observed); err != nil {
+	// observation contains the extracted state of the observed object that
+	// should be compared with the desired state of the object manifest to
+	// decide whether the object is up-to-date or not.
+	// If serverSideApply is enabled, we will extract the state from the
+	// observed object, otherwise we will extract the state from the last
+	// applied annotation.
+	var observation *unstructured.Unstructured
+	if observation, err = e.getObservation(cr, observed); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetLastApplied)
 	}
-	return c.handleLastApplied(ctx, cr, last, desired)
+	return e.handleObservation(ctx, cr, observation, desired)
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
+func (e *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
 	cr, ok := mg.(*v1alpha1.Object)
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Creating", "resource", cr)
+	e.logger.Debug("Creating", "resource", cr)
 
 	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionCreate) {
-		c.logger.Debug("External resource should not be created by provider, skip creating.")
+		e.logger.Debug("External resource should not be created by provider, skip creating.")
 		return managed.ExternalCreation{}, nil
 	}
 
@@ -262,27 +298,34 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, err
 	}
 
+	if e.applyExtractor != nil {
+		if err = e.client.Apply(ctx, obj); err != nil {
+			return managed.ExternalCreation{}, errors.Wrap(CleanErr(err), errApplyObject)
+		}
+		return managed.ExternalCreation{}, e.setObserved(cr, obj)
+	}
+
 	meta.AddAnnotations(obj, map[string]string{
 		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
 
-	if err := c.client.Create(ctx, obj); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateObject)
+	if err = e.client.Create(ctx, obj); err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(CleanErr(err), errCreateObject)
 	}
 
-	return managed.ExternalCreation{}, c.setObserved(cr, obj)
+	return managed.ExternalCreation{}, e.setObserved(cr, obj)
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
+func (e *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
 	cr, ok := mg.(*v1alpha1.Object)
 	if !ok {
 		return managed.ExternalUpdate{}, errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Updating", "resource", cr)
+	e.logger.Debug("Updating", "resource", cr)
 
 	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionUpdate) {
-		c.logger.Debug("External resource should not be updated by provider, skip updating.")
+		e.logger.Debug("External resource should not be updated by provider, skip updating.")
 		return managed.ExternalUpdate{}, nil
 	}
 
@@ -291,27 +334,29 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, err
 	}
 
-	meta.AddAnnotations(obj, map[string]string{
-		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
-	})
+	if e.applyExtractor == nil {
+		meta.AddAnnotations(obj, map[string]string{
+			v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
+		})
+	}
 
-	if err := c.client.Apply(ctx, obj); err != nil {
+	if err = e.client.Apply(ctx, obj); err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(CleanErr(err), errApplyObject)
 	}
 
-	return managed.ExternalUpdate{}, c.setObserved(cr, obj)
+	return managed.ExternalUpdate{}, e.setObserved(cr, obj)
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
+func (e *external) Delete(ctx context.Context, mg resource.Managed) error {
 	cr, ok := mg.(*v1alpha1.Object)
 	if !ok {
 		return errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Deleting", "resource", cr)
+	e.logger.Debug("Deleting", "resource", cr)
 
 	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionDelete) {
-		c.logger.Debug("External resource should not be deleted by provider, skip deleting.")
+		e.logger.Debug("External resource should not be deleted by provider, skip deleting.")
 		return nil
 	}
 
@@ -320,7 +365,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return err
 	}
 
-	return errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, obj)), errDeleteObject)
+	return errors.Wrap(resource.IgnoreNotFound(e.client.Delete(ctx, obj)), errDeleteObject)
 }
 
 func getDesired(obj *v1alpha1.Object) (*unstructured.Unstructured, error) {
@@ -335,7 +380,10 @@ func getDesired(obj *v1alpha1.Object) (*unstructured.Unstructured, error) {
 	return desired, nil
 }
 
-func getLastApplied(obj *v1alpha1.Object, observed *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+func (e *external) getObservation(obj *v1alpha1.Object, observed *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	if e.applyExtractor != nil {
+		return e.applyExtractor.Extract(observed, "crossplane-provider-kubernetes")
+	}
 	lastApplied, ok := observed.GetAnnotations()[v1.LastAppliedConfigAnnotation]
 	if !ok {
 		return nil, nil
@@ -353,36 +401,36 @@ func getLastApplied(obj *v1alpha1.Object, observed *unstructured.Unstructured) (
 	return last, nil
 }
 
-func (c *external) setObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
+func (e *external) setObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
 	var err error
 	if obj.Status.AtProvider.Manifest.Raw, err = observed.MarshalJSON(); err != nil {
 		return errors.Wrap(err, errFailedToMarshalExisting)
 	}
 
-	if err := c.updateConditionFromObserved(obj, observed); err != nil {
+	if err := e.updateConditionFromObserved(obj, observed); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (c *external) updateConditionFromObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
+func (e *external) updateConditionFromObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
 	switch obj.Spec.Readiness.Policy {
 	case v1alpha1.ReadinessPolicyDeriveFromObject:
 		conditioned := xpv1.ConditionedStatus{}
 		err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
 		if err != nil {
-			c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
+			e.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
 			obj.SetConditions(xpv1.Unavailable())
 			return nil
 		}
 		if status := conditioned.GetCondition(xpv1.TypeReady).Status; status != v1.ConditionTrue {
-			c.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", observed)
+			e.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", observed)
 			obj.SetConditions(xpv1.Unavailable())
 			return nil
 		}
 		obj.SetConditions(xpv1.Available())
 	case v1alpha1.ReadinessPolicySuccessfulCreate, "":
-		// do nothing, will be handled by c.handleLastApplied method
+		// do nothing, will be handled by e.handleObservation method
 		// "" should never happen, but just in case we will treat it as SuccessfulCreate for backward compatibility
 	default:
 		// should never happen
@@ -414,8 +462,8 @@ func getReferenceInfo(ref v1alpha1.Reference) (string, string, string, string) {
 // resolveReferencies resolves references for the current Object. If it fails to
 // resolve some reference, e.g.: due to reference not ready, it will then return
 // error and requeue to wait for resolving it next time.
-func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object) error {
-	c.logger.Debug("Resolving referencies.")
+func (e *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object) error {
+	e.logger.Debug("Resolving referencies.")
 
 	// Loop through references to resolve each referenced resource
 	for _, ref := range obj.Spec.References {
@@ -428,7 +476,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 		res.SetAPIVersion(refAPIVersion)
 		res.SetKind(refKind)
 		// Try to get referenced resource
-		err := c.localClient.Get(ctx, client.ObjectKey{
+		err := e.localClient.Get(ctx, client.ObjectKey{
 			Namespace: refNamespace,
 			Name:      refName,
 		}, res)
@@ -448,7 +496,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 	return nil
 }
 
-func (c *external) isNotFound(obj *v1alpha1.Object, err error) bool {
+func (e *external) isNotFound(obj *v1alpha1.Object, err error) bool {
 	isNotFound := false
 
 	if kerrors.IsNotFound(err) {
@@ -460,7 +508,7 @@ func (c *external) isNotFound(obj *v1alpha1.Object, err error) bool {
 		// resource reconciler. Otherwise, the reconciler will try to delete the
 		// external resource which breaks the management policy.
 		if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionDelete) {
-			c.logger.Debug("Managed resource was deleted but external resource is undeletable.")
+			e.logger.Debug("Managed resource was deleted but external resource is undeletable.")
 			isNotFound = true
 		}
 	}
@@ -468,7 +516,7 @@ func (c *external) isNotFound(obj *v1alpha1.Object, err error) bool {
 	return isNotFound
 }
 
-func (c *external) handleLastApplied(ctx context.Context, obj *v1alpha1.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
+func (e *external) handleObservation(ctx context.Context, obj *v1alpha1.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	isUpToDate := false
 
 	if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionUpdate) {
@@ -481,13 +529,13 @@ func (c *external) handleLastApplied(ctx context.Context, obj *v1alpha1.Object, 
 	}
 
 	if isUpToDate {
-		c.logger.Debug("Up to date!")
+		e.logger.Debug("Up to date!")
 
 		if p := obj.Spec.Readiness.Policy; p == v1alpha1.ReadinessPolicySuccessfulCreate || p == "" {
 			obj.Status.SetConditions(xpv1.Available())
 		}
 
-		cd, err := connectionDetails(ctx, c.client, obj.Spec.ConnectionDetails)
+		cd, err := connectionDetails(ctx, e.client, obj.Spec.ConnectionDetails)
 		if err != nil {
 			return managed.ExternalObservation{}, errors.Wrap(err, errGetConnectionDetails)
 		}

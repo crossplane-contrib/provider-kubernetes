@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,6 +45,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
 	kubernetesv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/object/fake"
 )
 
 const (
@@ -225,7 +227,7 @@ func providerConfig(pm ...providerConfigModifier) *kubernetesv1alpha1.ProviderCo
 	return pc
 }
 
-func Test_connector_Connect(t *testing.T) {
+func TestConnectorConnect(t *testing.T) {
 	secret := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Namespace: providerSecretNamespace, Name: providerSecretName},
 		Data:       map[string][]byte{providerSecretKey: []byte(providerSecretData)},
@@ -503,10 +505,11 @@ func Test_connector_Connect(t *testing.T) {
 	}
 }
 
-func Test_helmExternal_Observe(t *testing.T) {
+func TestExternalObserve(t *testing.T) {
 	type args struct {
-		client resource.ClientApplicator
-		mg     resource.Managed
+		client    resource.ClientApplicator
+		mg        resource.Managed
+		extractor v1.UnstructuredExtractor
 	}
 	type want struct {
 		out managed.ExternalObservation
@@ -643,6 +646,69 @@ func Test_helmExternal_Observe(t *testing.T) {
 					ResourceExists:    true,
 					ResourceUpToDate:  true,
 					ConnectionDetails: managed.ConnectionDetails{},
+				},
+				err: nil,
+			},
+		},
+		"SSAUpToDate": {
+			args: args{
+				mg: kubernetesObject(),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource(func(res *unstructured.Unstructured) {
+								// We should only care about the extracted fields, not the entire object.
+								// So, the below labels should not affect the observation since we
+								// don't care about them (no labels in the manifest).
+								res.SetLabels(map[string]string{"some-label": "some-value"})
+							})
+							return nil
+						}),
+					},
+				},
+				extractor: &fake.UnstructuredExtractor{
+					ExtractFn: func(object *unstructured.Unstructured, fieldManager string) (*unstructured.Unstructured, error) {
+						return externalResource(), nil
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{
+					ResourceExists:    true,
+					ResourceUpToDate:  true,
+					ConnectionDetails: managed.ConnectionDetails{},
+				},
+				err: nil,
+			},
+		},
+		"SSANotUpToDate": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+					obj.SetLabels(map[string]string{"some-label": "other-value"})
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource(func(res *unstructured.Unstructured) {
+								res.SetLabels(map[string]string{"some-label": "some-value"})
+							})
+							return nil
+						}),
+					},
+				},
+				extractor: &fake.UnstructuredExtractor{
+					ExtractFn: func(object *unstructured.Unstructured, fieldManager string) (*unstructured.Unstructured, error) {
+						return externalResource(func(res *unstructured.Unstructured) {
+							res.SetLabels(map[string]string{"some-label": "some-value"})
+						}), nil
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{
+					ResourceExists:    true,
+					ResourceUpToDate:  false,
+					ConnectionDetails: nil,
 				},
 				err: nil,
 			},
@@ -893,9 +959,10 @@ func Test_helmExternal_Observe(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := &external{
-				logger:      logging.NewNopLogger(),
-				client:      tc.args.client,
-				localClient: tc.args.client,
+				logger:         logging.NewNopLogger(),
+				client:         tc.args.client,
+				localClient:    tc.args.client,
+				applyExtractor: tc.args.extractor,
 			}
 			got, gotErr := e.Observe(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
@@ -909,10 +976,11 @@ func Test_helmExternal_Observe(t *testing.T) {
 	}
 }
 
-func Test_helmExternal_Create(t *testing.T) {
+func TestExternalCreate(t *testing.T) {
 	type args struct {
-		client resource.ClientApplicator
-		mg     resource.Managed
+		client    resource.ClientApplicator
+		mg        resource.Managed
+		extractor v1.UnstructuredExtractor
 	}
 	type want struct {
 		out managed.ExternalCreation
@@ -1009,12 +1077,45 @@ func Test_helmExternal_Create(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SSAApplyFailed": {
+			args: args{
+				mg: kubernetesObject(),
+				client: resource.ClientApplicator{
+					Applicator: resource.ApplyFn(func(ctx context.Context, obj client.Object, op ...resource.ApplyOption) error {
+						return errBoom
+					}),
+				},
+				extractor: &fake.UnstructuredExtractor{},
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errApplyObject),
+			},
+		},
+		"SSASuccess": {
+			args: args{
+				mg: kubernetesObject(),
+				client: resource.ClientApplicator{
+					Applicator: resource.ApplyFn(func(ctx context.Context, obj client.Object, op ...resource.ApplyOption) error {
+						_, ok := obj.GetAnnotations()[corev1.LastAppliedConfigAnnotation]
+						if ok {
+							t.Errorf("Last applied annotation should not be set with SSA apply")
+						}
+						return nil
+					}),
+				},
+				extractor: &fake.UnstructuredExtractor{},
+			},
+			want: want{
+				err: nil,
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := &external{
-				logger: logging.NewNopLogger(),
-				client: tc.args.client,
+				logger:         logging.NewNopLogger(),
+				client:         tc.args.client,
+				applyExtractor: tc.args.extractor,
 			}
 			got, gotErr := e.Create(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
@@ -1028,10 +1129,11 @@ func Test_helmExternal_Create(t *testing.T) {
 	}
 }
 
-func Test_helmExternal_Update(t *testing.T) {
+func TestExternalUpdate(t *testing.T) {
 	type args struct {
-		client resource.ClientApplicator
-		mg     resource.Managed
+		client    resource.ClientApplicator
+		mg        resource.Managed
+		extractor v1.UnstructuredExtractor
 	}
 	type want struct {
 		out managed.ExternalUpdate
@@ -1116,12 +1218,45 @@ func Test_helmExternal_Update(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SSAApplyFailed": {
+			args: args{
+				mg: kubernetesObject(),
+				client: resource.ClientApplicator{
+					Applicator: resource.ApplyFn(func(ctx context.Context, obj client.Object, op ...resource.ApplyOption) error {
+						return errBoom
+					}),
+				},
+				extractor: &fake.UnstructuredExtractor{},
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errApplyObject),
+			},
+		},
+		"SSASuccess": {
+			args: args{
+				mg: kubernetesObject(),
+				client: resource.ClientApplicator{
+					Applicator: resource.ApplyFn(func(ctx context.Context, obj client.Object, op ...resource.ApplyOption) error {
+						_, ok := obj.GetAnnotations()[corev1.LastAppliedConfigAnnotation]
+						if ok {
+							t.Errorf("Last applied annotation should not be set with SSA apply")
+						}
+						return nil
+					}),
+				},
+				extractor: &fake.UnstructuredExtractor{},
+			},
+			want: want{
+				err: nil,
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := &external{
-				logger: logging.NewNopLogger(),
-				client: tc.args.client,
+				logger:         logging.NewNopLogger(),
+				client:         tc.args.client,
+				applyExtractor: tc.args.extractor,
 			}
 			got, gotErr := e.Update(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
@@ -1135,7 +1270,7 @@ func Test_helmExternal_Update(t *testing.T) {
 	}
 }
 
-func Test_helmExternal_Delete(t *testing.T) {
+func TestExternalDelete(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -1238,7 +1373,7 @@ func Test_helmExternal_Delete(t *testing.T) {
 	}
 }
 
-func Test_objFinalizer_AddFinalizer(t *testing.T) {
+func TestFinalizerAddFinalizer(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -1371,7 +1506,7 @@ func Test_objFinalizer_AddFinalizer(t *testing.T) {
 	}
 }
 
-func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
+func TestFinalizerRemoveFinalizer(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -1532,7 +1667,7 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 	}
 }
 
-func Test_connectionDetails(t *testing.T) {
+func TestConnectionDetails(t *testing.T) {
 	mockClient := func(secretData map[string]interface{}, err error) *test.MockClient {
 		return &test.MockClient{
 			MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
@@ -1644,7 +1779,7 @@ func Test_connectionDetails(t *testing.T) {
 	}
 }
 
-func Test_updateConditionFromObserved(t *testing.T) {
+func TestUpdateConditionFromObserved(t *testing.T) {
 	type args struct {
 		obj      *v1alpha1.Object
 		observed *unstructured.Unstructured
