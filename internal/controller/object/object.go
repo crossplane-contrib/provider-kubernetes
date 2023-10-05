@@ -381,6 +381,26 @@ func (c *external) updateConditionFromObserved(obj *v1alpha1.Object, observed *u
 			return nil
 		}
 		obj.SetConditions(xpv1.Available())
+	case v1alpha1.ReadinessPolicyAllTrue:
+		conditioned := xpv1.ConditionedStatus{}
+		err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
+		if err != nil {
+			c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
+			obj.SetConditions(xpv1.Unavailable())
+			return nil
+		}
+		allTrue := len(conditioned.Conditions) > 0
+		for _, condition := range conditioned.Conditions {
+			if condition.Status != v1.ConditionTrue {
+				allTrue = false
+				break
+			}
+		}
+		if allTrue {
+			obj.SetConditions(xpv1.Available())
+		} else {
+			obj.SetConditions(xpv1.Unavailable())
+		}
 	case v1alpha1.ReadinessPolicySuccessfulCreate, "":
 		// do nothing, will be handled by c.handleLastApplied method
 		// "" should never happen, but just in case we will treat it as SuccessfulCreate for backward compatibility
