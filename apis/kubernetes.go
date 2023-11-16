@@ -20,7 +20,7 @@ package apis
 import (
 	"k8s.io/apimachinery/pkg/runtime"
 
-	objectv1alpha2 "github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
+	objectv1alpha2 "github.com/crossplane-contrib/provider-kubernetes/apis/object/v1beta1"
 	templatev1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 )
 

@@ -14,8 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1alpha2 contains the v1alpha1 group Object resources of the Kubernetes provider.
+// Package v1beta1 contains the v1beta1 group Object resources of the Kubernetes provider.
 // +kubebuilder:object:generate=true
 // +groupName=kubernetes.crossplane.io
-// +versionName=v1alpha2
-package v1alpha2
+// +versionName=v1beta1
+package v1beta1
