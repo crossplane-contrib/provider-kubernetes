@@ -17,9 +17,11 @@ limitations under the License.
 package main
 
 import (
+	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	"os"
 	"path/filepath"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"time"
 
 	"go.uber.org/zap/zapcore"
@@ -78,6 +80,9 @@ func main() {
 		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
 		LeaseDuration:              func() *time.Duration { d := 60 * time.Second; return &d }(),
 		RenewDeadline:              func() *time.Duration { d := 50 * time.Second; return &d }(),
+		WebhookServer: webhook.NewServer(webhook.Options{
+			CertDir: filepath.Join("/", "webhook", "tls"),
+		}),
 	})
 	kingpin.FatalIfError(err, "Cannot create controller manager")
 
@@ -89,6 +94,8 @@ func main() {
 		GlobalRateLimiter:       ratelimiter.NewGlobal(*maxReconcileRate),
 		Features:                &feature.Flags{},
 	}
+
+	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&v1alpha2.Object{}).Complete(), "Cannot create Object webhook")
 
 	kingpin.FatalIfError(object.Setup(mgr, o), "Cannot setup controller")
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")
