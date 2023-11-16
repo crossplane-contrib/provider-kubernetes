@@ -22,13 +22,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/feature"
@@ -36,6 +36,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis"
+	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	object "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -83,6 +84,9 @@ func main() {
 		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
 		LeaseDuration:              func() *time.Duration { d := 60 * time.Second; return &d }(),
 		RenewDeadline:              func() *time.Duration { d := 50 * time.Second; return &d }(),
+		WebhookServer: webhook.NewServer(webhook.Options{
+			CertDir: filepath.Join("/", "webhook", "tls"),
+		}),
 	})
 	kingpin.FatalIfError(err, "Cannot create controller manager")
 
@@ -94,6 +98,8 @@ func main() {
 		GlobalRateLimiter:       ratelimiter.NewGlobal(*maxReconcileRate),
 		Features:                &feature.Flags{},
 	}
+
+	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&v1alpha2.Object{}).Complete(), "Cannot create Object webhook")
 
 	kingpin.FatalIfError(object.Setup(mgr, o), "Cannot setup controller")
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")
