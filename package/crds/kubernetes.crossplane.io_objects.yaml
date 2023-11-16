@@ -588,17 +588,6 @@ spec:
                   - '*'
                   type: string
                 type: array
-              managementPolicy:
-                default: Default
-                description: A ManagementPolicy determines what should happen to the
-                  underlying external resource when a managed resource is created,
-                  updated, deleted, or observed.
-                enum:
-                - Default
-                - ObserveCreateUpdate
-                - ObserveDelete
-                - Observe
-                type: string
               providerConfigRef:
                 default:
                   name: default
