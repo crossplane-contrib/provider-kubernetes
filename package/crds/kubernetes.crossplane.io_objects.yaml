@@ -22,7 +22,7 @@ spec:
     strategy: Webhook
     webhook:
       conversionReviewVersions:
-        - v1alpha2
+        - v1beta1
       clientConfig:
         service:
           path: /convert
