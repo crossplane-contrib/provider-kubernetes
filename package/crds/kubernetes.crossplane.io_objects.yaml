@@ -17,6 +17,15 @@ spec:
     plural: objects
     singular: object
   scope: Cluster
+  # TODO(turkenh): Find a way to generate this, currently added manually and will be overridden by generate crds
+  conversion:
+    strategy: Webhook
+    webhook:
+      conversionReviewVersions:
+        - v1alpha2
+      clientConfig:
+        service:
+          path: /convert
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.forProvider.manifest.kind
