@@ -256,7 +256,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		Name:      observed.GetName(),
 	}, observed)
 
-	if c.isNotFound(cr, err) {
+	if kerrors.IsNotFound(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
@@ -283,11 +283,6 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	c.logger.Debug("Creating", "resource", cr)
 
-	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha2.ObjectActionCreate) {
-		c.logger.Debug("External resource should not be created by provider, skip creating.")
-		return managed.ExternalCreation{}, nil
-	}
-
 	obj, err := getDesired(cr)
 	if err != nil {
 		return managed.ExternalCreation{}, err
@@ -312,11 +307,6 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	c.logger.Debug("Updating", "resource", cr)
 
-	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha2.ObjectActionUpdate) {
-		c.logger.Debug("External resource should not be updated by provider, skip updating.")
-		return managed.ExternalUpdate{}, nil
-	}
-
 	obj, err := getDesired(cr)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
@@ -340,11 +330,6 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	c.logger.Debug("Deleting", "resource", cr)
-
-	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha2.ObjectActionDelete) {
-		c.logger.Debug("External resource should not be deleted by provider, skip deleting.")
-		return nil
-	}
 
 	obj, err := getDesired(cr)
 	if err != nil {
@@ -499,34 +484,10 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 	return nil
 }
 
-func (c *external) isNotFound(obj *v1alpha2.Object, err error) bool {
-	isNotFound := false
-
-	if kerrors.IsNotFound(err) {
-		isNotFound = true
-	} else if meta.WasDeleted(obj) {
-		// If the Object resource was being deleted but the external resource is
-		// not deletable as management policy is specified, we should return the
-		// external resource not found, so that Object can be deleted by managed
-		// resource reconciler. Otherwise, the reconciler will try to delete the
-		// external resource which breaks the management policy.
-		if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha2.ObjectActionDelete) {
-			c.logger.Debug("Managed resource was deleted but external resource is undeletable.")
-			isNotFound = true
-		}
-	}
-
-	return isNotFound
-}
-
 func (c *external) handleLastApplied(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	isUpToDate := false
 
-	if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha2.ObjectActionUpdate) {
-		// Treated as up-to-date to skip last applied annotation update since we
-		// do not create or update the external resource.
-		isUpToDate = true
-	} else if last != nil && equality.Semantic.DeepEqual(last, desired) {
+	if last != nil && equality.Semantic.DeepEqual(last, desired) {
 		// Mark as up-to-date since last is equal to desired
 		isUpToDate = true
 	}

@@ -120,10 +120,8 @@ type ObjectSpec struct {
 	xpv1.ResourceSpec `json:",inline"`
 	ConnectionDetails []ConnectionDetail `json:"connectionDetails,omitempty"`
 	ForProvider       ObjectParameters   `json:"forProvider"`
-	// +kubebuilder:default=Default
-	ManagementPolicy `json:"managementPolicy,omitempty"`
-	References       []Reference `json:"references,omitempty"`
-	Readiness        Readiness   `json:"readiness,omitempty"`
+	References        []Reference        `json:"references,omitempty"`
+	Readiness         Readiness          `json:"readiness,omitempty"`
 }
 
 // ReadinessPolicy defines how the Object's readiness condition should be computed.
@@ -231,14 +229,4 @@ func patchFieldValueToObject(path string, value interface{}, to runtime.Object) 
 	}
 
 	return runtime.DefaultUnstructuredConverter.FromUnstructured(paved.UnstructuredContent(), to)
-}
-
-// IsActionAllowed determines if action is allowed to be performed on Object
-func (p *ManagementPolicy) IsActionAllowed(action ObjectAction) bool {
-	if action == ObjectActionCreate || action == ObjectActionUpdate {
-		return *p == Default || *p == ObserveCreateUpdate
-	}
-
-	// ObjectActionDelete
-	return *p == Default || *p == ObserveDelete
 }
