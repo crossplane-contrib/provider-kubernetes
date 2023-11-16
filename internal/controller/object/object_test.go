@@ -42,7 +42,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/pkg/test"
 
-	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
+	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	kubernetesv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 )
 
@@ -78,31 +78,30 @@ type notKubernetesObject struct {
 	resource.Managed
 }
 
-type kubernetesObjectModifier func(obj *v1alpha1.Object)
+type kubernetesObjectModifier func(obj *v1alpha2.Object)
 type externalResourceModifier func(res *unstructured.Unstructured)
 
-func kubernetesObject(om ...kubernetesObjectModifier) *v1alpha1.Object {
-	o := &v1alpha1.Object{
+func kubernetesObject(om ...kubernetesObjectModifier) *v1alpha2.Object {
+	o := &v1alpha2.Object{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: v1alpha1.SchemeGroupVersion.String(),
-			Kind:       v1alpha1.ObjectKind,
+			APIVersion: v1alpha2.SchemeGroupVersion.String(),
+			Kind:       v1alpha2.ObjectKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      testObjectName,
 			Namespace: testNamespace,
 		},
-		Spec: v1alpha1.ObjectSpec{
-			ManagementPolicy: v1alpha1.Default,
-			ResourceSpec: v1alpha1.ResourceSpec{
+		Spec: v1alpha2.ObjectSpec{
+			ResourceSpec: xpv1.ResourceSpec{
 				ProviderConfigReference: &xpv1.Reference{
 					Name: providerName,
 				},
 			},
-			ForProvider: v1alpha1.ObjectParameters{
+			ForProvider: v1alpha2.ObjectParameters{
 				Manifest: runtime.RawExtension{Raw: externalResourceRaw},
 			},
 		},
-		Status: v1alpha1.ObjectStatus{},
+		Status: v1alpha2.ObjectStatus{},
 	}
 
 	for _, m := range om {
@@ -144,16 +143,16 @@ func upToDateExternalResource() *unstructured.Unstructured {
 	return externalResourceWithLastAppliedConfigAnnotation(string(externalResourceRaw))
 }
 
-func objectReferences() []v1alpha1.Reference {
-	dependsOn := v1alpha1.DependsOn{
-		APIVersion: v1alpha1.SchemeGroupVersion.String(),
-		Kind:       v1alpha1.ObjectKind,
+func objectReferences() []v1alpha2.Reference {
+	dependsOn := v1alpha2.DependsOn{
+		APIVersion: v1alpha2.SchemeGroupVersion.String(),
+		Kind:       v1alpha2.ObjectKind,
 		Name:       testReferenceObjectName,
 		Namespace:  testNamespace,
 	}
-	ref := []v1alpha1.Reference{
+	ref := []v1alpha2.Reference{
 		{
-			PatchesFrom: &v1alpha1.PatchesFrom{
+			PatchesFrom: &v1alpha2.PatchesFrom{
 				DependsOn: dependsOn,
 			},
 		},
@@ -167,8 +166,8 @@ func objectReferences() []v1alpha1.Reference {
 func referenceObject(rm ...externalResourceModifier) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": v1alpha1.SchemeGroupVersion.String(),
-			"kind":       v1alpha1.ObjectKind,
+			"apiVersion": v1alpha2.SchemeGroupVersion.String(),
+			"kind":       v1alpha2.ObjectKind,
 			"metadata": map[string]interface{}{
 				"name":      testReferenceObjectName,
 				"namespace": testNamespace,
@@ -540,7 +539,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 		},
 		"NotAValidManifest": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.ForProvider.Manifest.Raw = []byte(`{"test": "not-a-valid-manifest"}`)
 				}),
 			},
@@ -600,7 +599,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 		},
 		"UpToDateNameDefaultsToObjectName": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.ForProvider.Manifest.Raw = []byte(`{
 				    "apiVersion": "v1",
 				    "kind": "Namespace" }`)
@@ -647,32 +646,9 @@ func Test_helmExternal_Observe(t *testing.T) {
 				err: nil,
 			},
 		},
-		"UpToDateIfManagementPolicyDefined": {
-			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
-					obj.Spec.ManagementPolicy = "ObserveDelete"
-				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) = *externalResource()
-							return nil
-						}),
-					},
-				},
-			},
-			want: want{
-				out: managed.ExternalObservation{
-					ResourceExists:    true,
-					ResourceUpToDate:  true,
-					ConnectionDetails: managed.ConnectionDetails{},
-				},
-				err: nil,
-			},
-		},
 		"FailedToPatchFieldFromReferenceObject": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.References = objectReferences()
 					obj.Spec.References[0].PatchesFrom.FieldPath = pointer.String("nonexistent_field")
 				}),
@@ -693,7 +669,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 		},
 		"NoReferenceObjectExists": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.References = objectReferences()
 				}),
 				client: resource.ClientApplicator{
@@ -710,7 +686,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 		},
 		"NoExternalResourceExistsIfObjectWasDeleted": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.ObjectMeta.DeletionTimestamp = &metav1.Time{Time: time.Now()}
 					obj.Spec.References = objectReferences()
 				}),
@@ -734,37 +710,9 @@ func Test_helmExternal_Observe(t *testing.T) {
 				err: nil,
 			},
 		},
-		"NoExternalResourceDeletableIfObjectWasDeleted": {
-			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
-					obj.ObjectMeta.DeletionTimestamp = &metav1.Time{Time: time.Now()}
-					obj.Spec.ManagementPolicy = "ObserveCreateUpdate"
-					obj.Spec.References = objectReferences()
-				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-							if key.Name == testReferenceObjectName {
-								*obj.(*unstructured.Unstructured) = *referenceObject()
-								return nil
-							} else if key.Name == externalResourceName {
-								*obj.(*unstructured.Unstructured) = *externalResource()
-								return nil
-							}
-							return errBoom
-						},
-						MockUpdate: test.NewMockUpdateFn(nil),
-					},
-				},
-			},
-			want: want{
-				out: managed.ExternalObservation{ResourceExists: false},
-				err: nil,
-			},
-		},
 		"ReferenceToObject": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.References = objectReferences()
 				}),
 				client: resource.ClientApplicator{
@@ -794,8 +742,8 @@ func Test_helmExternal_Observe(t *testing.T) {
 		},
 		"EmptyReference": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
-					obj.Spec.References = []v1alpha1.Reference{{}}
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.References = []v1alpha2.Reference{{}}
 				}),
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
@@ -810,9 +758,9 @@ func Test_helmExternal_Observe(t *testing.T) {
 		},
 		"ConnectionDetails": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.References = objectReferences()
-					obj.Spec.ConnectionDetails = []v1alpha1.ConnectionDetail{
+					obj.Spec.ConnectionDetails = []v1alpha2.ConnectionDetail{
 						{
 							ObjectReference: corev1.ObjectReference{
 								Kind:       "Secret",
@@ -856,9 +804,9 @@ func Test_helmExternal_Observe(t *testing.T) {
 		},
 		"FailedToGetConnectionDetails": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.References = objectReferences()
-					obj.Spec.ConnectionDetails = []v1alpha1.ConnectionDetail{
+					obj.Spec.ConnectionDetails = []v1alpha2.ConnectionDetail{
 						{
 							ObjectReference: corev1.ObjectReference{
 								Kind:       "Secret",
@@ -932,7 +880,7 @@ func Test_helmExternal_Create(t *testing.T) {
 		},
 		"NotAValidManifest": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.ForProvider.Manifest.Raw = []byte(`{"test": "not-a-valid-manifest"}`)
 				}),
 			},
@@ -953,20 +901,9 @@ func Test_helmExternal_Create(t *testing.T) {
 				err: errors.Wrap(errBoom, errCreateObject),
 			},
 		},
-		"SkipCreateIfManagementPolicyDefined": {
-			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
-					obj.Spec.ManagementPolicy = "ObserveDelete"
-				}),
-			},
-			want: want{
-				out: managed.ExternalCreation{},
-				err: nil,
-			},
-		},
 		"SuccessDefaultsToObjectName": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.ForProvider.Manifest.Raw = []byte(`{
 				    "apiVersion": "v1",
 				    "kind": "Namespace" }`)
@@ -1051,7 +988,7 @@ func Test_helmExternal_Update(t *testing.T) {
 		},
 		"NotAValidManifest": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.ForProvider.Manifest.Raw = []byte(`{"test": "not-a-valid-manifest"}`)
 				}),
 			},
@@ -1072,20 +1009,9 @@ func Test_helmExternal_Update(t *testing.T) {
 				err: errors.Wrap(errBoom, errApplyObject),
 			},
 		},
-		"SkipUpdateIfManagementPolicyDefined": {
-			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
-					obj.Spec.ManagementPolicy = "ObserveDelete"
-				}),
-			},
-			want: want{
-				out: managed.ExternalUpdate{},
-				err: nil,
-			},
-		},
 		"SuccessDefaultsToObjectName": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.ForProvider.Manifest.Raw = []byte(`{
 				    "apiVersion": "v1",
 				    "kind": "Namespace" }`)
@@ -1157,7 +1083,7 @@ func Test_helmExternal_Delete(t *testing.T) {
 		},
 		"NotAValidManifest": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.ForProvider.Manifest.Raw = []byte(`{"test": "not-a-valid-manifest"}`)
 				}),
 			},
@@ -1178,19 +1104,9 @@ func Test_helmExternal_Delete(t *testing.T) {
 				err: errors.Wrap(errBoom, errDeleteObject),
 			},
 		},
-		"SkipDeleteIfManagementPolicyDefined": {
-			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
-					obj.Spec.ManagementPolicy = "ObserveCreateUpdate"
-				}),
-			},
-			want: want{
-				err: nil,
-			},
-		},
 		"SuccessDefaultsToObjectName": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.ForProvider.Manifest.Raw = []byte(`{
 				    "apiVersion": "v1",
 				    "kind": "Namespace" }`)
@@ -1273,7 +1189,7 @@ func Test_objFinalizer_AddFinalizer(t *testing.T) {
 		},
 		"ObjectFinalizerExists": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
 				}),
 			},
@@ -1283,7 +1199,7 @@ func Test_objFinalizer_AddFinalizer(t *testing.T) {
 		},
 		"NoReferenceObjectExists": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.References = objectReferences()
 				}),
 				client: resource.ClientApplicator{
@@ -1301,8 +1217,8 @@ func Test_objFinalizer_AddFinalizer(t *testing.T) {
 		},
 		"EmptyReference": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
-					obj.Spec.References = []v1alpha1.Reference{{}}
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.References = []v1alpha2.Reference{{}}
 				}),
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
@@ -1316,7 +1232,7 @@ func Test_objFinalizer_AddFinalizer(t *testing.T) {
 		},
 		"FailedToAddReferenceFinalizer": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.References = objectReferences()
 				}),
 				client: resource.ClientApplicator{
@@ -1343,7 +1259,7 @@ func Test_objFinalizer_AddFinalizer(t *testing.T) {
 		},
 		"Success": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.References = objectReferences()
 				}),
 				client: resource.ClientApplicator{
@@ -1395,7 +1311,7 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 		},
 		"FailedToRemoveObjectFinalizer": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
 				}),
 				client: resource.ClientApplicator{
@@ -1420,7 +1336,7 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 		},
 		"NoReferenceFinalizerExists": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
 					obj.Spec.References = objectReferences()
 				}),
@@ -1441,7 +1357,7 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 		},
 		"ReferenceNotFound": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
 					obj.Spec.References = objectReferences()
 					obj.ObjectMeta.UID = "some-uid"
@@ -1460,7 +1376,7 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 		},
 		"FailedToRemoveReferenceFinalizer": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
 					obj.Spec.References = objectReferences()
 					obj.ObjectMeta.UID = "some-uid"
@@ -1490,7 +1406,7 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 		},
 		"Success": {
 			args: args{
-				mg: kubernetesObject(func(obj *v1alpha1.Object) {
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
 					obj.Spec.References = objectReferences()
 					obj.ObjectMeta.UID = "some-uid"
@@ -1522,7 +1438,7 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				t.Errorf("f.RemoveFinalizer(...): -want error, +got error: %s", diff)
 			}
 
-			if _, ok := tc.args.mg.(*v1alpha1.Object); ok {
+			if _, ok := tc.args.mg.(*v1alpha2.Object); ok {
 				sort := cmpopts.SortSlices(func(a, b string) bool { return a < b })
 				if diff := cmp.Diff(tc.want.finalizers, tc.args.mg.GetFinalizers(), sort); diff != "" {
 					t.Errorf("managed resource finalizers: -want, +got: %s", diff)
@@ -1548,7 +1464,7 @@ func Test_connectionDetails(t *testing.T) {
 		}
 	}
 
-	connDetail := v1alpha1.ConnectionDetail{
+	connDetail := v1alpha2.ConnectionDetail{
 		ObjectReference: corev1.ObjectReference{
 			Kind:       "Secret",
 			Namespace:  testNamespace,
@@ -1561,7 +1477,7 @@ func Test_connectionDetails(t *testing.T) {
 
 	type args struct {
 		kube        client.Client
-		connDetails []v1alpha1.ConnectionDetail
+		connDetails []v1alpha2.ConnectionDetail
 	}
 	type want struct {
 		out managed.ConnectionDetails
@@ -1577,7 +1493,7 @@ func Test_connectionDetails(t *testing.T) {
 					map[string]interface{}{},
 					kerrors.NewNotFound(schema.GroupResource{Group: "", Resource: "secrets"}, testSecretName),
 				),
-				connDetails: []v1alpha1.ConnectionDetail{connDetail},
+				connDetails: []v1alpha2.ConnectionDetail{connDetail},
 			},
 			want: want{
 				out: managed.ConnectionDetails{},
@@ -1592,7 +1508,7 @@ func Test_connectionDetails(t *testing.T) {
 					},
 					nil,
 				),
-				connDetails: []v1alpha1.ConnectionDetail{connDetail},
+				connDetails: []v1alpha2.ConnectionDetail{connDetail},
 			},
 			want: want{
 				out: managed.ConnectionDetails{},
@@ -1607,7 +1523,7 @@ func Test_connectionDetails(t *testing.T) {
 					},
 					nil,
 				),
-				connDetails: []v1alpha1.ConnectionDetail{connDetail},
+				connDetails: []v1alpha2.ConnectionDetail{connDetail},
 			},
 			want: want{
 				out: managed.ConnectionDetails{},
@@ -1622,7 +1538,7 @@ func Test_connectionDetails(t *testing.T) {
 					},
 					nil,
 				),
-				connDetails: []v1alpha1.ConnectionDetail{connDetail},
+				connDetails: []v1alpha2.ConnectionDetail{connDetail},
 			},
 			want: want{
 				out: managed.ConnectionDetails{
@@ -1646,7 +1562,7 @@ func Test_connectionDetails(t *testing.T) {
 
 func Test_updateConditionFromObserved(t *testing.T) {
 	type args struct {
-		obj      *v1alpha1.Object
+		obj      *v1alpha2.Object
 		observed *unstructured.Unstructured
 	}
 	type want struct {
@@ -1659,7 +1575,7 @@ func Test_updateConditionFromObserved(t *testing.T) {
 	}{
 		"NoopIfNoPolicyDefined": {
 			args: args{
-				obj: &v1alpha1.Object{},
+				obj: &v1alpha2.Object{},
 				observed: &unstructured.Unstructured{
 					Object: map[string]interface{}{
 						"status": xpv1.ConditionedStatus{},
@@ -1673,10 +1589,10 @@ func Test_updateConditionFromObserved(t *testing.T) {
 		},
 		"NoopIfSuccessfulCreatePolicyDefined": {
 			args: args{
-				obj: &v1alpha1.Object{
-					Spec: v1alpha1.ObjectSpec{
-						Readiness: v1alpha1.Readiness{
-							Policy: v1alpha1.ReadinessPolicySuccessfulCreate,
+				obj: &v1alpha2.Object{
+					Spec: v1alpha2.ObjectSpec{
+						Readiness: v1alpha2.Readiness{
+							Policy: v1alpha2.ReadinessPolicySuccessfulCreate,
 						},
 					},
 				},
@@ -1693,10 +1609,10 @@ func Test_updateConditionFromObserved(t *testing.T) {
 		},
 		"UnavailableIfDeriveFromObjectAndNotReady": {
 			args: args{
-				obj: &v1alpha1.Object{
-					Spec: v1alpha1.ObjectSpec{
-						Readiness: v1alpha1.Readiness{
-							Policy: v1alpha1.ReadinessPolicyDeriveFromObject,
+				obj: &v1alpha2.Object{
+					Spec: v1alpha2.ObjectSpec{
+						Readiness: v1alpha2.Readiness{
+							Policy: v1alpha2.ReadinessPolicyDeriveFromObject,
 						},
 					},
 				},
@@ -1726,10 +1642,10 @@ func Test_updateConditionFromObserved(t *testing.T) {
 		},
 		"UnavailableIfDerivedFromObjectAndNoCondition": {
 			args: args{
-				obj: &v1alpha1.Object{
-					Spec: v1alpha1.ObjectSpec{
-						Readiness: v1alpha1.Readiness{
-							Policy: v1alpha1.ReadinessPolicyDeriveFromObject,
+				obj: &v1alpha2.Object{
+					Spec: v1alpha2.ObjectSpec{
+						Readiness: v1alpha2.Readiness{
+							Policy: v1alpha2.ReadinessPolicyDeriveFromObject,
 						},
 					},
 				},
@@ -1752,10 +1668,10 @@ func Test_updateConditionFromObserved(t *testing.T) {
 		},
 		"AvailableIfDeriveFromObjectAndReady": {
 			args: args{
-				obj: &v1alpha1.Object{
-					Spec: v1alpha1.ObjectSpec{
-						Readiness: v1alpha1.Readiness{
-							Policy: v1alpha1.ReadinessPolicyDeriveFromObject,
+				obj: &v1alpha2.Object{
+					Spec: v1alpha2.ObjectSpec{
+						Readiness: v1alpha2.Readiness{
+							Policy: v1alpha2.ReadinessPolicyDeriveFromObject,
 						},
 					},
 				},
@@ -1785,10 +1701,10 @@ func Test_updateConditionFromObserved(t *testing.T) {
 		},
 		"UnavailableIfDerivedFromObjectAndCantParse": {
 			args: args{
-				obj: &v1alpha1.Object{
-					Spec: v1alpha1.ObjectSpec{
-						Readiness: v1alpha1.Readiness{
-							Policy: v1alpha1.ReadinessPolicyDeriveFromObject,
+				obj: &v1alpha2.Object{
+					Spec: v1alpha2.ObjectSpec{
+						Readiness: v1alpha2.Readiness{
+							Policy: v1alpha2.ReadinessPolicyDeriveFromObject,
 						},
 					},
 				},

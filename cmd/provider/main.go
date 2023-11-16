@@ -17,18 +17,17 @@ limitations under the License.
 package main
 
 import (
-	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	"os"
 	"path/filepath"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"time"
 
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/feature"
@@ -36,6 +35,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis"
+	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	object "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"

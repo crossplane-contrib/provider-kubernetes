@@ -1,15 +1,17 @@
 package v1alpha1
 
 import (
-	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
-	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
+
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+
+	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 )
 
 // ConvertTo converts this Object to the Hub version (v1alpha2).
-func (src *Object) ConvertTo(dstRaw conversion.Hub) error {
+func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // We want to use different names for receiver parameter to be more clear.
 	dst := dstRaw.(*v1alpha2.Object)
 
 	switch src.Spec.ManagementPolicy {
@@ -29,7 +31,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error {
 }
 
 // ConvertFrom converts from the Hub version (v1alpha2) to this version.
-func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error {
+func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint // We want to use different names for receiver parameter to be more clear.
 	src := srcRaw.(*v1alpha2.Object)
 
 	policySet := sets.New[xpv1.ManagementAction](src.GetManagementPolicies()...)
