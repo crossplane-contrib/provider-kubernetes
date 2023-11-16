@@ -19,6 +19,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"time"
 
 	"go.uber.org/zap/zapcore"
@@ -62,8 +63,9 @@ func main() {
 	kingpin.FatalIfError(err, "Cannot get API server rest config")
 
 	mgr, err := ctrl.NewManager(ratelimiter.LimitRESTConfig(cfg, *maxReconcileRate), ctrl.Options{
-		SyncPeriod: syncInterval,
-
+		Cache: cache.Options{
+			SyncPeriod: syncInterval,
+		},
 		// controller-runtime uses both ConfigMaps and Leases for leader
 		// election by default. Leases expire after 15 seconds, with a
 		// 10 second renewal deadline. We've observed leader loss due to
