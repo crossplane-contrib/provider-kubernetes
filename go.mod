@@ -5,7 +5,7 @@ go 1.19
 require (
 	github.com/crossplane/crossplane-runtime v1.14.0-rc.0.0.20230815060607-4f3cb3d9fd2b
 	github.com/crossplane/crossplane-tools v0.0.0-20220310165030-1f43fc12793e
-	github.com/google/go-cmp v0.5.9
+	github.com/google/go-cmp v0.6.0
 	github.com/pkg/errors v0.9.1
 	go.uber.org/zap v1.24.0
 	golang.org/x/oauth2 v0.14.0
