@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Crossplane Authors.
+Copyright 2023 The Crossplane Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,31 +27,6 @@ import (
 
 // ObjectAction defines actions applicable to Object
 type ObjectAction string
-
-// A ManagementPolicy determines what should happen to the underlying external
-// resource when a managed resource is created, updated, deleted, or observed.
-// +kubebuilder:validation:Enum=Default;ObserveCreateUpdate;ObserveDelete;Observe
-type ManagementPolicy string
-
-const (
-	// Default means the provider can fully manage the resource.
-	Default ManagementPolicy = "Default"
-	// ObserveCreateUpdate means the provider can observe, create, or update
-	// the resource, but can not delete it.
-	ObserveCreateUpdate ManagementPolicy = "ObserveCreateUpdate"
-	// ObserveDelete means the provider can observe or delete the resource, but
-	// can not create and update it.
-	ObserveDelete ManagementPolicy = "ObserveDelete"
-	// Observe means the provider can only observe the resource.
-	Observe ManagementPolicy = "Observe"
-
-	// ObjectActionCreate means to create an Object
-	ObjectActionCreate ObjectAction = "Create"
-	// ObjectActionUpdate means to update an Object
-	ObjectActionUpdate ObjectAction = "Update"
-	// ObjectActionDelete means to delete an Object
-	ObjectActionDelete ObjectAction = "Delete"
-)
 
 // DependsOn refers to an object by Name, Kind, APIVersion, etc. It is used to
 // reference other Object or arbitrary Kubernetes resource which is either
