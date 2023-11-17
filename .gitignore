@@ -5,3 +5,5 @@
 /vendor
 /.vendor-new
 .vscode
+/.idea
+
