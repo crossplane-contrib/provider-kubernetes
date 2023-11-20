@@ -36,7 +36,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis"
-	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1beta1"
+	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
 	object "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -85,7 +85,7 @@ func main() {
 		LeaseDuration:              func() *time.Duration { d := 60 * time.Second; return &d }(),
 		RenewDeadline:              func() *time.Duration { d := 50 * time.Second; return &d }(),
 		WebhookServer: webhook.NewServer(webhook.Options{
-			CertDir: filepath.Join("/", "webhook", "tls"),
+			CertDir: filepath.Join("/", "tls", "server"),
 		}),
 	})
 	kingpin.FatalIfError(err, "Cannot create controller manager")
@@ -99,7 +99,7 @@ func main() {
 		Features:                &feature.Flags{},
 	}
 
-	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&v1beta1.Object{}).Complete(), "Cannot create Object webhook")
+	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&v1alpha1.Object{}).Complete(), "Cannot create Object webhook")
 
 	kingpin.FatalIfError(object.Setup(mgr, o), "Cannot setup controller")
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")

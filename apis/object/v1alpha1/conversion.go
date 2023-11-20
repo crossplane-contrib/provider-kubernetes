@@ -30,6 +30,10 @@ import (
 func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // We want to use different names for receiver parameter to be more clear.
 	dst := dstRaw.(*v1beta1.Object)
 
+	// copy identical fields
+	dst.ObjectMeta = src.ObjectMeta
+
+	// handle management policies migration
 	switch src.Spec.ManagementPolicy {
 	case Default:
 		dst.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionAll}
@@ -50,8 +54,12 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint // We want to use different names for receiver parameter to be more clear.
 	src := srcRaw.(*v1beta1.Object)
 
-	policySet := sets.New[xpv1.ManagementAction](src.GetManagementPolicies()...)
+	// copy identical fields
+	dst.ObjectMeta = src.ObjectMeta
 
+	// handle management policies migration
+	policySet := sets.New[xpv1.ManagementAction](src.GetManagementPolicies()...)
+	
 	switch {
 	case policySet.Has(xpv1.ManagementActionAll):
 		dst.Spec.ManagementPolicy = Default

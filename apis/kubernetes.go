@@ -20,6 +20,7 @@ package apis
 import (
 	"k8s.io/apimachinery/pkg/runtime"
 
+	objectv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
 	objectv1beta1 "github.com/crossplane-contrib/provider-kubernetes/apis/object/v1beta1"
 	templatev1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 )
@@ -28,6 +29,7 @@ func init() {
 	// Register the types with the Scheme so the components can map objects to GroupVersionKinds and back
 	AddToSchemes = append(AddToSchemes,
 		templatev1alpha1.SchemeBuilder.AddToScheme,
+		objectv1alpha1.SchemeBuilder.AddToScheme,
 		objectv1beta1.SchemeBuilder.AddToScheme,
 	)
 }
