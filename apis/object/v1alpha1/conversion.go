@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"github.com/pkg/errors"
+
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 
@@ -32,6 +33,58 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 
 	// copy identical fields
 	dst.ObjectMeta = src.ObjectMeta
+
+	dst.Status = v1beta1.ObjectStatus{
+		ResourceStatus: src.Status.ResourceStatus,
+		AtProvider: v1beta1.ObjectObservation{
+			Manifest: src.Status.AtProvider.Manifest,
+		},
+	}
+
+	connectionDetails := []v1beta1.ConnectionDetail{}
+	for _, cd := range src.Spec.ConnectionDetails {
+		connectionDetails = append(connectionDetails, v1beta1.ConnectionDetail{
+			ObjectReference: cd.ObjectReference,
+		})
+	}
+
+	references := []v1beta1.Reference{}
+	for _, r := range src.Spec.References {
+		references = append(references, v1beta1.Reference{
+			DependsOn: &v1beta1.DependsOn{
+				APIVersion: r.DependsOn.APIVersion,
+				Kind:       r.DependsOn.Kind,
+				Name:       r.DependsOn.Name,
+				Namespace:  r.DependsOn.Namespace,
+			},
+			PatchesFrom: &v1beta1.PatchesFrom{
+				DependsOn: v1beta1.DependsOn{
+					APIVersion: r.PatchesFrom.APIVersion,
+					Kind:       r.PatchesFrom.Kind,
+					Name:       r.PatchesFrom.Name,
+					Namespace:  r.PatchesFrom.Namespace,
+				},
+				FieldPath: r.PatchesFrom.FieldPath,
+			},
+		})
+	}
+
+	dst.Spec = v1beta1.ObjectSpec{
+		ResourceSpec: xpv1.ResourceSpec{
+			WriteConnectionSecretToReference: src.GetWriteConnectionSecretToReference(),
+			PublishConnectionDetailsTo:       src.GetPublishConnectionDetailsTo(),
+			ProviderConfigReference:          src.GetProviderConfigReference(),
+			DeletionPolicy:                   src.GetDeletionPolicy(),
+		},
+		ConnectionDetails: connectionDetails,
+		ForProvider: v1beta1.ObjectParameters{
+			Manifest: src.Spec.ForProvider.Manifest,
+		},
+		References: references,
+		Readiness: v1beta1.Readiness{
+			Policy: v1beta1.ReadinessPolicy(src.Spec.Readiness.Policy),
+		},
+	}
 
 	// handle management policies migration
 	switch src.Spec.ManagementPolicy {
@@ -56,10 +109,61 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint /
 
 	// copy identical fields
 	dst.ObjectMeta = src.ObjectMeta
+	dst.Status = ObjectStatus{
+		ResourceStatus: src.Status.ResourceStatus,
+		AtProvider: ObjectObservation{
+			Manifest: src.Status.AtProvider.Manifest,
+		},
+	}
+
+	connectionDetails := []ConnectionDetail{}
+	for _, cd := range src.Spec.ConnectionDetails {
+		connectionDetails = append(connectionDetails, ConnectionDetail{
+			ObjectReference: cd.ObjectReference,
+		})
+	}
+
+	references := []Reference{}
+	for _, r := range src.Spec.References {
+		references = append(references, Reference{
+			DependsOn: &DependsOn{
+				APIVersion: r.DependsOn.APIVersion,
+				Kind:       r.DependsOn.Kind,
+				Name:       r.DependsOn.Name,
+				Namespace:  r.DependsOn.Namespace,
+			},
+			PatchesFrom: &PatchesFrom{
+				DependsOn: DependsOn{
+					APIVersion: r.PatchesFrom.APIVersion,
+					Kind:       r.PatchesFrom.Kind,
+					Name:       r.PatchesFrom.Name,
+					Namespace:  r.PatchesFrom.Namespace,
+				},
+				FieldPath: r.PatchesFrom.FieldPath,
+			},
+		})
+	}
+
+	dst.Spec = ObjectSpec{
+		ResourceSpec: ResourceSpec{
+			WriteConnectionSecretToReference: src.GetWriteConnectionSecretToReference(),
+			PublishConnectionDetailsTo:       src.GetPublishConnectionDetailsTo(),
+			ProviderConfigReference:          src.GetProviderConfigReference(),
+			DeletionPolicy:                   src.GetDeletionPolicy(),
+		},
+		ConnectionDetails: connectionDetails,
+		ForProvider: ObjectParameters{
+			Manifest: src.Spec.ForProvider.Manifest,
+		},
+		References: references,
+		Readiness: Readiness{
+			Policy: ReadinessPolicy(src.Spec.Readiness.Policy),
+		},
+	}
 
 	// handle management policies migration
 	policySet := sets.New[xpv1.ManagementAction](src.GetManagementPolicies()...)
-	
+
 	switch {
 	case policySet.Has(xpv1.ManagementActionAll):
 		dst.Spec.ManagementPolicy = Default
