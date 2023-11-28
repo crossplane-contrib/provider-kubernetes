@@ -36,6 +36,7 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
+	"github.com/crossplane/crossplane-runtime/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/pkg/fieldpath"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/pkg/meta"
@@ -93,8 +94,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 
 	cps := []managed.ConnectionPublisher{managed.NewAPISecretPublisher(mgr.GetClient(), mgr.GetScheme())}
 
-	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1beta1.ObjectGroupVersionKind),
+	reconcilerOptions := []managed.ReconcilerOption{
 		managed.WithExternalConnecter(&connector{
 			logger:           o.Logger,
 			kube:             mgr.GetClient(),
@@ -111,7 +111,16 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
-		managed.WithConnectionPublishers(cps...))
+		managed.WithConnectionPublishers(cps...),
+	}
+
+	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
+		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
+	}
+
+	r := managed.NewReconciler(mgr,
+		resource.ManagedKind(v1beta1.ObjectGroupVersionKind),
+		reconcilerOptions...)
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).

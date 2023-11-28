@@ -44,12 +44,13 @@ import (
 
 func main() {
 	var (
-		app              = kingpin.New(filepath.Base(os.Args[0]), "Template support for Crossplane.").DefaultEnvars()
-		debug            = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
-		syncInterval     = app.Flag("sync", "Controller manager sync period such as 300ms, 1.5h, or 2h45m").Short('s').Default("1h").Duration()
-		pollInterval     = app.Flag("poll", "Poll interval controls how often an individual resource should be checked for drift.").Default("1m").Duration()
-		leaderElection   = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
-		maxReconcileRate = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("10").Int()
+		app                      = kingpin.New(filepath.Base(os.Args[0]), "Template support for Crossplane.").DefaultEnvars()
+		debug                    = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
+		syncInterval             = app.Flag("sync", "Controller manager sync period such as 300ms, 1.5h, or 2h45m").Short('s').Default("1h").Duration()
+		pollInterval             = app.Flag("poll", "Poll interval controls how often an individual resource should be checked for drift.").Default("1m").Duration()
+		leaderElection           = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
+		maxReconcileRate         = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("10").Int()
+		enableManagementPolicies = app.Flag("enable-management-policies", "Enable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
@@ -97,6 +98,11 @@ func main() {
 		PollInterval:            *pollInterval,
 		GlobalRateLimiter:       ratelimiter.NewGlobal(*maxReconcileRate),
 		Features:                &feature.Flags{},
+	}
+
+	if *enableManagementPolicies {
+		o.Features.Enable(feature.EnableBetaManagementPolicies)
+		log.Info("Beta feature enabled", "flag", feature.EnableBetaManagementPolicies)
 	}
 
 	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&v1alpha1.Object{}).Complete(), "Cannot create Object webhook")
