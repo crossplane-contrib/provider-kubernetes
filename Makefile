@@ -125,3 +125,20 @@ manifests:
 	@$(INFO) Deprecated. Run make generate instead.
 
 .PHONY: cobertura submodules fallthrough test-integration run manifests
+
+generate.run: kustomize.gen
+
+generate.done: kustomize.clean
+
+kustomize.gen:
+	@$(INFO) Generating CRDs with kustomize
+	@$(KUBECTL) kustomize cluster/kustomize/ > cluster/kustomize/kubernetes.crossplane.io_objects.yaml
+	@mv cluster/kustomize/kubernetes.crossplane.io_objects.yaml cluster/kustomize/crds/kubernetes.crossplane.io_objects.yaml
+	@mv cluster/kustomize/crds package/crds
+	@$(OK) Generated CRDs with kustomize
+
+kustomize.clean:
+	@$(INFO) Cleaning up kustomize generated CRDs
+	@rm -rf cluster/kustomize/crds
+	@rm -f cluster/kustomize/kubernetes.crossplane.io_objects.yaml
+	@$(OK) Cleaned up kustomize generated CRDs
