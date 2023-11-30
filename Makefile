@@ -130,7 +130,7 @@ generate.run: kustomize.gen
 
 generate.done: kustomize.clean
 
-kustomize.gen:
+kustomize.gen: $(KUBECTL)
 	@$(INFO) Generating CRDs with kustomize
 	@$(KUBECTL) kustomize cluster/kustomize/ > cluster/kustomize/kubernetes.crossplane.io_objects.yaml
 	@mv cluster/kustomize/kubernetes.crossplane.io_objects.yaml cluster/kustomize/crds/kubernetes.crossplane.io_objects.yaml
