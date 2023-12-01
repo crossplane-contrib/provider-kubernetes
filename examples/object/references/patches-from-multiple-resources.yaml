@@ -1,5 +1,5 @@
 ---
-apiVersion: kubernetes.crossplane.io/v1alpha1
+apiVersion: kubernetes.crossplane.io/v1beta1
 kind: Object
 metadata:
   name: foo

@@ -6,14 +6,14 @@ metadata:
 data:
   sample-key: sample-value
 ---
-apiVersion: kubernetes.crossplane.io/v1beta1
+apiVersion: kubernetes.crossplane.io/v1alpha1
 kind: Object
 metadata:
   name: foo
 spec:
-  # Use management policies Observe to observe k8s resource,
+  # Use management policy Observe to observe k8s resource,
   # but leave to third party to create, update, or delete the resource
-  managementPolicies: ["Observe"]
+  managementPolicy: Observe
   forProvider:
     manifest:
       apiVersion: v1

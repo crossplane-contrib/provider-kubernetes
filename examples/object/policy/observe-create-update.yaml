@@ -1,12 +1,12 @@
 ---
-apiVersion: kubernetes.crossplane.io/v1alpha1
+apiVersion: kubernetes.crossplane.io/v1beta1
 kind: Object
 metadata:
   name: foo
 spec:
-  # Use management policy ObserveCreateUpdate to observe, create, or update k8s
+  # Use management policy Observe Create Update to observe, create, or update k8s
   # resource, but leave to third party to delete the resource
-  managementPolicy: ObserveCreateUpdate
+  managementPolicies: ["Observe", "Create", "Update"]
   forProvider:
     manifest:
       apiVersion: v1
