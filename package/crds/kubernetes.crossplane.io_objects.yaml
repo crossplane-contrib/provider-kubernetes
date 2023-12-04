@@ -54,10 +54,12 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: AGE
       type: date
+    deprecated: true
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: A Object is an provider Kubernetes API type
+        description: 'A Object is an provider Kubernetes API type Deprecated: v1alpha1.Object
+          is deprecated in favor of v1beta1.Object'
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
