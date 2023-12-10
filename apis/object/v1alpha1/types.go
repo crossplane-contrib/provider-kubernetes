@@ -136,6 +136,10 @@ const (
 	// ReadinessPolicyDeriveFromObject means the object is marked as ready if and only if the underlying
 	// external resource is considered ready.
 	ReadinessPolicyDeriveFromObject ReadinessPolicy = "DeriveFromObject"
+
+	// ReadinessPolicyAllTrue means that all conditions have status true on the object.
+	// There must be at least one condition.
+	ReadinessPolicyAllTrue ReadinessPolicy = "AllTrue"
 )
 
 // Readiness defines how the object's readiness condition should be computed,
@@ -144,7 +148,7 @@ const (
 type Readiness struct {
 	// Policy defines how the Object's readiness condition should be computed.
 	// +optional
-	// +kubebuilder:validation:Enum=SuccessfulCreate;DeriveFromObject
+	// +kubebuilder:validation:Enum=SuccessfulCreate;DeriveFromObject;AllTrue
 	// +kubebuilder:default=SuccessfulCreate
 	Policy ReadinessPolicy `json:"policy,omitempty"`
 }

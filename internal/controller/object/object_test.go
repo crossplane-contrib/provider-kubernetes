@@ -1809,6 +1809,128 @@ func Test_updateConditionFromObserved(t *testing.T) {
 				},
 			},
 		},
+		"UnavailableIfAllTrueWithoutConditions": {
+			args: args{
+				obj: &v1alpha1.Object{
+					Spec: v1alpha1.ObjectSpec{
+						Readiness: v1alpha1.Readiness{
+							Policy: v1alpha1.ReadinessPolicyAllTrue,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": xpv1.ConditionedStatus{},
+					},
+				},
+			},
+			want: want{
+				conditions: []xpv1.Condition{
+					{
+						Type:   xpv1.TypeReady,
+						Status: corev1.ConditionFalse,
+						Reason: xpv1.ReasonUnavailable,
+					},
+				},
+			},
+		},
+		"UnavailableIfAllTrueAndCantParse": {
+			args: args{
+				obj: &v1alpha1.Object{
+					Spec: v1alpha1.ObjectSpec{
+						Readiness: v1alpha1.Readiness{
+							Policy: v1alpha1.ReadinessPolicyAllTrue,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": "not a conditioned status",
+					},
+				},
+			},
+			want: want{
+				conditions: []xpv1.Condition{
+					{
+						Type:   xpv1.TypeReady,
+						Status: corev1.ConditionFalse,
+						Reason: xpv1.ReasonUnavailable,
+					},
+				},
+			},
+		},
+		"UnavailableIfAllTrueAndAnyConditionFalse": {
+			args: args{
+				obj: &v1alpha1.Object{
+					Spec: v1alpha1.ObjectSpec{
+						Readiness: v1alpha1.Readiness{
+							Policy: v1alpha1.ReadinessPolicyAllTrue,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": xpv1.ConditionedStatus{
+							Conditions: []xpv1.Condition{
+								{
+									Type:   "condition1",
+									Status: corev1.ConditionFalse,
+								},
+								{
+									Type:   xpv1.TypeReady,
+									Status: corev1.ConditionTrue,
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				conditions: []xpv1.Condition{
+					{
+						Type:   xpv1.TypeReady,
+						Status: corev1.ConditionFalse,
+						Reason: xpv1.ReasonUnavailable,
+					},
+				},
+			},
+		},
+		"AvailableIfAllTrueAndAllConditionsTrue": {
+			args: args{
+				obj: &v1alpha1.Object{
+					Spec: v1alpha1.ObjectSpec{
+						Readiness: v1alpha1.Readiness{
+							Policy: v1alpha1.ReadinessPolicyAllTrue,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": xpv1.ConditionedStatus{
+							Conditions: []xpv1.Condition{
+								{
+									Type:   "condition1",
+									Status: corev1.ConditionTrue,
+								},
+								{
+									Type:   xpv1.TypeReady,
+									Status: corev1.ConditionTrue,
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				conditions: []xpv1.Condition{
+					{
+						Type:   xpv1.TypeReady,
+						Status: corev1.ConditionTrue,
+						Reason: xpv1.ReasonAvailable,
+					},
+				},
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
