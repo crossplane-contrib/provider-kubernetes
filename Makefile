@@ -126,7 +126,7 @@ manifests:
 
 .PHONY: cobertura submodules fallthrough test-integration run manifests
 
-generate.run: kustomize.gen
+generate.run: go.generate kustomize.gen
 
 generate.done: kustomize.clean
 
