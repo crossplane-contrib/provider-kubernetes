@@ -105,6 +105,10 @@ func main() {
 		log.Info("Beta feature enabled", "flag", feature.EnableBetaManagementPolicies)
 	}
 
+	// NOTE(lsviben): We are registering the conversion webhook with v1alpha1
+	// Object. As far as I can see and based on some tests, it doesn't matter
+	// which version we use here. Leaving it as v1alpha1 as it will be easy to
+	// notice and remove when we drop support for v1alpha1.
 	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&v1alpha1.Object{}).Complete(), "Cannot create Object webhook")
 
 	kingpin.FatalIfError(object.Setup(mgr, o), "Cannot setup controller")

@@ -130,6 +130,11 @@ generate.run: kustomize.gen
 
 generate.done: kustomize.clean
 
+# This hack is needed because we want to inject the conversion webhook
+# configuration into the Object CRD. This is not possible with the CRD
+# generation through controller-gen, and actually kubebuilder does
+# something similar, so we are following suit. Can be removed once we
+# drop support for v1alpha1.
 kustomize.gen: $(KUBECTL)
 	@$(INFO) Generating CRDs with kustomize
 	@$(KUBECTL) kustomize cluster/kustomize/ > cluster/kustomize/kubernetes.crossplane.io_objects.yaml
