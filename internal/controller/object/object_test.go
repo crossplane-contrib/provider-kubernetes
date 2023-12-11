@@ -1895,10 +1895,10 @@ func Test_updateConditionFromObserved(t *testing.T) {
 		},
 		"UnavailableIfAllTrueWithoutConditions": {
 			args: args{
-				obj: &v1alpha1.Object{
-					Spec: v1alpha1.ObjectSpec{
-						Readiness: v1alpha1.Readiness{
-							Policy: v1alpha1.ReadinessPolicyAllTrue,
+				obj: &v1beta1.Object{
+					Spec: v1beta1.ObjectSpec{
+						Readiness: v1beta1.Readiness{
+							Policy: v1beta1.ReadinessPolicyAllTrue,
 						},
 					},
 				},
@@ -1920,10 +1920,10 @@ func Test_updateConditionFromObserved(t *testing.T) {
 		},
 		"UnavailableIfAllTrueAndCantParse": {
 			args: args{
-				obj: &v1alpha1.Object{
-					Spec: v1alpha1.ObjectSpec{
-						Readiness: v1alpha1.Readiness{
-							Policy: v1alpha1.ReadinessPolicyAllTrue,
+				obj: &v1beta1.Object{
+					Spec: v1beta1.ObjectSpec{
+						Readiness: v1beta1.Readiness{
+							Policy: v1beta1.ReadinessPolicyAllTrue,
 						},
 					},
 				},
@@ -1945,10 +1945,10 @@ func Test_updateConditionFromObserved(t *testing.T) {
 		},
 		"UnavailableIfAllTrueAndAnyConditionFalse": {
 			args: args{
-				obj: &v1alpha1.Object{
-					Spec: v1alpha1.ObjectSpec{
-						Readiness: v1alpha1.Readiness{
-							Policy: v1alpha1.ReadinessPolicyAllTrue,
+				obj: &v1beta1.Object{
+					Spec: v1beta1.ObjectSpec{
+						Readiness: v1beta1.Readiness{
+							Policy: v1beta1.ReadinessPolicyAllTrue,
 						},
 					},
 				},
@@ -1981,10 +1981,10 @@ func Test_updateConditionFromObserved(t *testing.T) {
 		},
 		"AvailableIfAllTrueAndAllConditionsTrue": {
 			args: args{
-				obj: &v1alpha1.Object{
-					Spec: v1alpha1.ObjectSpec{
-						Readiness: v1alpha1.Readiness{
-							Policy: v1alpha1.ReadinessPolicyAllTrue,
+				obj: &v1beta1.Object{
+					Spec: v1beta1.ObjectSpec{
+						Readiness: v1beta1.Readiness{
+							Policy: v1beta1.ReadinessPolicyAllTrue,
 						},
 					},
 				},
