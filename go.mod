@@ -1,6 +1,6 @@
 module github.com/crossplane-contrib/provider-kubernetes
 
-go 1.19
+go 1.21.5
 
 require (
 	github.com/crossplane/crossplane-runtime v1.14.2
