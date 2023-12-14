@@ -50,14 +50,17 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 
 	references := []v1beta1.Reference{}
 	for _, r := range src.Spec.References {
-		references = append(references, v1beta1.Reference{
-			DependsOn: &v1beta1.DependsOn{
+		ref := v1beta1.Reference{}
+		if r.DependsOn != nil {
+			ref.DependsOn = &v1beta1.DependsOn{
 				APIVersion: r.DependsOn.APIVersion,
 				Kind:       r.DependsOn.Kind,
 				Name:       r.DependsOn.Name,
 				Namespace:  r.DependsOn.Namespace,
-			},
-			PatchesFrom: &v1beta1.PatchesFrom{
+			}
+		}
+		if r.PatchesFrom != nil {
+			ref.PatchesFrom = &v1beta1.PatchesFrom{
 				DependsOn: v1beta1.DependsOn{
 					APIVersion: r.PatchesFrom.APIVersion,
 					Kind:       r.PatchesFrom.Kind,
@@ -65,8 +68,9 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 					Namespace:  r.PatchesFrom.Namespace,
 				},
 				FieldPath: r.PatchesFrom.FieldPath,
-			},
-		})
+			}
+		}
+		references = append(references, ref)
 	}
 
 	dst.Spec = v1beta1.ObjectSpec{
@@ -125,14 +129,17 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint, 
 
 	references := []Reference{}
 	for _, r := range src.Spec.References {
-		references = append(references, Reference{
-			DependsOn: &DependsOn{
+		ref := Reference{}
+		if r.DependsOn != nil {
+			ref.DependsOn = &DependsOn{
 				APIVersion: r.DependsOn.APIVersion,
 				Kind:       r.DependsOn.Kind,
 				Name:       r.DependsOn.Name,
 				Namespace:  r.DependsOn.Namespace,
-			},
-			PatchesFrom: &PatchesFrom{
+			}
+		}
+		if r.PatchesFrom != nil {
+			ref.PatchesFrom = &PatchesFrom{
 				DependsOn: DependsOn{
 					APIVersion: r.PatchesFrom.APIVersion,
 					Kind:       r.PatchesFrom.Kind,
@@ -140,8 +147,9 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint, 
 					Namespace:  r.PatchesFrom.Namespace,
 				},
 				FieldPath: r.PatchesFrom.FieldPath,
-			},
-		})
+			}
+		}
+		references = append(references, ref)
 	}
 
 	dst.Spec = ObjectSpec{

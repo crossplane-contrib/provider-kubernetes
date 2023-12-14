@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/pointer"
 
 	v1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/test"
@@ -70,8 +71,26 @@ func TestConvertTo(t *testing.T) {
 							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
 						},
 						ManagementPolicy: v1alpha1.Observe,
-						References:       nil,
-						Readiness:        v1alpha1.Readiness{Policy: v1alpha1.ReadinessPolicySuccessfulCreate},
+						References: []v1alpha1.Reference{
+							{
+								DependsOn: &v1alpha1.DependsOn{
+									APIVersion: "v1",
+									Kind:       "Secret",
+									Name:       "topsecret",
+									Namespace:  "coolns",
+								},
+								PatchesFrom: &v1alpha1.PatchesFrom{
+									DependsOn: v1alpha1.DependsOn{
+										APIVersion: "v1",
+										Kind:       "Secret",
+										Name:       "topsecret",
+										Namespace:  "coolns",
+									},
+									FieldPath: pointer.String("data.password"),
+								},
+							},
+						},
+						Readiness: v1alpha1.Readiness{Policy: v1alpha1.ReadinessPolicySuccessfulCreate},
 					},
 				},
 			},
@@ -97,8 +116,93 @@ func TestConvertTo(t *testing.T) {
 						ForProvider: v1beta1.ObjectParameters{
 							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
 						},
-						References: []v1beta1.Reference{},
-						Readiness:  v1beta1.Readiness{Policy: v1beta1.ReadinessPolicySuccessfulCreate},
+						References: []v1beta1.Reference{
+							{
+								DependsOn: &v1beta1.DependsOn{
+									APIVersion: "v1",
+									Kind:       "Secret",
+									Name:       "topsecret",
+									Namespace:  "coolns",
+								},
+								PatchesFrom: &v1beta1.PatchesFrom{
+									DependsOn: v1beta1.DependsOn{
+										APIVersion: "v1",
+										Kind:       "Secret",
+										Name:       "topsecret",
+										Namespace:  "coolns",
+									},
+									FieldPath: pointer.String("data.password"),
+								},
+							},
+						},
+						Readiness: v1beta1.Readiness{Policy: v1beta1.ReadinessPolicySuccessfulCreate},
+					},
+				},
+			},
+		},
+		{
+			name: "converts to v1beta1 - nil checks",
+			args: args{
+				src: &v1alpha1.Object{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "coolobject",
+					},
+					Spec: v1alpha1.ObjectSpec{
+						ResourceSpec: v1alpha1.ResourceSpec{
+							DeletionPolicy: v1.DeletionDelete,
+						},
+						ConnectionDetails: []v1alpha1.ConnectionDetail{
+							{
+								ObjectReference: corev1.ObjectReference{
+									APIVersion: "v1",
+									Kind:       "Secret",
+									Name:       "topsecret",
+								},
+							},
+						},
+						ForProvider: v1alpha1.ObjectParameters{
+							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
+						},
+						ManagementPolicy: v1alpha1.Observe,
+						References: []v1alpha1.Reference{
+							{
+								DependsOn:   nil,
+								PatchesFrom: nil,
+							},
+						},
+						Readiness: v1alpha1.Readiness{Policy: v1alpha1.ReadinessPolicySuccessfulCreate},
+					},
+				},
+			},
+			want: want{
+				dst: &v1beta1.Object{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "coolobject",
+					},
+					Spec: v1beta1.ObjectSpec{
+						ResourceSpec: v1.ResourceSpec{
+							DeletionPolicy:     v1.DeletionDelete,
+							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionObserve},
+						},
+						ConnectionDetails: []v1beta1.ConnectionDetail{
+							{
+								ObjectReference: corev1.ObjectReference{
+									APIVersion: "v1",
+									Kind:       "Secret",
+									Name:       "topsecret",
+								},
+							},
+						},
+						ForProvider: v1beta1.ObjectParameters{
+							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
+						},
+						References: []v1beta1.Reference{
+							{
+								DependsOn:   nil,
+								PatchesFrom: nil,
+							},
+						},
+						Readiness: v1beta1.Readiness{Policy: v1beta1.ReadinessPolicySuccessfulCreate},
 					},
 				},
 			},
@@ -175,8 +279,26 @@ func TestConvertFrom(t *testing.T) {
 						ForProvider: v1beta1.ObjectParameters{
 							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
 						},
-						References: []v1beta1.Reference{},
-						Readiness:  v1beta1.Readiness{Policy: v1beta1.ReadinessPolicySuccessfulCreate},
+						References: []v1beta1.Reference{
+							{
+								DependsOn: &v1beta1.DependsOn{
+									APIVersion: "v1",
+									Kind:       "Secret",
+									Name:       "topsecret",
+									Namespace:  "coolns",
+								},
+								PatchesFrom: &v1beta1.PatchesFrom{
+									DependsOn: v1beta1.DependsOn{
+										APIVersion: "v1",
+										Kind:       "Secret",
+										Name:       "topsecret",
+										Namespace:  "coolns",
+									},
+									FieldPath: pointer.String("data.password"),
+								},
+							},
+						},
+						Readiness: v1beta1.Readiness{Policy: v1beta1.ReadinessPolicySuccessfulCreate},
 					},
 				},
 			},
@@ -202,8 +324,93 @@ func TestConvertFrom(t *testing.T) {
 							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
 						},
 						ManagementPolicy: v1alpha1.Observe,
-						References:       []v1alpha1.Reference{},
-						Readiness:        v1alpha1.Readiness{Policy: v1alpha1.ReadinessPolicySuccessfulCreate},
+						References: []v1alpha1.Reference{
+							{
+								DependsOn: &v1alpha1.DependsOn{
+									APIVersion: "v1",
+									Kind:       "Secret",
+									Name:       "topsecret",
+									Namespace:  "coolns",
+								},
+								PatchesFrom: &v1alpha1.PatchesFrom{
+									DependsOn: v1alpha1.DependsOn{
+										APIVersion: "v1",
+										Kind:       "Secret",
+										Name:       "topsecret",
+										Namespace:  "coolns",
+									},
+									FieldPath: pointer.String("data.password"),
+								},
+							},
+						},
+						Readiness: v1alpha1.Readiness{Policy: v1alpha1.ReadinessPolicySuccessfulCreate},
+					},
+				},
+			},
+		},
+		{
+			name: "converts to v1beta1 - nil checks",
+			args: args{
+				src: &v1beta1.Object{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "coolobject",
+					},
+					Spec: v1beta1.ObjectSpec{
+						ResourceSpec: v1.ResourceSpec{
+							DeletionPolicy:     v1.DeletionDelete,
+							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionObserve},
+						},
+						ConnectionDetails: []v1beta1.ConnectionDetail{
+							{
+								ObjectReference: corev1.ObjectReference{
+									APIVersion: "v1",
+									Kind:       "Secret",
+									Name:       "topsecret",
+								},
+							},
+						},
+						ForProvider: v1beta1.ObjectParameters{
+							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
+						},
+						References: []v1beta1.Reference{
+							{
+								DependsOn:   nil,
+								PatchesFrom: nil,
+							},
+						},
+						Readiness: v1beta1.Readiness{Policy: v1beta1.ReadinessPolicySuccessfulCreate},
+					},
+				},
+			},
+			want: want{
+				dst: &v1alpha1.Object{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "coolobject",
+					},
+					Spec: v1alpha1.ObjectSpec{
+						ResourceSpec: v1alpha1.ResourceSpec{
+							DeletionPolicy: v1.DeletionDelete,
+						},
+						ConnectionDetails: []v1alpha1.ConnectionDetail{
+							{
+								ObjectReference: corev1.ObjectReference{
+									APIVersion: "v1",
+									Kind:       "Secret",
+									Name:       "topsecret",
+								},
+							},
+						},
+						ForProvider: v1alpha1.ObjectParameters{
+							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
+						},
+						ManagementPolicy: v1alpha1.Observe,
+						References: []v1alpha1.Reference{
+							{
+								DependsOn:   nil,
+								PatchesFrom: nil,
+							},
+						},
+						Readiness: v1alpha1.Readiness{Policy: v1alpha1.ReadinessPolicySuccessfulCreate},
 					},
 				},
 			},
