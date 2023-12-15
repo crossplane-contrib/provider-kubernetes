@@ -3,7 +3,7 @@ module github.com/crossplane-contrib/provider-kubernetes
 go 1.19
 
 require (
-	github.com/crossplane/crossplane-runtime v1.14.2
+	github.com/crossplane/crossplane-runtime v1.14.3
 	github.com/crossplane/crossplane-tools v0.0.0-20230925130601-628280f8bf79
 	github.com/google/go-cmp v0.6.0
 	github.com/pkg/errors v0.9.1
