@@ -42,6 +42,12 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
+const (
+	webhookTLSCertDirEnvVar = "WEBHOOK_TLS_CERT_DIR"
+	tlsServerCertDirEnvVar  = "TLS_SERVER_CERTS_DIR"
+	tlsServerCertDir        = "/tls/server"
+)
+
 func main() {
 	var (
 		app                      = kingpin.New(filepath.Base(os.Args[0]), "Template support for Crossplane.").DefaultEnvars()
@@ -68,6 +74,18 @@ func main() {
 	cfg, err := ctrl.GetConfig()
 	kingpin.FatalIfError(err, "Cannot get API server rest config")
 
+	// Get the TLS certs directory from the environment variable if set
+	// In older XP versions we used WEBHOOK_TLS_CERT_DIR, in newer versions
+	// we use TLS_SERVER_CERTS_DIR. If neither are set, use the default.
+	var certDir string
+	certDir = os.Getenv(webhookTLSCertDirEnvVar)
+	if certDir == "" {
+		certDir = os.Getenv(tlsServerCertDirEnvVar)
+		if certDir == "" {
+			certDir = tlsServerCertDir
+		}
+	}
+
 	mgr, err := ctrl.NewManager(ratelimiter.LimitRESTConfig(cfg, *maxReconcileRate), ctrl.Options{
 		Cache: cache.Options{
 			SyncPeriod: syncInterval,
@@ -86,7 +104,7 @@ func main() {
 		LeaseDuration:              func() *time.Duration { d := 60 * time.Second; return &d }(),
 		RenewDeadline:              func() *time.Duration { d := 50 * time.Second; return &d }(),
 		WebhookServer: webhook.NewServer(webhook.Options{
-			CertDir: filepath.Join("/", "tls", "server"),
+			CertDir: certDir,
 		}),
 	})
 	kingpin.FatalIfError(err, "Cannot create controller manager")
