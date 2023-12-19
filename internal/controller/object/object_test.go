@@ -60,6 +60,8 @@ const (
 	testSecretName          = "testcreds"
 
 	externalResourceName = "crossplane-system"
+
+	someUID = "some-uid"
 )
 
 var (
@@ -205,10 +207,13 @@ func referenceObjectWithFinalizer(val interface{}) *unstructured.Unstructured {
 	return res
 }
 
-type providerConfigModifier func(pc *kubernetesv1alpha1.ProviderConfig)
+func Test_connector_Connect(t *testing.T) {
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: providerSecretNamespace, Name: providerSecretName},
+		Data:       map[string][]byte{providerSecretKey: []byte(providerSecretData)},
+	}
 
-func providerConfig(pm ...providerConfigModifier) *kubernetesv1alpha1.ProviderConfig {
-	pc := &kubernetesv1alpha1.ProviderConfig{
+	providerConfig := kubernetesv1alpha1.ProviderConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: providerName},
 		Spec: kubernetesv1alpha1.ProviderConfigSpec{
 			Credentials: kubernetesv1alpha1.ProviderCredentials{},
@@ -218,28 +223,41 @@ func providerConfig(pm ...providerConfigModifier) *kubernetesv1alpha1.ProviderCo
 		},
 	}
 
-	for _, m := range pm {
-		m(pc)
+	providerConfigGoogleInjectedIdentity := *providerConfig.DeepCopy()
+	providerConfigGoogleInjectedIdentity.Spec.Identity.Source = xpv1.CredentialsSourceInjectedIdentity
+
+	providerConfigAzure := &kubernetesv1alpha1.ProviderConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: providerName},
+		Spec: kubernetesv1alpha1.ProviderConfigSpec{
+			Credentials: kubernetesv1alpha1.ProviderCredentials{
+				Source: xpv1.CredentialsSourceNone,
+			},
+			Identity: &kubernetesv1alpha1.Identity{
+				Type: kubernetesv1alpha1.IdentityTypeAzureServicePrincipalCredentials,
+				ProviderCredentials: kubernetesv1alpha1.ProviderCredentials{
+					Source: xpv1.CredentialsSourceNone,
+				},
+			},
+		},
 	}
 
-	return pc
-}
+	providerConfigAzureInjectedIdentity := *providerConfigAzure.DeepCopy()
+	providerConfigAzureInjectedIdentity.Spec.Identity.Source = xpv1.CredentialsSourceInjectedIdentity
 
-func Test_connector_Connect(t *testing.T) {
-	secret := corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: providerSecretNamespace, Name: providerSecretName},
-		Data:       map[string][]byte{providerSecretKey: []byte(providerSecretData)},
-	}
+	providerConfigUnknownIdentitySource := *providerConfigAzure.DeepCopy()
+	providerConfigUnknownIdentitySource.Spec.Identity.Type = "foo"
 
 	type args struct {
-		client          client.Client
-		kcfgExtractorFn func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
-		gcpExtractorFn  func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
-		gcpInjectorFn   func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error
-		newRESTConfigFn func(kubeconfig []byte) (*rest.Config, error)
-		newKubeClientFn func(config *rest.Config) (client.Client, error)
-		usage           resource.Tracker
-		mg              resource.Managed
+		client           client.Client
+		kcfgExtractorFn  func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
+		gcpExtractorFn   func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
+		gcpInjectorFn    func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error
+		azureExtractorFn func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
+		azureInjectorFn  func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error
+		newRESTConfigFn  func(kubeconfig []byte) (*rest.Config, error)
+		newKubeClientFn  func(config *rest.Config) (client.Client, error)
+		usage            resource.Tracker
+		mg               resource.Managed
 	}
 	type want struct {
 		err error
@@ -270,7 +288,7 @@ func Test_connector_Connect(t *testing.T) {
 				client: &test.MockClient{
 					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 						if key.Name == providerName {
-							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfig()
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = providerConfig
 							return errBoom
 						}
 						return nil
@@ -288,7 +306,7 @@ func Test_connector_Connect(t *testing.T) {
 				client: &test.MockClient{
 					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 						if key.Name == providerName {
-							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfig()
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = providerConfig
 							return nil
 						}
 						if key.Name == providerSecretName && key.Namespace == providerSecretNamespace {
@@ -313,7 +331,7 @@ func Test_connector_Connect(t *testing.T) {
 				client: &test.MockClient{
 					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 						if key.Name == providerName {
-							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfig()
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = providerConfig
 							return nil
 						}
 						if key.Name == providerSecretName && key.Namespace == providerSecretNamespace {
@@ -336,12 +354,12 @@ func Test_connector_Connect(t *testing.T) {
 				err: errors.Wrap(errBoom, errFailedToCreateRestConfig),
 			},
 		},
-		"FailedToExtractGoogleAppCreds": {
+		"FailedToExtractGoogleCredentials": {
 			args: args{
 				client: &test.MockClient{
 					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 						if key.Name == providerName {
-							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfig()
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = providerConfig
 							return nil
 						}
 						if key.Name == providerSecretName && key.Namespace == providerSecretNamespace {
@@ -367,12 +385,12 @@ func Test_connector_Connect(t *testing.T) {
 				err: errors.Wrap(errBoom, errFailedToExtractGoogleCredentials),
 			},
 		},
-		"FailedToInjectGoogleAppCreds": {
+		"FailedToInjectGoogleCredentials": {
 			args: args{
 				client: &test.MockClient{
 					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 						if key.Name == providerName {
-							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfig()
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = providerConfig
 							return nil
 						}
 						if key.Name == providerSecretName && key.Namespace == providerSecretNamespace {
@@ -401,12 +419,160 @@ func Test_connector_Connect(t *testing.T) {
 				err: errors.Wrap(errBoom, errFailedToInjectGoogleCredentials),
 			},
 		},
+		"FailedToInjectGoogleCredentialsWithInjectedIdentitySource": {
+			args: args{
+				client: &test.MockClient{
+					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if key.Name == providerName {
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = providerConfigGoogleInjectedIdentity
+							return nil
+						}
+						return errBoom
+					},
+				},
+				kcfgExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				newRESTConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
+					return nil, nil
+				},
+				gcpExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				gcpInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+					return errBoom
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				mg:    kubernetesObject(),
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errFailedToInjectGoogleCredentials),
+			},
+		},
+		"FailedToExtractAzureCredentials": {
+			args: args{
+				client: &test.MockClient{
+					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if key.Name == providerName {
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfigAzure
+							return nil
+						}
+						return errBoom
+					},
+				},
+				kcfgExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				newRESTConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
+					return nil, nil
+				},
+				azureExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, errBoom
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				mg:    kubernetesObject(),
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errFailedToExtractAzureCredentials),
+			},
+		},
+		"FailedToInjectAzureCredentials": {
+			args: args{
+				client: &test.MockClient{
+					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if key.Name == providerName {
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfigAzure
+							return nil
+						}
+						return errBoom
+					},
+				},
+				kcfgExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				newRESTConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
+					return nil, nil
+				},
+				azureExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				azureInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+					return errBoom
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				mg:    kubernetesObject(),
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errFailedToInjectAzureCredentials),
+			},
+		},
+		"AzureCredentialsInjectedIdentitySourceNotSupported": {
+			args: args{
+				client: &test.MockClient{
+					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if key.Name == providerName {
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = providerConfigAzureInjectedIdentity
+							return nil
+						}
+						return errBoom
+					},
+				},
+				kcfgExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				newRESTConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
+					return nil, nil
+				},
+				azureExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				azureInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+					return errBoom
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				mg:    kubernetesObject(),
+			},
+			want: want{
+				err: errors.Errorf("%s is not supported as identity source for identity type %s",
+					xpv1.CredentialsSourceInjectedIdentity, kubernetesv1alpha1.IdentityTypeAzureServicePrincipalCredentials),
+			},
+		},
+		"FailedToInjectUnknownIdentityType": {
+			args: args{
+				client: &test.MockClient{
+					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if key.Name == providerName {
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = providerConfigUnknownIdentitySource
+							return nil
+						}
+						return errBoom
+					},
+				},
+				kcfgExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				newRESTConfigFn: func(kubeconfig []byte) (config *rest.Config, err error) {
+					return nil, nil
+				},
+				azureExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
+					return nil, nil
+				},
+				azureInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+					return errBoom
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				mg:    kubernetesObject(),
+			},
+			want: want{
+				err: errors.Errorf("unknown identity type: %s", "foo"),
+			},
+		},
 		"FailedToCreateNewKubernetesClient": {
 			args: args{
 				client: &test.MockClient{
 					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 						if key.Name == providerName {
-							*obj.(*kubernetesv1alpha1.ProviderConfig) = *providerConfig()
+							*obj.(*kubernetesv1alpha1.ProviderConfig) = providerConfig
 							return nil
 						}
 						if key.Name == providerSecretName && key.Namespace == providerSecretNamespace {
@@ -448,7 +614,7 @@ func Test_connector_Connect(t *testing.T) {
 					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 						switch t := obj.(type) {
 						case *kubernetesv1alpha1.ProviderConfig:
-							*t = *providerConfig()
+							*t = providerConfig
 						case *corev1.Secret:
 							*t = secret
 						default:
@@ -486,14 +652,16 @@ func Test_connector_Connect(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			c := &connector{
-				logger:          logging.NewNopLogger(),
-				kube:            tc.args.client,
-				kcfgExtractorFn: tc.args.kcfgExtractorFn,
-				gcpExtractorFn:  tc.args.gcpExtractorFn,
-				gcpInjectorFn:   tc.args.gcpInjectorFn,
-				newRESTConfigFn: tc.args.newRESTConfigFn,
-				newKubeClientFn: tc.args.newKubeClientFn,
-				usage:           tc.usage,
+				logger:           logging.NewNopLogger(),
+				kube:             tc.args.client,
+				kcfgExtractorFn:  tc.args.kcfgExtractorFn,
+				gcpExtractorFn:   tc.args.gcpExtractorFn,
+				gcpInjectorFn:    tc.args.gcpInjectorFn,
+				azureExtractorFn: tc.args.azureExtractorFn,
+				azureInjectorFn:  tc.args.azureInjectorFn,
+				newRESTConfigFn:  tc.args.newRESTConfigFn,
+				newKubeClientFn:  tc.args.newKubeClientFn,
+				usage:            tc.usage,
 			}
 			_, gotErr := c.Connect(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
@@ -1444,7 +1612,7 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				mg: kubernetesObject(func(obj *v1alpha1.Object) {
 					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
 					obj.Spec.References = objectReferences()
-					obj.ObjectMeta.UID = "some-uid"
+					obj.ObjectMeta.UID = someUID
 				}),
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
@@ -1463,12 +1631,12 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				mg: kubernetesObject(func(obj *v1alpha1.Object) {
 					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
 					obj.Spec.References = objectReferences()
-					obj.ObjectMeta.UID = "some-uid"
+					obj.ObjectMeta.UID = someUID
 				}),
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
 						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-							*obj.(*unstructured.Unstructured) = *referenceObjectWithFinalizer(refFinalizerNamePrefix + "some-uid")
+							*obj.(*unstructured.Unstructured) = *referenceObjectWithFinalizer(refFinalizerNamePrefix + someUID)
 							return nil
 						},
 						MockUpdate: test.NewMockUpdateFn(nil, func(obj client.Object) error {
@@ -1493,12 +1661,12 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 				mg: kubernetesObject(func(obj *v1alpha1.Object) {
 					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
 					obj.Spec.References = objectReferences()
-					obj.ObjectMeta.UID = "some-uid"
+					obj.ObjectMeta.UID = someUID
 				}),
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
 						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) = *referenceObjectWithFinalizer(refFinalizerNamePrefix + "some-uid")
+							*obj.(*unstructured.Unstructured) = *referenceObjectWithFinalizer(refFinalizerNamePrefix + someUID)
 							return nil
 						}),
 						MockUpdate: test.NewMockUpdateFn(nil),

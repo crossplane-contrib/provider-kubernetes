@@ -156,6 +156,7 @@ spec:
                     description: Type of identity.
                     enum:
                     - GoogleApplicationCredentials
+                    - AzureServicePrincipalCredentials
                     type: string
                 required:
                 - source
