@@ -28,6 +28,10 @@ func WrapRESTConfig(_ context.Context, rc *rest.Config, credentials []byte, _ ..
 		return err
 	}
 
+	if rc.ExecProvider == nil || rc.ExecProvider.Args == nil || len(rc.ExecProvider.Args) < 1 {
+		return errors.New("an identity configuration was specified but the provided kubeconfig does not have execProvider section")
+	}
+
 	fs := pflag.NewFlagSet("kubelogin", pflag.ContinueOnError)
 	opts := token.NewOptions()
 	opts.AddFlags(fs)
