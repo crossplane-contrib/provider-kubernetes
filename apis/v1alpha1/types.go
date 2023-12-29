@@ -49,12 +49,14 @@ type IdentityType string
 // Supported identity types.
 const (
 	IdentityTypeGoogleApplicationCredentials = "GoogleApplicationCredentials"
+
+	IdentityTypeAzureServicePrincipalCredentials = "AzureServicePrincipalCredentials"
 )
 
 // Identity used to authenticate.
 type Identity struct {
 	// Type of identity.
-	// +kubebuilder:validation:Enum=GoogleApplicationCredentials
+	// +kubebuilder:validation:Enum=GoogleApplicationCredentials;AzureServicePrincipalCredentials
 	Type IdentityType `json:"type"`
 
 	ProviderCredentials `json:",inline"`

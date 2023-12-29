@@ -30,14 +30,14 @@ GO_TEST_PARALLEL := $(shell echo $$(( $(NPROCS) / 2 )))
 GO_STATIC_PACKAGES = $(GO_PROJECT)/cmd/provider
 GO_SUBDIRS += cmd internal apis
 GO111MODULE = on
-GOLANGCILINT_VERSION = 1.51.2
+GOLANGCILINT_VERSION = 1.55.2
 -include build/makelib/golang.mk
 
 # ====================================================================================
 # Setup Kubernetes tools
 KIND_VERSION = v0.18.0
-UP_VERSION = v0.17.0
-UPTEST_VERSION = v0.5.0
+UP_VERSION = v0.21.0
+UPTEST_VERSION = v0.9.0
 UP_CHANNEL = stable
 USE_HELM3 = true
 -include build/makelib/k8s_tools.mk
@@ -92,7 +92,7 @@ CROSSPLANE_NAMESPACE = crossplane-system
 UPTEST_EXAMPLE_LIST ?= "examples/object/object.yaml"
 uptest: $(UPTEST) $(KUBECTL) $(KUTTL)
 	@$(INFO) running automated tests
-	@KUBECTL=$(KUBECTL) KUTTL=$(KUTTL) $(UPTEST) e2e "$(UPTEST_EXAMPLE_LIST)" --setup-script=cluster/test/setup.sh || $(FAIL)
+	@KUBECTL=$(KUBECTL) KUTTL=$(KUTTL) CROSSPLANE_NAMESPACE=${CROSSPLANE_NAMESPACE} $(UPTEST) e2e "$(UPTEST_EXAMPLE_LIST)" --setup-script=cluster/test/setup.sh || $(FAIL)
 	@$(OK) running automated tests
 
 local-dev: controlplane.up
