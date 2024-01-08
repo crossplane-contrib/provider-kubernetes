@@ -14,9 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
-
-// Hub marks this type as a conversion hub.
-func (g *Object) Hub() {
-
-}
+// Package v1alpha2 contains the v1alpha2 group Object resources of the Kubernetes provider.
+// +kubebuilder:object:generate=true
+// +groupName=kubernetes.crossplane.io
+// +versionName=v1alpha2
+package v1alpha2

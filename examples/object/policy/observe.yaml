@@ -6,7 +6,7 @@ metadata:
 data:
   sample-key: sample-value
 ---
-apiVersion: kubernetes.crossplane.io/v1beta1
+apiVersion: kubernetes.crossplane.io/v1alpha2
 kind: Object
 metadata:
   name: foo

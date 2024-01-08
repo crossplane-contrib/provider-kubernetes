@@ -24,35 +24,35 @@ import (
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 
-	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1beta1"
+	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 )
 
-// ConvertTo converts this Object to the Hub version (v1beta1).
+// ConvertTo converts this Object to the Hub version (v1alpha2).
 func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // We want to use different names for receiver parameter to be more clear.
-	dst := dstRaw.(*v1beta1.Object)
+	dst := dstRaw.(*v1alpha2.Object)
 
 	// copy identical fields
 	dst.ObjectMeta = src.ObjectMeta
 
-	dst.Status = v1beta1.ObjectStatus{
+	dst.Status = v1alpha2.ObjectStatus{
 		ResourceStatus: src.Status.ResourceStatus,
-		AtProvider: v1beta1.ObjectObservation{
+		AtProvider: v1alpha2.ObjectObservation{
 			Manifest: src.Status.AtProvider.Manifest,
 		},
 	}
 
-	connectionDetails := []v1beta1.ConnectionDetail{}
+	connectionDetails := []v1alpha2.ConnectionDetail{}
 	for _, cd := range src.Spec.ConnectionDetails {
-		connectionDetails = append(connectionDetails, v1beta1.ConnectionDetail{
+		connectionDetails = append(connectionDetails, v1alpha2.ConnectionDetail{
 			ObjectReference: cd.ObjectReference,
 		})
 	}
 
-	references := []v1beta1.Reference{}
+	references := []v1alpha2.Reference{}
 	for _, r := range src.Spec.References {
-		ref := v1beta1.Reference{}
+		ref := v1alpha2.Reference{}
 		if r.DependsOn != nil {
-			ref.DependsOn = &v1beta1.DependsOn{
+			ref.DependsOn = &v1alpha2.DependsOn{
 				APIVersion: r.DependsOn.APIVersion,
 				Kind:       r.DependsOn.Kind,
 				Name:       r.DependsOn.Name,
@@ -60,8 +60,8 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 			}
 		}
 		if r.PatchesFrom != nil {
-			ref.PatchesFrom = &v1beta1.PatchesFrom{
-				DependsOn: v1beta1.DependsOn{
+			ref.PatchesFrom = &v1alpha2.PatchesFrom{
+				DependsOn: v1alpha2.DependsOn{
 					APIVersion: r.PatchesFrom.APIVersion,
 					Kind:       r.PatchesFrom.Kind,
 					Name:       r.PatchesFrom.Name,
@@ -73,7 +73,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 		references = append(references, ref)
 	}
 
-	dst.Spec = v1beta1.ObjectSpec{
+	dst.Spec = v1alpha2.ObjectSpec{
 		ResourceSpec: xpv1.ResourceSpec{
 			WriteConnectionSecretToReference: src.GetWriteConnectionSecretToReference(),
 			PublishConnectionDetailsTo:       src.GetPublishConnectionDetailsTo(),
@@ -81,12 +81,12 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 			DeletionPolicy:                   src.GetDeletionPolicy(),
 		},
 		ConnectionDetails: connectionDetails,
-		ForProvider: v1beta1.ObjectParameters{
+		ForProvider: v1alpha2.ObjectParameters{
 			Manifest: src.Spec.ForProvider.Manifest,
 		},
 		References: references,
-		Readiness: v1beta1.Readiness{
-			Policy: v1beta1.ReadinessPolicy(src.Spec.Readiness.Policy),
+		Readiness: v1alpha2.Readiness{
+			Policy: v1alpha2.ReadinessPolicy(src.Spec.Readiness.Policy),
 		},
 	}
 
@@ -107,9 +107,9 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 	return nil
 }
 
-// ConvertFrom converts from the Hub version (v1beta1) to this version.
+// ConvertFrom converts from the Hub version (v1alpha2) to this version.
 func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint, gocyclo // We want to use different names for receiver parameter to be more clear.
-	src := srcRaw.(*v1beta1.Object)
+	src := srcRaw.(*v1alpha2.Object)
 
 	// copy identical fields
 	dst.ObjectMeta = src.ObjectMeta

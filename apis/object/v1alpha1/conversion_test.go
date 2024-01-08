@@ -30,7 +30,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/test"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
-	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1beta1"
+	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 )
 
 func TestConvertTo(t *testing.T) {
@@ -39,7 +39,7 @@ func TestConvertTo(t *testing.T) {
 	}
 	type want struct {
 		err error
-		dst *v1beta1.Object
+		dst *v1alpha2.Object
 	}
 
 	tests := []struct {
@@ -48,7 +48,7 @@ func TestConvertTo(t *testing.T) {
 		want want
 	}{
 		{
-			name: "converts to v1beta1",
+			name: "converts to v1alpha2",
 			args: args{
 				src: &v1alpha1.Object{
 					ObjectMeta: metav1.ObjectMeta{
@@ -95,16 +95,16 @@ func TestConvertTo(t *testing.T) {
 				},
 			},
 			want: want{
-				dst: &v1beta1.Object{
+				dst: &v1alpha2.Object{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "coolobject",
 					},
-					Spec: v1beta1.ObjectSpec{
+					Spec: v1alpha2.ObjectSpec{
 						ResourceSpec: v1.ResourceSpec{
 							DeletionPolicy:     v1.DeletionDelete,
 							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionObserve},
 						},
-						ConnectionDetails: []v1beta1.ConnectionDetail{
+						ConnectionDetails: []v1alpha2.ConnectionDetail{
 							{
 								ObjectReference: corev1.ObjectReference{
 									APIVersion: "v1",
@@ -113,19 +113,19 @@ func TestConvertTo(t *testing.T) {
 								},
 							},
 						},
-						ForProvider: v1beta1.ObjectParameters{
+						ForProvider: v1alpha2.ObjectParameters{
 							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
 						},
-						References: []v1beta1.Reference{
+						References: []v1alpha2.Reference{
 							{
-								DependsOn: &v1beta1.DependsOn{
+								DependsOn: &v1alpha2.DependsOn{
 									APIVersion: "v1",
 									Kind:       "Secret",
 									Name:       "topsecret",
 									Namespace:  "coolns",
 								},
-								PatchesFrom: &v1beta1.PatchesFrom{
-									DependsOn: v1beta1.DependsOn{
+								PatchesFrom: &v1alpha2.PatchesFrom{
+									DependsOn: v1alpha2.DependsOn{
 										APIVersion: "v1",
 										Kind:       "Secret",
 										Name:       "topsecret",
@@ -135,13 +135,13 @@ func TestConvertTo(t *testing.T) {
 								},
 							},
 						},
-						Readiness: v1beta1.Readiness{Policy: v1beta1.ReadinessPolicySuccessfulCreate},
+						Readiness: v1alpha2.Readiness{Policy: v1alpha2.ReadinessPolicySuccessfulCreate},
 					},
 				},
 			},
 		},
 		{
-			name: "converts to v1beta1 - nil checks",
+			name: "converts to v1alpha2 - nil checks",
 			args: args{
 				src: &v1alpha1.Object{
 					ObjectMeta: metav1.ObjectMeta{
@@ -175,16 +175,16 @@ func TestConvertTo(t *testing.T) {
 				},
 			},
 			want: want{
-				dst: &v1beta1.Object{
+				dst: &v1alpha2.Object{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "coolobject",
 					},
-					Spec: v1beta1.ObjectSpec{
+					Spec: v1alpha2.ObjectSpec{
 						ResourceSpec: v1.ResourceSpec{
 							DeletionPolicy:     v1.DeletionDelete,
 							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionObserve},
 						},
-						ConnectionDetails: []v1beta1.ConnectionDetail{
+						ConnectionDetails: []v1alpha2.ConnectionDetail{
 							{
 								ObjectReference: corev1.ObjectReference{
 									APIVersion: "v1",
@@ -193,16 +193,16 @@ func TestConvertTo(t *testing.T) {
 								},
 							},
 						},
-						ForProvider: v1beta1.ObjectParameters{
+						ForProvider: v1alpha2.ObjectParameters{
 							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
 						},
-						References: []v1beta1.Reference{
+						References: []v1alpha2.Reference{
 							{
 								DependsOn:   nil,
 								PatchesFrom: nil,
 							},
 						},
-						Readiness: v1beta1.Readiness{Policy: v1beta1.ReadinessPolicySuccessfulCreate},
+						Readiness: v1alpha2.Readiness{Policy: v1alpha2.ReadinessPolicySuccessfulCreate},
 					},
 				},
 			},
@@ -226,7 +226,7 @@ func TestConvertTo(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			beta := &v1beta1.Object{}
+			beta := &v1alpha2.Object{}
 			err := tc.args.src.ConvertTo(beta)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\nr.ConvertTo(...): -want error, +got error:\n%s", diff)
@@ -243,7 +243,7 @@ func TestConvertTo(t *testing.T) {
 
 func TestConvertFrom(t *testing.T) {
 	type args struct {
-		src *v1beta1.Object
+		src *v1alpha2.Object
 	}
 	type want struct {
 		err error
@@ -256,18 +256,18 @@ func TestConvertFrom(t *testing.T) {
 		want want
 	}{
 		{
-			name: "converts to v1beta1",
+			name: "converts to v1alpha2",
 			args: args{
-				src: &v1beta1.Object{
+				src: &v1alpha2.Object{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "coolobject",
 					},
-					Spec: v1beta1.ObjectSpec{
+					Spec: v1alpha2.ObjectSpec{
 						ResourceSpec: v1.ResourceSpec{
 							DeletionPolicy:     v1.DeletionDelete,
 							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionObserve},
 						},
-						ConnectionDetails: []v1beta1.ConnectionDetail{
+						ConnectionDetails: []v1alpha2.ConnectionDetail{
 							{
 								ObjectReference: corev1.ObjectReference{
 									APIVersion: "v1",
@@ -276,19 +276,19 @@ func TestConvertFrom(t *testing.T) {
 								},
 							},
 						},
-						ForProvider: v1beta1.ObjectParameters{
+						ForProvider: v1alpha2.ObjectParameters{
 							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
 						},
-						References: []v1beta1.Reference{
+						References: []v1alpha2.Reference{
 							{
-								DependsOn: &v1beta1.DependsOn{
+								DependsOn: &v1alpha2.DependsOn{
 									APIVersion: "v1",
 									Kind:       "Secret",
 									Name:       "topsecret",
 									Namespace:  "coolns",
 								},
-								PatchesFrom: &v1beta1.PatchesFrom{
-									DependsOn: v1beta1.DependsOn{
+								PatchesFrom: &v1alpha2.PatchesFrom{
+									DependsOn: v1alpha2.DependsOn{
 										APIVersion: "v1",
 										Kind:       "Secret",
 										Name:       "topsecret",
@@ -298,7 +298,7 @@ func TestConvertFrom(t *testing.T) {
 								},
 							},
 						},
-						Readiness: v1beta1.Readiness{Policy: v1beta1.ReadinessPolicySuccessfulCreate},
+						Readiness: v1alpha2.Readiness{Policy: v1alpha2.ReadinessPolicySuccessfulCreate},
 					},
 				},
 			},
@@ -349,18 +349,18 @@ func TestConvertFrom(t *testing.T) {
 			},
 		},
 		{
-			name: "converts to v1beta1 - nil checks",
+			name: "converts to v1alpha2 - nil checks",
 			args: args{
-				src: &v1beta1.Object{
+				src: &v1alpha2.Object{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "coolobject",
 					},
-					Spec: v1beta1.ObjectSpec{
+					Spec: v1alpha2.ObjectSpec{
 						ResourceSpec: v1.ResourceSpec{
 							DeletionPolicy:     v1.DeletionDelete,
 							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionObserve},
 						},
-						ConnectionDetails: []v1beta1.ConnectionDetail{
+						ConnectionDetails: []v1alpha2.ConnectionDetail{
 							{
 								ObjectReference: corev1.ObjectReference{
 									APIVersion: "v1",
@@ -369,16 +369,16 @@ func TestConvertFrom(t *testing.T) {
 								},
 							},
 						},
-						ForProvider: v1beta1.ObjectParameters{
+						ForProvider: v1alpha2.ObjectParameters{
 							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
 						},
-						References: []v1beta1.Reference{
+						References: []v1alpha2.Reference{
 							{
 								DependsOn:   nil,
 								PatchesFrom: nil,
 							},
 						},
-						Readiness: v1beta1.Readiness{Policy: v1beta1.ReadinessPolicySuccessfulCreate},
+						Readiness: v1alpha2.Readiness{Policy: v1alpha2.ReadinessPolicySuccessfulCreate},
 					},
 				},
 			},
@@ -418,11 +418,11 @@ func TestConvertFrom(t *testing.T) {
 		{
 			name: "errors if management policy is unknown",
 			args: args{
-				src: &v1beta1.Object{
+				src: &v1alpha2.Object{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "coolobject",
 					},
-					Spec: v1beta1.ObjectSpec{
+					Spec: v1alpha2.ObjectSpec{
 						ResourceSpec: v1.ResourceSpec{
 							ManagementPolicies: []v1.ManagementAction{},
 						},
