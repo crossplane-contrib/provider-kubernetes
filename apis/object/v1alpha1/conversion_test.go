@@ -141,6 +141,43 @@ func TestConvertTo(t *testing.T) {
 			},
 		},
 		{
+			name: "converts to v1alpha2 - empty policy",
+			args: args{
+				src: &v1alpha1.Object{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "coolobject",
+					},
+					Spec: v1alpha1.ObjectSpec{
+						ResourceSpec: v1alpha1.ResourceSpec{
+							DeletionPolicy: v1.DeletionDelete,
+						},
+						ForProvider: v1alpha1.ObjectParameters{
+							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
+						},
+						ManagementPolicy: "",
+					},
+				},
+			},
+			want: want{
+				dst: &v1alpha2.Object{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "coolobject",
+					},
+					Spec: v1alpha2.ObjectSpec{
+						ResourceSpec: v1.ResourceSpec{
+							DeletionPolicy:     v1.DeletionDelete,
+							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionAll},
+						},
+						ForProvider: v1alpha2.ObjectParameters{
+							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
+						},
+						ConnectionDetails: []v1alpha2.ConnectionDetail{},
+						References:        []v1alpha2.Reference{},
+					},
+				},
+			},
+		},
+		{
 			name: "converts to v1alpha2 - nil checks",
 			args: args{
 				src: &v1alpha1.Object{

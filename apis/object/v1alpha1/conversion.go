@@ -92,7 +92,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 
 	// handle management policies migration
 	switch src.Spec.ManagementPolicy {
-	case Default:
+	case Default, "":
 		dst.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionAll}
 	case ObserveCreateUpdate:
 		dst.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionObserve, xpv1.ManagementActionCreate, xpv1.ManagementActionUpdate}
