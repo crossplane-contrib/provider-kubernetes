@@ -120,7 +120,7 @@ const (
 type Readiness struct {
 	// Policy defines how the Object's readiness condition should be computed.
 	// +optional
-	// +kubebuilder:validation:Enum=SuccessfulCreate;DeriveFromObject
+	// +kubebuilder:validation:Enum=SuccessfulCreate;DeriveFromObject;AllTrue
 	// +kubebuilder:default=SuccessfulCreate
 	Policy ReadinessPolicy `json:"policy,omitempty"`
 }

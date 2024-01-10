@@ -98,6 +98,7 @@ func kubernetesObject(om ...kubernetesObjectModifier) *v1alpha2.Object {
 				ProviderConfigReference: &xpv1.Reference{
 					Name: providerName,
 				},
+				ManagementPolicies: xpv1.ManagementPolicies{xpv1.ManagementActionAll},
 			},
 			ForProvider: v1alpha2.ObjectParameters{
 				Manifest: runtime.RawExtension{Raw: externalResourceRaw},
@@ -1003,6 +1004,28 @@ func Test_helmExternal_Observe(t *testing.T) {
 			},
 			want: want{
 				err: errors.Wrap(errors.Wrap(errBoom, errGetObject), errGetConnectionDetails),
+			},
+		},
+		"Observe Only - up to date by default": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionObserve}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) =
+								*externalResourceWithLastAppliedConfigAnnotation(
+									`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"crossplane-system", "labels": {"old-label":"gone"}}}`,
+								)
+							return nil
+						}),
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true, ConnectionDetails: managed.ConnectionDetails{}},
+				err: nil,
 			},
 		},
 	}

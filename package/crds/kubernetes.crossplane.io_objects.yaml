@@ -721,6 +721,7 @@ spec:
                     enum:
                     - SuccessfulCreate
                     - DeriveFromObject
+                    - AllTrue
                     type: string
                 type: object
               references:

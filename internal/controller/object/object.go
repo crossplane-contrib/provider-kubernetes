@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -497,6 +498,11 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 func (c *external) handleLastApplied(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	isUpToDate := false
 
+	if !sets.New[xpv1.ManagementAction](obj.GetManagementPolicies()...).
+		HasAny(xpv1.ManagementActionUpdate, xpv1.ManagementActionCreate, xpv1.ManagementActionAll) {
+		// Treated as up-to-date as we don't update or create the resource
+		isUpToDate = true
+	}
 	if last != nil && equality.Semantic.DeepEqual(last, desired) {
 		// Mark as up-to-date since last is equal to desired
 		isUpToDate = true
