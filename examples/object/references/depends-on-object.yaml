@@ -1,5 +1,5 @@
 ---
-apiVersion: kubernetes.crossplane.io/v1alpha1
+apiVersion: kubernetes.crossplane.io/v1alpha2
 kind: Object
 metadata:
   name: foo
@@ -22,7 +22,7 @@ spec:
   providerConfigRef:
     name: kubernetes-provider
 ---
-apiVersion: kubernetes.crossplane.io/v1alpha1
+apiVersion: kubernetes.crossplane.io/v1alpha2
 kind: Object
 metadata:
   name: bar

@@ -28,6 +28,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/feature"
@@ -35,19 +36,27 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis"
+	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
 	object "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
+const (
+	webhookTLSCertDirEnvVar = "WEBHOOK_TLS_CERT_DIR"
+	tlsServerCertDirEnvVar  = "TLS_SERVER_CERTS_DIR"
+	tlsServerCertDir        = "/tls/server"
+)
+
 func main() {
 	var (
-		app              = kingpin.New(filepath.Base(os.Args[0]), "Template support for Crossplane.").DefaultEnvars()
-		debug            = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
-		syncInterval     = app.Flag("sync", "Controller manager sync period such as 300ms, 1.5h, or 2h45m").Short('s').Default("1h").Duration()
-		pollInterval     = app.Flag("poll", "Poll interval controls how often an individual resource should be checked for drift.").Default("1m").Duration()
-		leaderElection   = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
-		maxReconcileRate = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("10").Int()
+		app                      = kingpin.New(filepath.Base(os.Args[0]), "Template support for Crossplane.").DefaultEnvars()
+		debug                    = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
+		syncInterval             = app.Flag("sync", "Controller manager sync period such as 300ms, 1.5h, or 2h45m").Short('s').Default("1h").Duration()
+		pollInterval             = app.Flag("poll", "Poll interval controls how often an individual resource should be checked for drift.").Default("1m").Duration()
+		leaderElection           = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
+		maxReconcileRate         = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("10").Int()
+		enableManagementPolicies = app.Flag("enable-management-policies", "Enable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
@@ -64,6 +73,18 @@ func main() {
 
 	cfg, err := ctrl.GetConfig()
 	kingpin.FatalIfError(err, "Cannot get API server rest config")
+
+	// Get the TLS certs directory from the environment variable if set
+	// In older XP versions we used WEBHOOK_TLS_CERT_DIR, in newer versions
+	// we use TLS_SERVER_CERTS_DIR. If neither are set, use the default.
+	var certDir string
+	certDir = os.Getenv(webhookTLSCertDirEnvVar)
+	if certDir == "" {
+		certDir = os.Getenv(tlsServerCertDirEnvVar)
+		if certDir == "" {
+			certDir = tlsServerCertDir
+		}
+	}
 
 	mgr, err := ctrl.NewManager(ratelimiter.LimitRESTConfig(cfg, *maxReconcileRate), ctrl.Options{
 		Cache: cache.Options{
@@ -82,6 +103,9 @@ func main() {
 		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
 		LeaseDuration:              func() *time.Duration { d := 60 * time.Second; return &d }(),
 		RenewDeadline:              func() *time.Duration { d := 50 * time.Second; return &d }(),
+		WebhookServer: webhook.NewServer(webhook.Options{
+			CertDir: certDir,
+		}),
 	})
 	kingpin.FatalIfError(err, "Cannot create controller manager")
 
@@ -93,6 +117,17 @@ func main() {
 		GlobalRateLimiter:       ratelimiter.NewGlobal(*maxReconcileRate),
 		Features:                &feature.Flags{},
 	}
+
+	if *enableManagementPolicies {
+		o.Features.Enable(feature.EnableBetaManagementPolicies)
+		log.Info("Beta feature enabled", "flag", feature.EnableBetaManagementPolicies)
+	}
+
+	// NOTE(lsviben): We are registering the conversion webhook with v1alpha1
+	// Object. As far as I can see and based on some tests, it doesn't matter
+	// which version we use here. Leaving it as v1alpha1 as it will be easy to
+	// notice and remove when we drop support for v1alpha1.
+	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&v1alpha1.Object{}).Complete(), "Cannot create Object webhook")
 
 	kingpin.FatalIfError(object.Setup(mgr, o), "Cannot setup controller")
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")

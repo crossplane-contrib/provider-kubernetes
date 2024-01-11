@@ -125,3 +125,25 @@ manifests:
 	@$(INFO) Deprecated. Run make generate instead.
 
 .PHONY: cobertura submodules fallthrough test-integration run manifests
+
+generate.run: go.generate kustomize.gen
+
+generate.done: kustomize.clean
+
+# This hack is needed because we want to inject the conversion webhook
+# configuration into the Object CRD. This is not possible with the CRD
+# generation through controller-gen, and actually kubebuilder does
+# something similar, so we are following suit. Can be removed once we
+# drop support for v1alpha1.
+kustomize.gen: $(KUBECTL)
+	@$(INFO) Generating CRDs with kustomize
+	@$(KUBECTL) kustomize cluster/kustomize/ > cluster/kustomize/kubernetes.crossplane.io_objects.yaml
+	@mv cluster/kustomize/kubernetes.crossplane.io_objects.yaml cluster/kustomize/crds/kubernetes.crossplane.io_objects.yaml
+	@mv cluster/kustomize/crds package/crds
+	@$(OK) Generated CRDs with kustomize
+
+kustomize.clean:
+	@$(INFO) Cleaning up kustomize generated CRDs
+	@rm -rf cluster/kustomize/crds
+	@rm -f cluster/kustomize/kubernetes.crossplane.io_objects.yaml
+	@$(OK) Cleaned up kustomize generated CRDs

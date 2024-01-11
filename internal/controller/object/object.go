@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -36,6 +37,7 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
+	"github.com/crossplane/crossplane-runtime/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/pkg/fieldpath"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/pkg/meta"
@@ -43,7 +45,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
-	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
+	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/azure"
@@ -89,12 +91,11 @@ const (
 
 // Setup adds a controller that reconciles Object managed resources.
 func Setup(mgr ctrl.Manager, o controller.Options) error {
-	name := managed.ControllerName(v1alpha1.ObjectGroupKind)
+	name := managed.ControllerName(v1alpha2.ObjectGroupKind)
 
 	cps := []managed.ConnectionPublisher{managed.NewAPISecretPublisher(mgr.GetClient(), mgr.GetScheme())}
 
-	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.ObjectGroupVersionKind),
+	reconcilerOptions := []managed.ReconcilerOption{
 		managed.WithExternalConnecter(&connector{
 			logger:           o.Logger,
 			kube:             mgr.GetClient(),
@@ -111,12 +112,22 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
-		managed.WithConnectionPublishers(cps...))
+		managed.WithConnectionPublishers(cps...),
+	}
+
+	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
+		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
+	}
+
+	r := managed.NewReconciler(mgr,
+		resource.ManagedKind(v1alpha2.ObjectGroupVersionKind),
+		reconcilerOptions...,
+	)
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		WithOptions(o.ForControllerRuntime()).
-		For(&v1alpha1.Object{}).
+		For(&v1alpha2.Object{}).
 		Complete(ratelimiter.NewReconciler(name, r, o.GlobalRateLimiter))
 }
 
@@ -138,7 +149,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	// This method is currently a little over our complexity goal - be wary
 	// of making it more complex.
 
-	cr, ok := mg.(*v1alpha1.Object)
+	cr, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return nil, errors.New(errNotKubernetesObject)
 	}
@@ -233,7 +244,7 @@ type external struct {
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*v1alpha1.Object)
+	cr, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return managed.ExternalObservation{}, errors.New(errNotKubernetesObject)
 	}
@@ -256,7 +267,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		Name:      observed.GetName(),
 	}, observed)
 
-	if c.isNotFound(cr, err) {
+	if kerrors.IsNotFound(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
@@ -276,17 +287,12 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*v1alpha1.Object)
+	cr, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotKubernetesObject)
 	}
 
 	c.logger.Debug("Creating", "resource", cr)
-
-	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionCreate) {
-		c.logger.Debug("External resource should not be created by provider, skip creating.")
-		return managed.ExternalCreation{}, nil
-	}
 
 	obj, err := getDesired(cr)
 	if err != nil {
@@ -305,17 +311,12 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
-	cr, ok := mg.(*v1alpha1.Object)
+	cr, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return managed.ExternalUpdate{}, errors.New(errNotKubernetesObject)
 	}
 
 	c.logger.Debug("Updating", "resource", cr)
-
-	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionUpdate) {
-		c.logger.Debug("External resource should not be updated by provider, skip updating.")
-		return managed.ExternalUpdate{}, nil
-	}
 
 	obj, err := getDesired(cr)
 	if err != nil {
@@ -334,17 +335,12 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
-	cr, ok := mg.(*v1alpha1.Object)
+	cr, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return errors.New(errNotKubernetesObject)
 	}
 
 	c.logger.Debug("Deleting", "resource", cr)
-
-	if !cr.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionDelete) {
-		c.logger.Debug("External resource should not be deleted by provider, skip deleting.")
-		return nil
-	}
 
 	obj, err := getDesired(cr)
 	if err != nil {
@@ -354,7 +350,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	return errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, obj)), errDeleteObject)
 }
 
-func getDesired(obj *v1alpha1.Object) (*unstructured.Unstructured, error) {
+func getDesired(obj *v1alpha2.Object) (*unstructured.Unstructured, error) {
 	desired := &unstructured.Unstructured{}
 	if err := json.Unmarshal(obj.Spec.ForProvider.Manifest.Raw, desired); err != nil {
 		return nil, errors.Wrap(err, errUnmarshalTemplate)
@@ -366,7 +362,7 @@ func getDesired(obj *v1alpha1.Object) (*unstructured.Unstructured, error) {
 	return desired, nil
 }
 
-func getLastApplied(obj *v1alpha1.Object, observed *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+func getLastApplied(obj *v1alpha2.Object, observed *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 	lastApplied, ok := observed.GetAnnotations()[v1.LastAppliedConfigAnnotation]
 	if !ok {
 		return nil, nil
@@ -384,7 +380,7 @@ func getLastApplied(obj *v1alpha1.Object, observed *unstructured.Unstructured) (
 	return last, nil
 }
 
-func (c *external) setObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
+func (c *external) setObserved(obj *v1alpha2.Object, observed *unstructured.Unstructured) error {
 	var err error
 	if obj.Status.AtProvider.Manifest.Raw, err = observed.MarshalJSON(); err != nil {
 		return errors.Wrap(err, errFailedToMarshalExisting)
@@ -396,9 +392,9 @@ func (c *external) setObserved(obj *v1alpha1.Object, observed *unstructured.Unst
 	return nil
 }
 
-func (c *external) updateConditionFromObserved(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
+func (c *external) updateConditionFromObserved(obj *v1alpha2.Object, observed *unstructured.Unstructured) error {
 	switch obj.Spec.Readiness.Policy {
-	case v1alpha1.ReadinessPolicyDeriveFromObject:
+	case v1alpha2.ReadinessPolicyDeriveFromObject:
 		conditioned := xpv1.ConditionedStatus{}
 		err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
 		if err != nil {
@@ -412,7 +408,7 @@ func (c *external) updateConditionFromObserved(obj *v1alpha1.Object, observed *u
 			return nil
 		}
 		obj.SetConditions(xpv1.Available())
-	case v1alpha1.ReadinessPolicyAllTrue:
+	case v1alpha2.ReadinessPolicyAllTrue:
 		conditioned := xpv1.ConditionedStatus{}
 		err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
 		if err != nil {
@@ -432,7 +428,7 @@ func (c *external) updateConditionFromObserved(obj *v1alpha1.Object, observed *u
 		} else {
 			obj.SetConditions(xpv1.Unavailable())
 		}
-	case v1alpha1.ReadinessPolicySuccessfulCreate, "":
+	case v1alpha2.ReadinessPolicySuccessfulCreate, "":
 		// do nothing, will be handled by c.handleLastApplied method
 		// "" should never happen, but just in case we will treat it as SuccessfulCreate for backward compatibility
 	default:
@@ -442,7 +438,7 @@ func (c *external) updateConditionFromObserved(obj *v1alpha1.Object, observed *u
 	return nil
 }
 
-func getReferenceInfo(ref v1alpha1.Reference) (string, string, string, string) {
+func getReferenceInfo(ref v1alpha2.Reference) (string, string, string, string) {
 	var apiVersion, kind, namespace, name string
 
 	if ref.PatchesFrom != nil {
@@ -465,7 +461,7 @@ func getReferenceInfo(ref v1alpha1.Reference) (string, string, string, string) {
 // resolveReferencies resolves references for the current Object. If it fails to
 // resolve some reference, e.g.: due to reference not ready, it will then return
 // error and requeue to wait for resolving it next time.
-func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object) error {
+func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object) error {
 	c.logger.Debug("Resolving referencies.")
 
 	// Loop through references to resolve each referenced resource
@@ -499,34 +495,15 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 	return nil
 }
 
-func (c *external) isNotFound(obj *v1alpha1.Object, err error) bool {
-	isNotFound := false
-
-	if kerrors.IsNotFound(err) {
-		isNotFound = true
-	} else if meta.WasDeleted(obj) {
-		// If the Object resource was being deleted but the external resource is
-		// not deletable as management policy is specified, we should return the
-		// external resource not found, so that Object can be deleted by managed
-		// resource reconciler. Otherwise, the reconciler will try to delete the
-		// external resource which breaks the management policy.
-		if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionDelete) {
-			c.logger.Debug("Managed resource was deleted but external resource is undeletable.")
-			isNotFound = true
-		}
-	}
-
-	return isNotFound
-}
-
-func (c *external) handleLastApplied(ctx context.Context, obj *v1alpha1.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
+func (c *external) handleLastApplied(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	isUpToDate := false
 
-	if !obj.Spec.ManagementPolicy.IsActionAllowed(v1alpha1.ObjectActionUpdate) {
-		// Treated as up-to-date to skip last applied annotation update since we
-		// do not create or update the external resource.
+	if !sets.New[xpv1.ManagementAction](obj.GetManagementPolicies()...).
+		HasAny(xpv1.ManagementActionUpdate, xpv1.ManagementActionCreate, xpv1.ManagementActionAll) {
+		// Treated as up-to-date as we don't update or create the resource
 		isUpToDate = true
-	} else if last != nil && equality.Semantic.DeepEqual(last, desired) {
+	}
+	if last != nil && equality.Semantic.DeepEqual(last, desired) {
 		// Mark as up-to-date since last is equal to desired
 		isUpToDate = true
 	}
@@ -534,7 +511,7 @@ func (c *external) handleLastApplied(ctx context.Context, obj *v1alpha1.Object, 
 	if isUpToDate {
 		c.logger.Debug("Up to date!")
 
-		if p := obj.Spec.Readiness.Policy; p == v1alpha1.ReadinessPolicySuccessfulCreate || p == "" {
+		if p := obj.Spec.Readiness.Policy; p == v1alpha2.ReadinessPolicySuccessfulCreate || p == "" {
 			obj.Status.SetConditions(xpv1.Available())
 		}
 
@@ -563,7 +540,7 @@ type objFinalizer struct {
 
 type refFinalizerFn func(context.Context, *unstructured.Unstructured, string) error
 
-func (f *objFinalizer) handleRefFinalizer(ctx context.Context, obj *v1alpha1.Object, finalizerFn refFinalizerFn, ignoreNotFound bool) error {
+func (f *objFinalizer) handleRefFinalizer(ctx context.Context, obj *v1alpha2.Object, finalizerFn refFinalizerFn, ignoreNotFound bool) error {
 	// Loop through references to resolve each referenced resource
 	for _, ref := range obj.Spec.References {
 		if ref.DependsOn == nil && ref.PatchesFrom == nil {
@@ -599,7 +576,7 @@ func (f *objFinalizer) handleRefFinalizer(ctx context.Context, obj *v1alpha1.Obj
 }
 
 func (f *objFinalizer) AddFinalizer(ctx context.Context, res resource.Object) error {
-	obj, ok := res.(*v1alpha1.Object)
+	obj, ok := res.(*v1alpha2.Object)
 	if !ok {
 		return errors.New(errNotKubernetesObject)
 	}
@@ -629,7 +606,7 @@ func (f *objFinalizer) AddFinalizer(ctx context.Context, res resource.Object) er
 }
 
 func (f *objFinalizer) RemoveFinalizer(ctx context.Context, res resource.Object) error {
-	obj, ok := res.(*v1alpha1.Object)
+	obj, ok := res.(*v1alpha2.Object)
 	if !ok {
 		return errors.New(errNotKubernetesObject)
 	}
@@ -658,7 +635,7 @@ func (f *objFinalizer) RemoveFinalizer(ctx context.Context, res resource.Object)
 	return errors.Wrap(err, errRemoveFinalizer)
 }
 
-func connectionDetails(ctx context.Context, kube client.Client, connDetails []v1alpha1.ConnectionDetail) (managed.ConnectionDetails, error) {
+func connectionDetails(ctx context.Context, kube client.Client, connDetails []v1alpha2.ConnectionDetail) (managed.ConnectionDetails, error) {
 	mcd := managed.ConnectionDetails{}
 
 	for _, cd := range connDetails {

@@ -1,0 +1,4 @@
+resources:
+  - crds/kubernetes.crossplane.io_objects.yaml
+patches:
+  - path: webhook/webhook.patch.yaml

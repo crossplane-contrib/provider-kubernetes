@@ -184,7 +184,7 @@ spec:
               string:
                 fmt: "%s-argocd"
     - base:
-        apiVersion: kubernetes.crossplane.io/v1alpha1
+        apiVersion: kubernetes.crossplane.io/v1beta1
         kind: ProviderConfig
         spec:
           credentials:
@@ -206,7 +206,7 @@ spec:
       readinessChecks:
         - type: None
     - base:
-        apiVersion: kubernetes.crossplane.io/v1alpha1
+        apiVersion: kubernetes.crossplane.io/v1beta1
         kind: Object
         spec:
           forProvider:

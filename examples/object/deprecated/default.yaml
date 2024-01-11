@@ -1,12 +1,10 @@
----
-apiVersion: kubernetes.crossplane.io/v1alpha2
+apiVersion: kubernetes.crossplane.io/v1alpha1
 kind: Object
 metadata:
   name: foo
 spec:
-  # Use management policy Observe Create Update to observe, create, or update k8s
-  # resource, but leave to third party to delete the resource
-  managementPolicies: ["Observe", "Create", "Update"]
+  # Use management policy Default to fully control k8s resource
+  # It is the default policy that can be omitted
   forProvider:
     manifest:
       apiVersion: v1
@@ -15,7 +13,5 @@ spec:
         # name in manifest is optional and defaults to Object name
         # name: some-other-name
         namespace: default
-      data:
-        sample-key: sample-value
   providerConfigRef:
     name: kubernetes-provider
