@@ -244,6 +244,7 @@ func TestConvertTo(t *testing.T) {
 				},
 			},
 		},
+
 		{
 			name: "errors if management policy is unknown",
 			args: args{
@@ -293,7 +294,7 @@ func TestConvertFrom(t *testing.T) {
 		want want
 	}{
 		{
-			name: "converts to v1alpha2",
+			name: "converts to v1alpha1",
 			args: args{
 				src: &v1alpha2.Object{
 					ObjectMeta: metav1.ObjectMeta{
@@ -386,7 +387,7 @@ func TestConvertFrom(t *testing.T) {
 			},
 		},
 		{
-			name: "converts to v1alpha2 - nil checks",
+			name: "converts to v1alpha1 - nil checks",
 			args: args{
 				src: &v1alpha2.Object{
 					ObjectMeta: metav1.ObjectMeta{
@@ -448,6 +449,42 @@ func TestConvertFrom(t *testing.T) {
 							},
 						},
 						Readiness: v1alpha1.Readiness{Policy: v1alpha1.ReadinessPolicySuccessfulCreate},
+					},
+				},
+			},
+		},
+		{
+			name: "converts to v1alpha1 - empty policy",
+			args: args{
+				src: &v1alpha2.Object{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "coolobject",
+					},
+					Spec: v1alpha2.ObjectSpec{
+						ResourceSpec: v1.ResourceSpec{
+							DeletionPolicy: v1.DeletionDelete,
+						},
+						ForProvider: v1alpha2.ObjectParameters{
+							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
+						},
+					},
+				},
+			},
+			want: want{
+				dst: &v1alpha1.Object{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "coolobject",
+					},
+					Spec: v1alpha1.ObjectSpec{
+						ResourceSpec: v1alpha1.ResourceSpec{
+							DeletionPolicy: v1.DeletionDelete,
+						},
+						ForProvider: v1alpha1.ObjectParameters{
+							Manifest: runtime.RawExtension{Raw: []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: topsecret\n")},
+						},
+						ManagementPolicy:  v1alpha1.Default,
+						ConnectionDetails: []v1alpha1.ConnectionDetail{},
+						References:        []v1alpha1.Reference{},
 					},
 				},
 			},

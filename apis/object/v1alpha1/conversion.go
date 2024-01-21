@@ -17,7 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"errors"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
@@ -101,7 +101,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 	case Observe:
 		dst.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionObserve}
 	default:
-		return errors.New("unknown management policy")
+		return fmt.Errorf("unknown management policy: %v", src.Spec.ManagementPolicy)
 	}
 
 	return nil
@@ -169,6 +169,14 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint, 
 		},
 	}
 
+	// Policies are unset and the object is not yet created.
+	// As the managementPolicies would default to ["*"], we can set
+	// the management policy to Default.
+	if src.GetManagementPolicies() == nil && src.CreationTimestamp.IsZero() {
+		dst.Spec.ManagementPolicy = Default
+		return nil
+	}
+
 	// handle management policies migration
 	policySet := sets.New[xpv1.ManagementAction](src.GetManagementPolicies()...)
 
@@ -188,7 +196,7 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint, 
 		dst.Spec.ManagementPolicy = Observe
 	default:
 		// TODO(turkenh): Should we default to something here instead of erroring out?
-		return errors.New("unsupported management policy")
+		return fmt.Errorf("unsupported management policies: %v", policySet.UnsortedList())
 	}
 
 	return nil
