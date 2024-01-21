@@ -195,8 +195,9 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint, 
 		!policySet.HasAny(xpv1.ManagementActionCreate, xpv1.ManagementActionUpdate, xpv1.ManagementActionDelete):
 		dst.Spec.ManagementPolicy = Observe
 	default:
-		// TODO(turkenh): Should we default to something here instead of erroring out?
-		return fmt.Errorf("unsupported management policies: %v", policySet.UnsortedList())
+		// NOTE(lsviben): Other combinations of v1alpha2 management policies
+		// were not supported in v1alpha1. Leaving it empty to avoid
+		// errors during conversion instead of failing.
 	}
 
 	return nil
