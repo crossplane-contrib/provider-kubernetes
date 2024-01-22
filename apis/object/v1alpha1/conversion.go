@@ -17,12 +17,11 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"fmt"
-
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/pkg/errors"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 )
@@ -101,7 +100,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 	case Observe:
 		dst.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionObserve}
 	default:
-		return fmt.Errorf("unknown management policy: %v", src.Spec.ManagementPolicy)
+		return errors.Errorf("unknown management policy: %v", src.Spec.ManagementPolicy)
 	}
 
 	return nil
