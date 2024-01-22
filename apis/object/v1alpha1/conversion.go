@@ -17,12 +17,11 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"errors"
-
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/pkg/errors"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 )
@@ -101,7 +100,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 	case Observe:
 		dst.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionObserve}
 	default:
-		return errors.New("unknown management policy")
+		return errors.Errorf("unknown management policy: %v", src.Spec.ManagementPolicy)
 	}
 
 	return nil
@@ -169,6 +168,14 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint, 
 		},
 	}
 
+	// Policies are unset and the object is not yet created.
+	// As the managementPolicies would default to ["*"], we can set
+	// the management policy to Default.
+	if src.GetManagementPolicies() == nil && src.CreationTimestamp.IsZero() {
+		dst.Spec.ManagementPolicy = Default
+		return nil
+	}
+
 	// handle management policies migration
 	policySet := sets.New[xpv1.ManagementAction](src.GetManagementPolicies()...)
 
@@ -187,8 +194,9 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint, 
 		!policySet.HasAny(xpv1.ManagementActionCreate, xpv1.ManagementActionUpdate, xpv1.ManagementActionDelete):
 		dst.Spec.ManagementPolicy = Observe
 	default:
-		// TODO(turkenh): Should we default to something here instead of erroring out?
-		return errors.New("unsupported management policy")
+		// NOTE(lsviben): Other combinations of v1alpha2 management policies
+		// were not supported in v1alpha1. Leaving it empty to avoid
+		// errors during conversion instead of failing.
 	}
 
 	return nil

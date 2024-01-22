@@ -206,7 +206,7 @@ spec:
       readinessChecks:
         - type: None
     - base:
-        apiVersion: kubernetes.crossplane.io/v1beta1
+        apiVersion: kubernetes.crossplane.io/v1alpha2
         kind: Object
         spec:
           forProvider:
