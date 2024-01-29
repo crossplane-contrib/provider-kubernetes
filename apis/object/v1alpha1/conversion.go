@@ -69,6 +69,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 				FieldPath: r.PatchesFrom.FieldPath,
 			}
 		}
+		ref.ToFieldPath = r.ToFieldPath
 		references = append(references, ref)
 	}
 
@@ -148,6 +149,7 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint, 
 				FieldPath: r.PatchesFrom.FieldPath,
 			}
 		}
+		ref.ToFieldPath = r.ToFieldPath
 		references = append(references, ref)
 	}
 
