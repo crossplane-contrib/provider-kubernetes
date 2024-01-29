@@ -1,0 +1,33 @@
+---
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: foo
+spec:
+  references:
+  # Use patchesFrom to patch field from other k8s resource to this object
+  - patchesFrom:
+      apiVersion: v1
+      kind: ConfigMap
+      name: bar
+      namespace: default
+      fieldPath: data.sample-key
+    toFieldPath: data.sample-key-from-bar
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        namespace: default
+      data:
+        sample-key: sample-value
+  providerConfigRef:
+    name: kubernetes-provider
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bar
+  namespace: default
+data:
+  sample-key: sample-value
