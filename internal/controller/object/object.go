@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -87,10 +88,11 @@ const (
 	errGetConnectionDetails = "cannot get connection details"
 	errGetValueAtFieldPath  = "cannot get value at fieldPath"
 	errDecodeSecretData     = "cannot decode secret data"
+	errSanitizeSecretData   = "failed sanitizing secret data"
 )
 
 // Setup adds a controller that reconciles Object managed resources.
-func Setup(mgr ctrl.Manager, o controller.Options) error {
+func Setup(mgr ctrl.Manager, o controller.Options, enableSantizeSecrets bool) error {
 	name := managed.ControllerName(v1alpha2.ObjectGroupKind)
 
 	cps := []managed.ConnectionPublisher{managed.NewAPISecretPublisher(mgr.GetClient(), mgr.GetScheme())}
@@ -98,6 +100,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 	reconcilerOptions := []managed.ReconcilerOption{
 		managed.WithExternalConnecter(&connector{
 			logger:           o.Logger,
+			santizeSecrets:   enableSantizeSecrets,
 			kube:             mgr.GetClient(),
 			usage:            resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
 			kcfgExtractorFn:  resource.CommonCredentialExtractor,
@@ -132,9 +135,10 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 }
 
 type connector struct {
-	kube   client.Client
-	usage  resource.Tracker
-	logger logging.Logger
+	kube           client.Client
+	usage          resource.Tracker
+	logger         logging.Logger
+	santizeSecrets bool
 
 	kcfgExtractorFn  func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
 	gcpExtractorFn   func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
@@ -232,7 +236,8 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 			Client:     k,
 			Applicator: resource.NewAPIPatchingApplicator(k),
 		},
-		localClient: c.kube,
+		localClient:     c.kube,
+		sanitizeSecrets: c.santizeSecrets,
 	}, nil
 }
 
@@ -240,7 +245,8 @@ type external struct {
 	logger logging.Logger
 	client resource.ClientApplicator
 	// localClient is specifically used to connect to local cluster
-	localClient client.Client
+	localClient     client.Client
+	sanitizeSecrets bool
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -382,6 +388,16 @@ func getLastApplied(obj *v1alpha2.Object, observed *unstructured.Unstructured) (
 
 func (c *external) setObserved(obj *v1alpha2.Object, observed *unstructured.Unstructured) error {
 	var err error
+
+	if c.sanitizeSecrets {
+		if observed.GetKind() == "Secret" && observed.GetAPIVersion() == "v1" {
+			observed, err = sanitizeUnstructuredSecret(observed)
+			if err != nil {
+				return errors.Wrap(err, errSanitizeSecretData)
+			}
+		}
+	}
+
 	if obj.Status.AtProvider.Manifest.Raw, err = observed.MarshalJSON(); err != nil {
 		return errors.Wrap(err, errFailedToMarshalExisting)
 	}
@@ -674,4 +690,26 @@ func unstructuredFromObjectRef(r v1.ObjectReference) unstructured.Unstructured {
 	u.SetNamespace(r.Namespace)
 
 	return u
+}
+
+// sanitizeUnstructuredSecret redacts the data field of a Secret object
+func sanitizeUnstructuredSecret(obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	redactedUnstructured := &unstructured.Unstructured{}
+	s := &v1.Secret{}
+
+	err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), s)
+	if err != nil {
+		return redactedUnstructured, fmt.Errorf("cannot convert unstructured to secret: %w", err)
+	}
+
+	s.Data = map[string][]byte{"redacted": []byte(nil)}
+
+	redactedObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(s)
+	if err != nil {
+		return redactedUnstructured, fmt.Errorf("cannot convert secret to unstructured: %w", err)
+	}
+
+	redactedUnstructured.SetUnstructuredContent(redactedObj)
+
+	return redactedUnstructured, nil
 }

@@ -2056,3 +2056,42 @@ func Test_updateConditionFromObserved(t *testing.T) {
 		})
 	}
 }
+
+func TestSanitizeUnstructuredSecret(t *testing.T) {
+	unstructuredSecret := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "my-secret",
+				"namespace": "my-namespace",
+			},
+			"type": "Opaque",
+			"data": map[string]interface{}{
+				"key1": "dGVzdGluZwo=",
+			},
+		},
+	}
+	expected := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":              "my-secret",
+				"namespace":         "my-namespace",
+				"creationTimestamp": nil,
+			},
+			"type": "Opaque",
+			"data": map[string]interface{}{
+				"redacted": nil,
+			},
+		},
+	}
+	secret, err := sanitizeUnstructuredSecret(unstructuredSecret)
+	if err != nil {
+		t.Fatalf("sanitizeUnstructuredSecret(...): expected nil, got error: %s", err)
+	}
+	if diff := cmp.Diff(expected, secret); diff != "" {
+		t.Errorf("sanitizeUnstructuredSecret(...): -want result, +got result: %s", diff)
+	}
+}

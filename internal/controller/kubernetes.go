@@ -27,14 +27,12 @@ import (
 
 // Setup creates all Template controllers with the supplied logger and adds them to
 // the supplied manager.
-func Setup(mgr ctrl.Manager, o controller.Options) error {
-	for _, setup := range []func(ctrl.Manager, controller.Options) error{
-		config.Setup,
-		object.Setup,
-	} {
-		if err := setup(mgr, o); err != nil {
-			return err
-		}
+func Setup(mgr ctrl.Manager, o controller.Options, enableSanitizeSecrets bool) error {
+	if err := config.Setup(mgr, o); err != nil {
+		return err
+	}
+	if err := object.Setup(mgr, o, enableSanitizeSecrets); err != nil {
+		return err
 	}
 	return nil
 }
