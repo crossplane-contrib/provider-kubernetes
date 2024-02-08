@@ -24,7 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	v1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/test"
@@ -86,9 +86,9 @@ func TestConvertTo(t *testing.T) {
 										Name:       "topsecret",
 										Namespace:  "coolns",
 									},
-									FieldPath: pointer.String("data.password"),
+									FieldPath: ptr.To("data.password"),
 								},
-								ToFieldPath: pointer.String("data"),
+								ToFieldPath: ptr.To("data"),
 							},
 						},
 						Readiness: v1alpha1.Readiness{Policy: v1alpha1.ReadinessPolicySuccessfulCreate},
@@ -132,9 +132,9 @@ func TestConvertTo(t *testing.T) {
 										Name:       "topsecret",
 										Namespace:  "coolns",
 									},
-									FieldPath: pointer.String("data.password"),
+									FieldPath: ptr.To("data.password"),
 								},
-								ToFieldPath: pointer.String("data"),
+								ToFieldPath: ptr.To("data"),
 							},
 						},
 						Readiness: v1alpha2.Readiness{Policy: v1alpha2.ReadinessPolicySuccessfulCreate},
@@ -333,9 +333,9 @@ func TestConvertFrom(t *testing.T) {
 										Name:       "topsecret",
 										Namespace:  "coolns",
 									},
-									FieldPath: pointer.String("data.password"),
+									FieldPath: ptr.To("data.password"),
 								},
-								ToFieldPath: pointer.String("data"),
+								ToFieldPath: ptr.To("data"),
 							},
 						},
 						Readiness: v1alpha2.Readiness{Policy: v1alpha2.ReadinessPolicySuccessfulCreate},
@@ -379,9 +379,9 @@ func TestConvertFrom(t *testing.T) {
 										Name:       "topsecret",
 										Namespace:  "coolns",
 									},
-									FieldPath: pointer.String("data.password"),
+									FieldPath: ptr.To("data.password"),
 								},
-								ToFieldPath: pointer.String("data"),
+								ToFieldPath: ptr.To("data"),
 							},
 						},
 						Readiness: v1alpha1.Readiness{Policy: v1alpha1.ReadinessPolicySuccessfulCreate},
