@@ -33,7 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -819,7 +819,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 			args: args{
 				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.References = objectReferences()
-					obj.Spec.References[0].PatchesFrom.FieldPath = pointer.String("nonexistent_field")
+					obj.Spec.References[0].PatchesFrom.FieldPath = ptr.To("nonexistent_field")
 				}),
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
