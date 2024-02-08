@@ -16,6 +16,7 @@ package gke
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/pkg/errors"
@@ -33,15 +34,49 @@ var DefaultScopes []string = []string{
 // WrapRESTConfig configures the supplied REST config to use OAuth2 bearer
 // tokens fetched using the supplied Google Application Credentials.
 func WrapRESTConfig(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
-	creds, err := google.CredentialsFromJSON(ctx, credentials, scopes...)
-	if err != nil {
-		return errors.Wrap(err, "cannot load Google Application Credentials from JSON")
+	var ts oauth2.TokenSource
+	if credentials != nil {
+		if isJSON(credentials) {
+			// If credentials are in a JSON format, extract the credential from the JSON
+			// CredentialsFromJSON creates a TokenSource that handles token caching.
+			creds, err := google.CredentialsFromJSON(ctx, credentials, scopes...)
+			if err != nil {
+				return errors.Wrap(err, "cannot load Google Application Credentials from JSON")
+			}
+			ts = creds.TokenSource
+			rc.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+				return &oauth2.Transport{Source: ts, Base: rt}
+			})
+			return nil
+		}
+		// if the credential not in a JSON format, treat the credential as an access token
+		t := oauth2.Token{
+			AccessToken: string(credentials),
+		}
+		if ok := t.Valid(); !ok {
+			return errors.New("Access token invalid")
+		}
+		ts = oauth2.StaticTokenSource(&t)
+		rc.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+			return &oauth2.Transport{Source: ts, Base: rt}
+		})
+		return nil
 	}
-
-	// CredentialsFromJSON creates a TokenSource that handles token caching.
+	var t *oauth2.Token
+	// DefaultTokenSource retrieves a token source from an injected identity.
+	gsrc, err := google.DefaultTokenSource(ctx, scopes...)
+	if err != nil {
+		return errors.Wrap(err, "failed to extract default credentials source")
+	}
+	ts = oauth2.ReuseTokenSource(t, gsrc)
 	rc.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-		return &oauth2.Transport{Source: creds.TokenSource, Base: rt}
+		return &oauth2.Transport{Source: ts, Base: rt}
 	})
 
 	return nil
+}
+
+func isJSON(b []byte) bool {
+	var js json.RawMessage
+	return json.Unmarshal(b, &js) == nil
 }
