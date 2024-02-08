@@ -1,4 +1,4 @@
-## check provider-in-cluster.yaml for grant access
+# Check ./provider-in-cluster.yaml to see how to grant permissions to the Provider
 apiVersion: kubernetes.crossplane.io/v1alpha1
 kind: ProviderConfig
 metadata:
