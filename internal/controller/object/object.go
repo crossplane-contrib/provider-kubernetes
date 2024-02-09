@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -88,11 +87,11 @@ const (
 	errGetConnectionDetails = "cannot get connection details"
 	errGetValueAtFieldPath  = "cannot get value at fieldPath"
 	errDecodeSecretData     = "cannot decode secret data"
-	errSanitizeSecretData   = "failed sanitizing secret data"
+	errSanitizeSecretData   = "cannot sanitize secret data"
 )
 
 // Setup adds a controller that reconciles Object managed resources.
-func Setup(mgr ctrl.Manager, o controller.Options, enableSantizeSecrets bool) error {
+func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool) error {
 	name := managed.ControllerName(v1alpha2.ObjectGroupKind)
 
 	cps := []managed.ConnectionPublisher{managed.NewAPISecretPublisher(mgr.GetClient(), mgr.GetScheme())}
@@ -100,7 +99,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, enableSantizeSecrets bool) er
 	reconcilerOptions := []managed.ReconcilerOption{
 		managed.WithExternalConnecter(&connector{
 			logger:           o.Logger,
-			santizeSecrets:   enableSantizeSecrets,
+			sanitizeSecrets:  sanitizeSecrets,
 			kube:             mgr.GetClient(),
 			usage:            resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
 			kcfgExtractorFn:  resource.CommonCredentialExtractor,
@@ -135,10 +134,10 @@ func Setup(mgr ctrl.Manager, o controller.Options, enableSantizeSecrets bool) er
 }
 
 type connector struct {
-	kube           client.Client
-	usage          resource.Tracker
-	logger         logging.Logger
-	santizeSecrets bool
+	kube            client.Client
+	usage           resource.Tracker
+	logger          logging.Logger
+	sanitizeSecrets bool
 
 	kcfgExtractorFn  func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
 	gcpExtractorFn   func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
@@ -237,7 +236,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 			Applicator: resource.NewAPIPatchingApplicator(k),
 		},
 		localClient:     c.kube,
-		sanitizeSecrets: c.santizeSecrets,
+		sanitizeSecrets: c.sanitizeSecrets,
 	}, nil
 }
 
@@ -391,8 +390,8 @@ func (c *external) setObserved(obj *v1alpha2.Object, observed *unstructured.Unst
 
 	if c.sanitizeSecrets {
 		if observed.GetKind() == "Secret" && observed.GetAPIVersion() == "v1" {
-			observed, err = sanitizeUnstructuredSecret(observed)
-			if err != nil {
+			data := map[string][]byte{"redacted": []byte(nil)}
+			if err = fieldpath.Pave(observed.Object).SetValue("data", data); err != nil {
 				return errors.Wrap(err, errSanitizeSecretData)
 			}
 		}
@@ -690,26 +689,4 @@ func unstructuredFromObjectRef(r v1.ObjectReference) unstructured.Unstructured {
 	u.SetNamespace(r.Namespace)
 
 	return u
-}
-
-// sanitizeUnstructuredSecret redacts the data field of a Secret object
-func sanitizeUnstructuredSecret(obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-	redactedUnstructured := &unstructured.Unstructured{}
-	s := &v1.Secret{}
-
-	err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), s)
-	if err != nil {
-		return redactedUnstructured, fmt.Errorf("cannot convert unstructured to secret: %w", err)
-	}
-
-	s.Data = map[string][]byte{"redacted": []byte(nil)}
-
-	redactedObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(s)
-	if err != nil {
-		return redactedUnstructured, fmt.Errorf("cannot convert secret to unstructured: %w", err)
-	}
-
-	redactedUnstructured.SetUnstructuredContent(redactedObj)
-
-	return redactedUnstructured, nil
 }
