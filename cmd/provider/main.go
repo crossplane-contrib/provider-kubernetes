@@ -57,6 +57,7 @@ func main() {
 		leaderElection           = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
 		maxReconcileRate         = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("10").Int()
 		enableManagementPolicies = app.Flag("enable-management-policies", "Enable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
+		sanitizeSecrets          = app.Flag("sanitize-secrets", "when enabled, redacts Secret data from Object status").Default("false").Envar("SANITIZE_SECRETS").Bool()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
@@ -129,7 +130,7 @@ func main() {
 	// notice and remove when we drop support for v1alpha1.
 	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&v1alpha1.Object{}).Complete(), "Cannot create Object webhook")
 
-	kingpin.FatalIfError(object.Setup(mgr, o), "Cannot setup controller")
+	kingpin.FatalIfError(object.Setup(mgr, o, *sanitizeSecrets), "Cannot setup controller")
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")
 }
 

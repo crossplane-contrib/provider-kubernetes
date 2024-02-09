@@ -87,10 +87,11 @@ const (
 	errGetConnectionDetails = "cannot get connection details"
 	errGetValueAtFieldPath  = "cannot get value at fieldPath"
 	errDecodeSecretData     = "cannot decode secret data"
+	errSanitizeSecretData   = "cannot sanitize secret data"
 )
 
 // Setup adds a controller that reconciles Object managed resources.
-func Setup(mgr ctrl.Manager, o controller.Options) error {
+func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool) error {
 	name := managed.ControllerName(v1alpha2.ObjectGroupKind)
 
 	cps := []managed.ConnectionPublisher{managed.NewAPISecretPublisher(mgr.GetClient(), mgr.GetScheme())}
@@ -98,6 +99,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 	reconcilerOptions := []managed.ReconcilerOption{
 		managed.WithExternalConnecter(&connector{
 			logger:           o.Logger,
+			sanitizeSecrets:  sanitizeSecrets,
 			kube:             mgr.GetClient(),
 			usage:            resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
 			kcfgExtractorFn:  resource.CommonCredentialExtractor,
@@ -132,9 +134,10 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 }
 
 type connector struct {
-	kube   client.Client
-	usage  resource.Tracker
-	logger logging.Logger
+	kube            client.Client
+	usage           resource.Tracker
+	logger          logging.Logger
+	sanitizeSecrets bool
 
 	kcfgExtractorFn  func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
 	gcpExtractorFn   func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
@@ -232,7 +235,8 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 			Client:     k,
 			Applicator: resource.NewAPIPatchingApplicator(k),
 		},
-		localClient: c.kube,
+		localClient:     c.kube,
+		sanitizeSecrets: c.sanitizeSecrets,
 	}, nil
 }
 
@@ -240,7 +244,8 @@ type external struct {
 	logger logging.Logger
 	client resource.ClientApplicator
 	// localClient is specifically used to connect to local cluster
-	localClient client.Client
+	localClient     client.Client
+	sanitizeSecrets bool
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -382,6 +387,16 @@ func getLastApplied(obj *v1alpha2.Object, observed *unstructured.Unstructured) (
 
 func (c *external) setObserved(obj *v1alpha2.Object, observed *unstructured.Unstructured) error {
 	var err error
+
+	if c.sanitizeSecrets {
+		if observed.GetKind() == "Secret" && observed.GetAPIVersion() == "v1" {
+			data := map[string][]byte{"redacted": []byte(nil)}
+			if err = fieldpath.Pave(observed.Object).SetValue("data", data); err != nil {
+				return errors.Wrap(err, errSanitizeSecretData)
+			}
+		}
+	}
+
 	if obj.Status.AtProvider.Manifest.Raw, err = observed.MarshalJSON(); err != nil {
 		return errors.Wrap(err, errFailedToMarshalExisting)
 	}
