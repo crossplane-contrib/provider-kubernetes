@@ -38,8 +38,8 @@ github.com/cespare/xxhash/v2 v2.2.0 h1:DC2CZ1Ep5Y4k3ZQ899DldepgrayRUGE6BBZ/cd9Cj
 github.com/cespare/xxhash/v2 v2.2.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cpuguy83/go-md2man/v2 v2.0.3/go.mod h1:tgQtvFlXSQOSOSIRvRPT7W67SCa46tRHOmNcaadrF8o=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
-github.com/crossplane/crossplane-runtime v1.15.0-rc.1 h1:LkYZk/mRLZiJrL9gx6mM8t0Mvloy0nkfwy/BKmpC2wA=
-github.com/crossplane/crossplane-runtime v1.15.0-rc.1/go.mod h1:kRcJjJQmBFrR2n/KhwL8wYS7xNfq3D8eK4JliEScOHI=
+github.com/crossplane/crossplane-runtime v1.16.0-rc.1 h1:wBvfaEgDdYa47qovPWYc80IGTBw17B3zw3yf2Q2NNkQ=
+github.com/crossplane/crossplane-runtime v1.16.0-rc.1/go.mod h1:kRcJjJQmBFrR2n/KhwL8wYS7xNfq3D8eK4JliEScOHI=
 github.com/crossplane/crossplane-tools v0.0.0-20230925130601-628280f8bf79 h1:HigXs5tEQxWz0fcj8hzbU2UAZgEM7wPe0XRFOsrtF8Y=
 github.com/crossplane/crossplane-tools v0.0.0-20230925130601-628280f8bf79/go.mod h1:+e4OaFlOcmr0JvINHl/yvEYBrZawzTgj6pQumOH1SS0=
 github.com/dave/jennifer v1.4.1 h1:XyqG6cn5RQsTj3qlWQTKlRGAyrTcsk1kUmWdZBzRjDw=
