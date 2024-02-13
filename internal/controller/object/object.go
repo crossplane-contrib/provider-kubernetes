@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
@@ -91,7 +92,7 @@ const (
 )
 
 // Setup adds a controller that reconciles Object managed resources.
-func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool) error {
+func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitter time.Duration) error {
 	name := managed.ControllerName(v1alpha2.ObjectGroupKind)
 
 	cps := []managed.ConnectionPublisher{managed.NewAPISecretPublisher(mgr.GetClient(), mgr.GetScheme())}
@@ -112,6 +113,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool) error {
 		}),
 		managed.WithFinalizer(&objFinalizer{client: mgr.GetClient()}),
 		managed.WithPollInterval(o.PollInterval),
+		managed.WithPollJitterHook(pollJitter),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
 		managed.WithConnectionPublishers(cps...),
