@@ -17,6 +17,8 @@ limitations under the License.
 package controller
 
 import (
+	"time"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
@@ -27,11 +29,11 @@ import (
 
 // Setup creates all Template controllers with the supplied logger and adds them to
 // the supplied manager.
-func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool) error {
+func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitter time.Duration) error {
 	if err := config.Setup(mgr, o); err != nil {
 		return err
 	}
-	if err := object.Setup(mgr, o, sanitizeSecrets); err != nil {
+	if err := object.Setup(mgr, o, sanitizeSecrets, pollJitter); err != nil {
 		return err
 	}
 	return nil

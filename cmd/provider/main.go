@@ -72,6 +72,14 @@ func main() {
 		ctrl.SetLogger(zl)
 	}
 
+	// configure the jitter to be the 10% of the poll interval
+	pollJitter := time.Duration(float64(*pollInterval) * 0.1)
+	log.Debug("Starting",
+		"sync-interval", syncInterval.String(),
+		"poll-interval", pollInterval.String(),
+		"poll-jitter", pollJitter.String(),
+		"max-reconcile-rate", *maxReconcileRate)
+
 	cfg, err := ctrl.GetConfig()
 	kingpin.FatalIfError(err, "Cannot get API server rest config")
 
@@ -130,7 +138,7 @@ func main() {
 	// notice and remove when we drop support for v1alpha1.
 	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&v1alpha1.Object{}).Complete(), "Cannot create Object webhook")
 
-	kingpin.FatalIfError(object.Setup(mgr, o, *sanitizeSecrets), "Cannot setup controller")
+	kingpin.FatalIfError(object.Setup(mgr, o, *sanitizeSecrets, pollJitter), "Cannot setup controller")
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")
 }
 
