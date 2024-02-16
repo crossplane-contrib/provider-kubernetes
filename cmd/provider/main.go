@@ -54,6 +54,7 @@ func main() {
 		debug                    = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
 		syncInterval             = app.Flag("sync", "Controller manager sync period such as 300ms, 1.5h, or 2h45m").Short('s').Default("1h").Duration()
 		pollInterval             = app.Flag("poll", "Poll interval controls how often an individual resource should be checked for drift.").Default("1m").Duration()
+		pollJitterPercentage     = app.Flag("poll-jitter-percentage", "Percentage of jitter to apply to poll interval. It cannot be negative, and must be less than 100.").Default("10").Uint()
 		leaderElection           = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
 		maxReconcileRate         = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("10").Int()
 		enableManagementPolicies = app.Flag("enable-management-policies", "Enable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
@@ -72,8 +73,10 @@ func main() {
 		ctrl.SetLogger(zl)
 	}
 
-	// configure the jitter to be the 10% of the poll interval
-	pollJitter := time.Duration(float64(*pollInterval) * 0.1)
+	if *pollJitterPercentage >= 100 {
+		kingpin.Fatalf("invalid --poll-jitter-percentage %v must be less than 100", *pollJitterPercentage)
+	}
+	pollJitter := time.Duration(float64(*pollInterval) * (float64(*pollJitterPercentage) / 100.0))
 	log.Debug("Starting",
 		"sync-interval", syncInterval.String(),
 		"poll-interval", pollInterval.String(),
