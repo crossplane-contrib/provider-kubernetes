@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -113,7 +114,15 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		}),
 		managed.WithFinalizer(&objFinalizer{client: mgr.GetClient()}),
 		managed.WithPollInterval(o.PollInterval),
-		managed.WithPollJitterHook(pollJitter),
+		managed.WithPollIntervalHook(func(mg resource.Managed, pollInterval time.Duration) time.Duration {
+			if mg.GetCondition(xpv1.TypeReady).Status != v1.ConditionTrue {
+				// If the resource is not ready, we should poll more frequently not to delay time to readiness.
+				pollInterval = 30 * time.Second
+			}
+			// This is the same as runtime default poll interval with jitter, see:
+			// https://github.com/crossplane/crossplane-runtime/blob/7fcb8c5cad6fc4abb6649813b92ab92e1832d368/pkg/reconciler/managed/reconciler.go#L573
+			return pollInterval + time.Duration((rand.Float64()-0.5)*2*float64(pollJitter)) //nolint G404 // No need for secure randomness
+		}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
 		managed.WithConnectionPublishers(cps...),
