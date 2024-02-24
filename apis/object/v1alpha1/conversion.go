@@ -43,7 +43,8 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 	connectionDetails := []v1alpha2.ConnectionDetail{}
 	for _, cd := range src.Spec.ConnectionDetails {
 		connectionDetails = append(connectionDetails, v1alpha2.ConnectionDetail{
-			ObjectReference: cd.ObjectReference,
+			ObjectReference:       cd.ObjectReference,
+			ToConnectionSecretKey: cd.ToConnectionSecretKey,
 		})
 	}
 
@@ -123,7 +124,8 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint, 
 	connectionDetails := []ConnectionDetail{}
 	for _, cd := range src.Spec.ConnectionDetails {
 		connectionDetails = append(connectionDetails, ConnectionDetail{
-			ObjectReference: cd.ObjectReference,
+			ObjectReference:       cd.ObjectReference,
+			ToConnectionSecretKey: cd.ToConnectionSecretKey,
 		})
 	}
 
