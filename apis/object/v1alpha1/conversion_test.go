@@ -64,7 +64,9 @@ func TestConvertTo(t *testing.T) {
 									APIVersion: "v1",
 									Kind:       "Secret",
 									Name:       "topsecret",
+									FieldPath:  "data.token",
 								},
+								ToConnectionSecretKey: "token",
 							},
 						},
 						ForProvider: v1alpha1.ObjectParameters{
@@ -111,7 +113,9 @@ func TestConvertTo(t *testing.T) {
 									APIVersion: "v1",
 									Kind:       "Secret",
 									Name:       "topsecret",
+									FieldPath:  "data.token",
 								},
+								ToConnectionSecretKey: "token",
 							},
 						},
 						ForProvider: v1alpha2.ObjectParameters{
@@ -196,7 +200,9 @@ func TestConvertTo(t *testing.T) {
 									APIVersion: "v1",
 									Kind:       "Secret",
 									Name:       "topsecret",
+									FieldPath:  "data.token",
 								},
+								ToConnectionSecretKey: "token",
 							},
 						},
 						ForProvider: v1alpha1.ObjectParameters{
@@ -229,7 +235,9 @@ func TestConvertTo(t *testing.T) {
 									APIVersion: "v1",
 									Kind:       "Secret",
 									Name:       "topsecret",
+									FieldPath:  "data.token",
 								},
+								ToConnectionSecretKey: "token",
 							},
 						},
 						ForProvider: v1alpha2.ObjectParameters{
@@ -312,7 +320,9 @@ func TestConvertFrom(t *testing.T) {
 									APIVersion: "v1",
 									Kind:       "Secret",
 									Name:       "topsecret",
+									FieldPath:  "data.token",
 								},
+								ToConnectionSecretKey: "token",
 							},
 						},
 						ForProvider: v1alpha2.ObjectParameters{
@@ -357,7 +367,9 @@ func TestConvertFrom(t *testing.T) {
 									APIVersion: "v1",
 									Kind:       "Secret",
 									Name:       "topsecret",
+									FieldPath:  "data.token",
 								},
+								ToConnectionSecretKey: "token",
 							},
 						},
 						ForProvider: v1alpha1.ObjectParameters{
@@ -407,7 +419,9 @@ func TestConvertFrom(t *testing.T) {
 									APIVersion: "v1",
 									Kind:       "Secret",
 									Name:       "topsecret",
+									FieldPath:  "data.token",
 								},
+								ToConnectionSecretKey: "token",
 							},
 						},
 						ForProvider: v1alpha2.ObjectParameters{
@@ -438,7 +452,9 @@ func TestConvertFrom(t *testing.T) {
 									APIVersion: "v1",
 									Kind:       "Secret",
 									Name:       "topsecret",
+									FieldPath:  "data.token",
 								},
+								ToConnectionSecretKey: "token",
 							},
 						},
 						ForProvider: v1alpha1.ObjectParameters{
