@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: default
+  name: test-sa
+---
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: test-sa
+spec:
+  connectionDetails:
+  - apiVersion: v1
+    fieldPath: data.token
+    kind: Secret
+    name: test-sa-token
+    namespace: default
+    toConnectionSecretKey: token
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        annotations:
+          kubernetes.io/service-account.name: test-sa
+        name: test-sa-token
+        namespace: default
+      type: kubernetes.io/service-account-token
+  providerConfigRef:
+    name: kubernetes-provider
+  writeConnectionSecretToRef:
+    name: test-sa-conn-out
+    namespace: default
