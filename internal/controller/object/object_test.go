@@ -253,7 +253,7 @@ func Test_connector_Connect(t *testing.T) {
 		gcpExtractorFn   func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
 		gcpInjectorFn    func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error
 		azureExtractorFn func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
-		azureInjectorFn  func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error
+		azureInjectorFn  func(ctx context.Context, rc *rest.Config, credentials []byte, identityType kubernetesv1alpha1.IdentityType, scopes ...string) error
 		newRESTConfigFn  func(kubeconfig []byte) (*rest.Config, error)
 		newKubeClientFn  func(config *rest.Config) (client.Client, error)
 		usage            resource.Tracker
@@ -496,7 +496,7 @@ func Test_connector_Connect(t *testing.T) {
 				azureExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
 					return nil, nil
 				},
-				azureInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+				azureInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, identityType kubernetesv1alpha1.IdentityType, scopes ...string) error {
 					return errBoom
 				},
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
@@ -526,7 +526,7 @@ func Test_connector_Connect(t *testing.T) {
 				azureExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
 					return nil, nil
 				},
-				azureInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+				azureInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, identityType kubernetesv1alpha1.IdentityType, scopes ...string) error {
 					return errBoom
 				},
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
@@ -557,7 +557,7 @@ func Test_connector_Connect(t *testing.T) {
 				azureExtractorFn: func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error) {
 					return nil, nil
 				},
-				azureInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+				azureInjectorFn: func(ctx context.Context, rc *rest.Config, credentials []byte, identityType kubernetesv1alpha1.IdentityType, scopes ...string) error {
 					return errBoom
 				},
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),

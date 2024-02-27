@@ -51,6 +51,8 @@ const (
 	IdentityTypeGoogleApplicationCredentials = "GoogleApplicationCredentials"
 
 	IdentityTypeAzureServicePrincipalCredentials = "AzureServicePrincipalCredentials"
+
+	IdentityTypeAzureWorkloadIdentityCredentials = "AzureWorkloadIdentityCredentials"
 )
 
 // Identity used to authenticate.

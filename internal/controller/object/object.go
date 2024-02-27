@@ -154,7 +154,7 @@ type connector struct {
 	gcpExtractorFn   func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
 	gcpInjectorFn    func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error
 	azureExtractorFn func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
-	azureInjectorFn  func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error
+	azureInjectorFn  func(ctx context.Context, rc *rest.Config, credentials []byte, identityType apisv1alpha1.IdentityType, scopes ...string) error
 	newRESTConfigFn  func(kubeconfig []byte) (*rest.Config, error)
 	newKubeClientFn  func(config *rest.Config) (client.Client, error)
 }
@@ -215,7 +215,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 					return nil, errors.Wrap(err, errFailedToInjectGoogleCredentials)
 				}
 			}
-		case apisv1alpha1.IdentityTypeAzureServicePrincipalCredentials:
+		case apisv1alpha1.IdentityTypeAzureServicePrincipalCredentials, apisv1alpha1.IdentityTypeAzureWorkloadIdentityCredentials:
 			switch id.Source { //nolint:exhaustive
 			case xpv1.CredentialsSourceInjectedIdentity:
 				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
@@ -226,7 +226,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 					return nil, errors.Wrap(err, errFailedToExtractAzureCredentials)
 				}
 
-				if err := c.azureInjectorFn(ctx, rc, creds); err != nil {
+				if err := c.azureInjectorFn(ctx, rc, creds, id.Type); err != nil {
 					return nil, errors.Wrap(err, errFailedToInjectAzureCredentials)
 				}
 			}
