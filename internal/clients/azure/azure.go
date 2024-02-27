@@ -65,19 +65,13 @@ func WrapRESTConfig(_ context.Context, rc *rest.Config, credentials []byte, iden
 		opts.ClientID = m[CredentialsKeyClientID]
 		opts.TenantID = m[CredentialsKeyTenantID]
 		opts.ServerID = m[CredentialsKeyServerID]
-		if ftf, ok := m[CredentialsKeyFederatedTokenFile]; ok {
-			// optional, default can be set via AZURE_FEDERATED_TOKEN_FILE env var
-			opts.FederatedTokenFile = ftf
-		}
-		if ftf, ok := m[CredentialsKeyAuthorityHost]; ok {
-			// optional, default can be set via AZURE_AUTHORITY_HOST env var
-			opts.FederatedTokenFile = ftf
-		}
+		opts.FederatedTokenFile = m[CredentialsKeyFederatedTokenFile]
+		opts.AuthorityHost = m[CredentialsKeyAuthorityHost]
 	}
 
 	p, err := token.NewTokenProvider(&opts)
 	if err != nil {
-		return errors.New("cannot build azure token provider")
+		return errors.Wrap(err, "cannot build azure token provider")
 	}
 
 	rc.Wrap(func(rt http.RoundTripper) http.RoundTripper {
