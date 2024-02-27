@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/Azure/kubelogin v0.0.0-00010101000000-000000000000
-	github.com/crossplane/crossplane-runtime v1.15.0-rc.1
+	github.com/crossplane/crossplane-runtime v1.16.0-rc.1
 	github.com/crossplane/crossplane-tools v0.0.0-20230925130601-628280f8bf79
 	github.com/google/go-cmp v0.6.0
 	github.com/pkg/errors v0.9.1
