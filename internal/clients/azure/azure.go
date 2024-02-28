@@ -3,13 +3,14 @@ package azure
 import (
 	"context"
 	"encoding/json"
-	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 	"net/http"
 
 	"github.com/Azure/kubelogin/pkg/token"
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	"k8s.io/client-go/rest"
+
+	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 )
 
 // Credentials Secret content is a json whose keys are below.
