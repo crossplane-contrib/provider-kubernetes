@@ -14,11 +14,31 @@ limitations under the License.
 package clients
 
 import (
+	"context"
+
 	"github.com/pkg/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/pkg/resource"
+
+	"github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/azure"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/gke"
+)
+
+const (
+	errGetPC                            = "cannot get ProviderConfig"
+	errGetCreds                         = "cannot get credentials"
+	errFailedToCreateRestConfig         = "cannot create new REST config using provider secret"
+	errFailedToExtractGoogleCredentials = "cannot extract Google Application Credentials"
+	errFailedToInjectGoogleCredentials  = "cannot wrap REST client with Google Application Credentials"
+	errFailedToExtractAzureCredentials  = "failed to extract Azure Application Credentials"
+	errFailedToInjectAzureCredentials   = "failed to wrap REST client with Azure Application Credentials"
 )
 
 // NewRESTConfig returns a rest config given a secret with connection information.
@@ -85,4 +105,72 @@ func restConfigFromAPIConfig(c *api.Config) (*rest.Config, error) {
 	config.QPS = 50
 
 	return config, nil
+}
+
+// ClientForProvider returns the client for the given provider config
+func ClientForProvider(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error) { //nolint:gocyclo
+	pc := &v1alpha1.ProviderConfig{}
+	if err := inclusterClient.Get(ctx, types.NamespacedName{Name: providerConfigName}, pc); err != nil {
+		return nil, errors.Wrap(err, errGetPC)
+	}
+
+	var rc *rest.Config
+	var err error
+
+	switch cd := pc.Spec.Credentials; cd.Source { //nolint:exhaustive
+	case xpv1.CredentialsSourceInjectedIdentity:
+		rc, err = rest.InClusterConfig()
+		if err != nil {
+			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
+		}
+	default:
+		kc, err := resource.CommonCredentialExtractor(ctx, cd.Source, inclusterClient, cd.CommonCredentialSelectors)
+		if err != nil {
+			return nil, errors.Wrap(err, errGetCreds)
+		}
+
+		if rc, err = NewRESTConfig(kc); err != nil {
+			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
+		}
+	}
+
+	if id := pc.Spec.Identity; id != nil {
+		switch id.Type {
+		case v1alpha1.IdentityTypeGoogleApplicationCredentials:
+			switch id.Source { //nolint:exhaustive
+			case xpv1.CredentialsSourceInjectedIdentity:
+				if err := gke.WrapRESTConfig(ctx, rc, nil, gke.DefaultScopes...); err != nil {
+					return nil, errors.Wrap(err, errFailedToInjectGoogleCredentials)
+				}
+			default:
+				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, inclusterClient, id.CommonCredentialSelectors)
+				if err != nil {
+					return nil, errors.Wrap(err, errFailedToExtractGoogleCredentials)
+				}
+
+				if err := gke.WrapRESTConfig(ctx, rc, creds, gke.DefaultScopes...); err != nil {
+					return nil, errors.Wrap(err, errFailedToInjectGoogleCredentials)
+				}
+			}
+		case v1alpha1.IdentityTypeAzureServicePrincipalCredentials:
+			switch id.Source { //nolint:exhaustive
+			case xpv1.CredentialsSourceInjectedIdentity:
+				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
+					xpv1.CredentialsSourceInjectedIdentity, v1alpha1.IdentityTypeAzureServicePrincipalCredentials)
+			default:
+				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, inclusterClient, id.CommonCredentialSelectors)
+				if err != nil {
+					return nil, errors.Wrap(err, errFailedToExtractAzureCredentials)
+				}
+
+				if err := azure.WrapRESTConfig(ctx, rc, creds); err != nil {
+					return nil, errors.Wrap(err, errFailedToInjectAzureCredentials)
+				}
+			}
+		default:
+			return nil, errors.Errorf("unknown identity type: %s", id.Type)
+		}
+	}
+
+	return NewKubeClient(rc)
 }

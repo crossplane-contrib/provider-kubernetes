@@ -23,6 +23,7 @@ import (
 
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 
+	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/collection"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/config"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/object"
 )
@@ -34,6 +35,9 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		return err
 	}
 	if err := object.Setup(mgr, o, sanitizeSecrets, pollJitter); err != nil {
+		return err
+	}
+	if err := collection.Setup(mgr, o, pollJitter); err != nil {
 		return err
 	}
 	return nil
