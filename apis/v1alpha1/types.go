@@ -114,3 +114,98 @@ type ProviderConfigUsageList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ProviderConfigUsage `json:"items"`
 }
+
+// +kubebuilder:object:root=true
+
+// A ObservedObjectCollection is a provider Kubernetes API type
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="KIND",type="string",JSONPath=".spec.kind"
+// +kubebuilder:printcolumn:name="APIVERSION",type="string",JSONPath=".spec.apiVersion",priority=1
+// +kubebuilder:printcolumn:name="PROVIDERCONFIG",type="string",JSONPath=".spec.providerConfigRef.name"
+// +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
+// +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
+// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:resource:scope=Cluster,categories={crossplane,managed,kubernetes}
+type ObservedObjectCollection struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              ObservedObjectCollectionSpec   `json:"spec"`
+	Status            ObservedObjectCollectionStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// ObservedObjectCollectionList contains a list of ObservedObjectCollection
+type ObservedObjectCollectionList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []ObservedObjectCollection `json:"items"`
+}
+
+// ObservedObjectCollectionSpec defines the desired state of ObservedObjectCollection
+type ObservedObjectCollectionSpec struct {
+
+	// APIVersion of objects that should be matched by the selector
+	// +kubebuilder:validation:MinLength:=1
+	APIVersion string `json:"apiVersion"`
+
+	// Kind of objects that should be matched by the selector
+	// +kubebuilder:validation:MinLength:=1
+	Kind string `json:"kind"`
+
+	// Namespace where to look for objects.
+	// If omitted, search is performed across all namespaces.
+	// For cluster-scoped objects, omit it.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// Selector defines the criteria for including objects into the collection
+	Selector metav1.LabelSelector `json:"selector"`
+
+	// ProviderConfigReference specifies how the provider that will be used to
+	// create, observe, update, and delete this managed resource should be
+	// configured.
+	// +kubebuilder:default={"name": "default"}
+	ProviderConfigReference xpv1.Reference `json:"providerConfigRef,omitempty"`
+
+	// Template when defined is used for creating Object instances
+	// +optional
+	Template *ObservedObjectTemplate `json:"template,omitempty"`
+}
+
+// ObservedObjectTemplate represents template used when creating observe-only Objects matching the given selector
+type ObservedObjectTemplate struct {
+
+	// Objects metadata
+	Metadata ObservedObjectTemplateMetadata `json:"metadata,omitempty"`
+}
+
+// ObservedObjectTemplateMetadata represents objects metadata
+type ObservedObjectTemplateMetadata struct {
+
+	// Labels of an object
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Annotations of an object
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// ObservedObjectCollectionStatus represents the observed state of a ObservedObjectCollection
+type ObservedObjectCollectionStatus struct {
+	xpv1.ResourceStatus `json:",inline"`
+
+	// List of object references mathing the given selector
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Objects []ObservedObjectReference `json:"objects,omitempty"`
+}
+
+// ObservedObjectReference represents a reference to Object with ObserveOnly management policy
+type ObservedObjectReference struct {
+
+	// Name of the observed object
+	// +kubebuilder:validation:MinLength:=1
+	// +kubebuilder:validation:MaxLength:=253
+	Name string `json:"name"`
+}
