@@ -32,13 +32,13 @@ import (
 )
 
 const (
-	errGetPC                            = "cannot get ProviderConfig"
-	errGetCreds                         = "cannot get credentials"
-	errFailedToCreateRestConfig         = "cannot create new REST config using provider secret"
-	errFailedToExtractGoogleCredentials = "cannot extract Google Application Credentials"
-	errFailedToInjectGoogleCredentials  = "cannot wrap REST client with Google Application Credentials"
-	errFailedToExtractAzureCredentials  = "failed to extract Azure Application Credentials"
-	errFailedToInjectAzureCredentials   = "failed to wrap REST client with Azure Application Credentials"
+	errGetPC                    = "cannot get ProviderConfig"
+	errGetCreds                 = "cannot get credentials"
+	errCreateRestConfig         = "cannot create new REST config using provider secret"
+	errExtractGoogleCredentials = "cannot extract Google Application Credentials"
+	errInjectGoogleCredentials  = "cannot wrap REST client with Google Application Credentials"
+	errExtractAzureCredentials  = "failed to extract Azure Application Credentials"
+	errInjectAzureCredentials   = "failed to wrap REST client with Azure Application Credentials"
 )
 
 // NewRESTConfig returns a rest config given a secret with connection information.
@@ -121,7 +121,7 @@ func ClientForProvider(ctx context.Context, inclusterClient client.Client, provi
 	case xpv1.CredentialsSourceInjectedIdentity:
 		rc, err = rest.InClusterConfig()
 		if err != nil {
-			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
+			return nil, errors.Wrap(err, errCreateRestConfig)
 		}
 	default:
 		kc, err := resource.CommonCredentialExtractor(ctx, cd.Source, inclusterClient, cd.CommonCredentialSelectors)
@@ -130,7 +130,7 @@ func ClientForProvider(ctx context.Context, inclusterClient client.Client, provi
 		}
 
 		if rc, err = NewRESTConfig(kc); err != nil {
-			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
+			return nil, errors.Wrap(err, errCreateRestConfig)
 		}
 	}
 
@@ -140,16 +140,16 @@ func ClientForProvider(ctx context.Context, inclusterClient client.Client, provi
 			switch id.Source { //nolint:exhaustive
 			case xpv1.CredentialsSourceInjectedIdentity:
 				if err := gke.WrapRESTConfig(ctx, rc, nil, gke.DefaultScopes...); err != nil {
-					return nil, errors.Wrap(err, errFailedToInjectGoogleCredentials)
+					return nil, errors.Wrap(err, errInjectGoogleCredentials)
 				}
 			default:
 				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, inclusterClient, id.CommonCredentialSelectors)
 				if err != nil {
-					return nil, errors.Wrap(err, errFailedToExtractGoogleCredentials)
+					return nil, errors.Wrap(err, errExtractGoogleCredentials)
 				}
 
 				if err := gke.WrapRESTConfig(ctx, rc, creds, gke.DefaultScopes...); err != nil {
-					return nil, errors.Wrap(err, errFailedToInjectGoogleCredentials)
+					return nil, errors.Wrap(err, errInjectGoogleCredentials)
 				}
 			}
 		case v1alpha1.IdentityTypeAzureServicePrincipalCredentials:
@@ -160,11 +160,11 @@ func ClientForProvider(ctx context.Context, inclusterClient client.Client, provi
 			default:
 				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, inclusterClient, id.CommonCredentialSelectors)
 				if err != nil {
-					return nil, errors.Wrap(err, errFailedToExtractAzureCredentials)
+					return nil, errors.Wrap(err, errExtractAzureCredentials)
 				}
 
 				if err := azure.WrapRESTConfig(ctx, rc, creds); err != nil {
-					return nil, errors.Wrap(err, errFailedToInjectAzureCredentials)
+					return nil, errors.Wrap(err, errInjectAzureCredentials)
 				}
 			}
 		default:

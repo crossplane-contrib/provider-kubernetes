@@ -64,20 +64,94 @@ spec:
             description: ObservedObjectCollectionSpec defines the desired state of
               ObservedObjectCollection
             properties:
-              apiVersion:
-                description: APIVersion of objects that should be matched by the selector
-                minLength: 1
-                type: string
-              kind:
-                description: Kind of objects that should be matched by the selector
-                minLength: 1
-                type: string
-              namespace:
+              objectTemplate:
+                description: Template when defined is used for creating Object instances
+                properties:
+                  metadata:
+                    description: Objects metadata
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        description: Annotations of an object
+                        type: object
+                      labels:
+                        additionalProperties:
+                          type: string
+                        description: Labels of an object
+                        type: object
+                    type: object
+                type: object
+              observeObjects:
                 description: |-
-                  Namespace where to look for objects.
-                  If omitted, search is performed across all namespaces.
-                  For cluster-scoped objects, omit it.
-                type: string
+                  ObserveObjects declares what criteria object need to fulfil
+                  to become a member of this collection
+                properties:
+                  apiVersion:
+                    description: APIVersion of objects that should be matched by the
+                      selector
+                    minLength: 1
+                    type: string
+                  kind:
+                    description: Kind of objects that should be matched by the selector
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace where to look for objects.
+                      If omitted, search is performed across all namespaces.
+                      For cluster-scoped objects, omit it.
+                    type: string
+                  selector:
+                    description: Selector defines the criteria for including objects
+                      into the collection
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - apiVersion
+                - kind
+                - selector
+                type: object
               providerConfigRef:
                 default:
                   name: default
@@ -117,73 +191,8 @@ spec:
                 required:
                 - name
                 type: object
-              selector:
-                description: Selector defines the criteria for including objects into
-                  the collection
-                properties:
-                  matchExpressions:
-                    description: matchExpressions is a list of label selector requirements.
-                      The requirements are ANDed.
-                    items:
-                      description: |-
-                        A label selector requirement is a selector that contains values, a key, and an operator that
-                        relates the key and values.
-                      properties:
-                        key:
-                          description: key is the label key that the selector applies
-                            to.
-                          type: string
-                        operator:
-                          description: |-
-                            operator represents a key's relationship to a set of values.
-                            Valid operators are In, NotIn, Exists and DoesNotExist.
-                          type: string
-                        values:
-                          description: |-
-                            values is an array of string values. If the operator is In or NotIn,
-                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                            the values array must be empty. This array is replaced during a strategic
-                            merge patch.
-                          items:
-                            type: string
-                          type: array
-                      required:
-                      - key
-                      - operator
-                      type: object
-                    type: array
-                  matchLabels:
-                    additionalProperties:
-                      type: string
-                    description: |-
-                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
-                      map is equivalent to an element of matchExpressions, whose key field is "key", the
-                      operator is "In", and the values array contains only "value". The requirements are ANDed.
-                    type: object
-                type: object
-                x-kubernetes-map-type: atomic
-              template:
-                description: Template when defined is used for creating Object instances
-                properties:
-                  metadata:
-                    description: Objects metadata
-                    properties:
-                      annotations:
-                        additionalProperties:
-                          type: string
-                        description: Annotations of an object
-                        type: object
-                      labels:
-                        additionalProperties:
-                          type: string
-                        description: Labels of an object
-                        type: object
-                    type: object
-                type: object
             required:
-            - apiVersion
-            - kind
-            - selector
+            - observeObjects
             type: object
           status:
             description: ObservedObjectCollectionStatus represents the observed state
@@ -228,7 +237,14 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              objects:
+              membershipLabel:
+                additionalProperties:
+                  type: string
+                description: |-
+                  MembershipLabel is the label set on each member of this collection
+                  and can be used for fetching them.
+                type: object
+              objectRefs:
                 description: List of object references mathing the given selector
                 items:
                   description: ObservedObjectReference represents a reference to Object
