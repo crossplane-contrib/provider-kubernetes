@@ -18,13 +18,11 @@ package observedobjectcollection
 
 import (
 	"context"
-	"crypto/md5" //#nosec G501 -- used for generating unique object names only
+	"crypto/sha256"
 	"fmt"
 	"math/rand"
-	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -219,21 +217,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 }
 
 func observedObjectName(collection client.Object, matchedObject client.Object) (string, error) {
-	name := fmt.Sprintf("%s-%s-%s-%s", collection.GetName(), strings.ToLower(matchedObject.GetObjectKind().GroupVersionKind().Kind), matchedObject.GetNamespace(), matchedObject.GetName())
-	// If the name length is less than 253 chars,
-	// we can use it as-is.
-	// https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names
-	if len(name) <= 253 {
-		return name, nil
-	}
-
-	// Otherwise, compute md5 hash of it, to reduce it length.
-	h := md5.New() //#nosec G401 -- used only for unique name generation
-	if _, err := h.Write([]byte(name)); err != nil {
+	// unique object identifier
+	k := fmt.Sprintf("%v/%s/%s", matchedObject.GetObjectKind().GroupVersionKind(), matchedObject.GetNamespace(), matchedObject.GetName())
+	// Compute sha256 hash of it and take first 56 bits.
+	h := sha256.New()
+	if _, err := h.Write([]byte(k)); err != nil {
 		return "", err
 	}
-	id, err := uuid.FromBytes(h.Sum(nil))
-	return id.String(), err
+	kp := fmt.Sprintf("%x", h.Sum(nil))[0:7]
+	// append it to the collection name
+	return fmt.Sprintf("%s-%s", collection.GetName(), kp), nil
 }
 
 func observedObjectPatch(name string, matchedObject unstructured.Unstructured, collection *v1alpha1.ObservedObjectCollection) (*unstructured.Unstructured, error) {
