@@ -244,28 +244,13 @@ spec:
                   MembershipLabel is the label set on each member of this collection
                   and can be used for fetching them.
                 type: object
-              objectRefs:
-                description: List of object references mathing the given selector
-                items:
-                  description: ObservedObjectReference represents a reference to Object
-                    with ObserveOnly management policy
-                  properties:
-                    name:
-                      description: Name of the observed object
-                      maxLength: 253
-                      minLength: 1
-                      type: string
-                  required:
-                  - name
-                  type: object
-                type: array
-                x-kubernetes-list-map-keys:
-                - name
-                x-kubernetes-list-type: map
             type: object
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: metadata.name max length is 63
+          rule: size(self.metadata.name) < 64
     served: true
     storage: true
     subresources:

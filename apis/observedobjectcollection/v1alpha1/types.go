@@ -33,6 +33,7 @@ import (
 // +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:scope=Cluster,categories={crossplane,managed,kubernetes}
+// +kubebuilder:validation:XValidation:rule="size(self.metadata.name) < 64",message="metadata.name max length is 63"
 type ObservedObjectCollection struct {
 	v1.TypeMeta   `json:",inline"`
 	v1.ObjectMeta `json:"metadata,omitempty"`
@@ -109,14 +110,9 @@ type ObservedObjectTemplateMetadata struct {
 type ObservedObjectCollectionStatus struct {
 	v12.ResourceStatus `json:",inline"`
 
-	// List of object references mathing the given selector
-	// +optional
-	// +listType=map
-	// +listMapKey=name
-	ObjectRefs []ObservedObjectReference `json:"objectRefs,omitempty"`
-
 	// MembershipLabel is the label set on each member of this collection
 	// and can be used for fetching them.
+	// +optional
 	MembershipLabel map[string]string `json:"membershipLabel,omitempty"`
 }
 

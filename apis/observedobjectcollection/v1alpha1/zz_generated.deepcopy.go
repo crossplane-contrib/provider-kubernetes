@@ -125,11 +125,6 @@ func (in *ObservedObjectCollectionSpec) DeepCopy() *ObservedObjectCollectionSpec
 func (in *ObservedObjectCollectionStatus) DeepCopyInto(out *ObservedObjectCollectionStatus) {
 	*out = *in
 	in.ResourceStatus.DeepCopyInto(&out.ResourceStatus)
-	if in.ObjectRefs != nil {
-		in, out := &in.ObjectRefs, &out.ObjectRefs
-		*out = make([]ObservedObjectReference, len(*in))
-		copy(*out, *in)
-	}
 	if in.MembershipLabel != nil {
 		in, out := &in.MembershipLabel, &out.MembershipLabel
 		*out = make(map[string]string, len(*in))

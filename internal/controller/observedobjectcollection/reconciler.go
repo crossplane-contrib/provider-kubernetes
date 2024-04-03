@@ -51,7 +51,7 @@ import (
 const (
 	errNewKubernetesClient = "cannot create new Kubernetes client"
 	errStatusUpdate        = "cannot update status"
-	fieldOwner             = client.FieldOwner("observed-object-collection-controller")
+	fieldOwner             = client.FieldOwner("kubernetes.crossplane.io/observed-object-collection-controller")
 	membershipLabelKey     = "kubernetes.crossplane.io/owned-by-collection"
 )
 
@@ -125,14 +125,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 
 	log.Info("Reconciling")
 
-	mlv, err := membershipLabelValue(c)
-	if err != nil {
-		werr := errors.Wrapf(err, "error getting value for label %v", membershipLabelKey)
-		c.Status.SetConditions(xpv1.ReconcileError(werr))
-		_ = r.client.Status().Update(ctx, c)
-		return ctrl.Result{}, werr
-	}
-
 	// Get client for the referenced provider config.
 	clusterClient, err := r.clientForProvider(ctx, r.client, c.Spec.ProviderConfigReference.Name)
 	if err != nil {
@@ -143,9 +135,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	}
 
 	// Fetch objects based on the set GVK and selector.
-	objects := &unstructured.UnstructuredList{}
-	objects.SetAPIVersion(c.Spec.ObserveObjects.APIVersion)
-	objects.SetKind(c.Spec.ObserveObjects.Kind)
+	k8sobjects := &unstructured.UnstructuredList{}
+	k8sobjects.SetAPIVersion(c.Spec.ObserveObjects.APIVersion)
+	k8sobjects.SetKind(c.Spec.ObserveObjects.Kind)
 	selector, err := metav1.LabelSelectorAsSelector(&c.Spec.ObserveObjects.Selector)
 
 	if err != nil {
@@ -155,17 +147,28 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 		return ctrl.Result{}, werr
 	}
 
-	if err := clusterClient.List(ctx, objects, &client.ListOptions{LabelSelector: selector, Namespace: c.Spec.ObserveObjects.Namespace}); err != nil {
-		werr := errors.Wrap(err, "error listing objects")
+	lo := client.ListOptions{LabelSelector: selector, Namespace: c.Spec.ObserveObjects.Namespace}
+	if err := clusterClient.List(ctx, k8sobjects, &lo); err != nil {
+		werr := errors.Wrapf(err, "error fetching objects for GVK %v and options %v", k8sobjects.GetObjectKind().GroupVersionKind(), lo)
 		c.Status.SetConditions(xpv1.ReconcileError(werr))
 		_ = r.client.Status().Update(ctx, c)
 		return ctrl.Result{}, werr
 	}
 
-	// Create observed-only Objects for all found items.
+	// Fetch any existing counter-part observe only Objects by collection label.
+	ml := map[string]string{membershipLabelKey: c.Name}
+	ol := &v1alpha2.ObjectList{}
+	if err := r.client.List(ctx, ol, client.MatchingLabels(ml)); err != nil {
+		werr := errors.Wrapf(err, "cannot list members matching labels %v", ml)
+		c.Status.SetConditions(xpv1.ReconcileError(werr))
+		_ = r.client.Status().Update(ctx, c)
+		return ctrl.Result{}, werr
+	}
+
+	// Create/update observed-only Objects for all found items.
 	refs := sets.New[v1alpha1.ObservedObjectReference]()
-	for i := range objects.Items {
-		o := objects.Items[i]
+	for i := range k8sobjects.Items {
+		o := k8sobjects.Items[i]
 		log.Debug("creating observed object for the matched item", "gvk", o.GroupVersionKind(), "name", o.GetName())
 		name, err := r.observedObjectName(c, &o)
 		if err != nil {
@@ -183,12 +186,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 			_ = r.client.Status().Update(ctx, c)
 			return ctrl.Result{}, werr
 		}
-		if l := po.GetLabels(); l != nil {
-			l[membershipLabelKey] = mlv
-			po.SetLabels(l)
-		} else {
-			po.SetLabels(map[string]string{membershipLabelKey: mlv})
-		}
 		if err := r.client.Patch(ctx, po, client.Apply, fieldOwner, client.ForceOwnership); err != nil {
 			werr := errors.Wrap(err, "cannot create observed object")
 			c.Status.SetConditions(xpv1.ReconcileError(werr))
@@ -201,23 +198,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	}
 
 	// Remove collection members that either do not exist anymore or are no match.
-	ol := &v1alpha2.ObjectList{}
-	if err := r.client.List(ctx, ol, client.MatchingLabels(map[string]string{membershipLabelKey: mlv})); err != nil {
-		werr := errors.Wrapf(err, "cannot list members matching label %v=%v", membershipLabelKey, mlv)
-		c.Status.SetConditions(xpv1.ReconcileError(werr))
-		_ = r.client.Status().Update(ctx, c)
-		return ctrl.Result{}, werr
-	}
-
-	oldRefs := sets.New[v1alpha1.ObservedObjectReference](c.Status.ObjectRefs...)
 	for i := range ol.Items {
-		name := ol.Items[i].Name
-		if refs.Has(v1alpha1.ObservedObjectReference{Name: name}) {
+		o := ol.Items[i]
+		if refs.Has(v1alpha1.ObservedObjectReference{Name: o.Name}) {
 			continue
 		}
-		log.Debug("Removing", "name", name)
+		log.Debug("Removing", "name", o.Name)
 		if err := r.client.Delete(ctx, &ol.Items[i]); err != nil {
-			werr := errors.Wrapf(err, "cannot delete observed object %s", name)
+			werr := errors.Wrapf(err, "cannot delete observed object %v", o)
 			c.Status.SetConditions(xpv1.ReconcileError(werr))
 			_ = r.client.Status().Update(ctx, c)
 			return ctrl.Result{}, werr
@@ -225,11 +213,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	}
 	c.Status.SetConditions(xpv1.ReconcileSuccess(), xpv1.Available())
 
-	// Update references only if more or less objects got matched since the last reconciliation.
-	if !refs.Equal(oldRefs) {
-		c.Status.ObjectRefs = refs.UnsortedList()
-	}
-	c.Status.MembershipLabel = map[string]string{membershipLabelKey: mlv}
+	c.Status.MembershipLabel = ml
 
 	return ctrl.Result{RequeueAfter: r.pollInterval()}, r.client.Status().Update(ctx, c)
 }
@@ -246,19 +230,6 @@ func observedObjectName(collection client.Object, matchedObject client.Object) (
 	// Otherwise, compute md5 hash of it, to reduce it length.
 	h := md5.New() //#nosec G401 -- used only for unique name generation
 	if _, err := h.Write([]byte(name)); err != nil {
-		return "", err
-	}
-	id, err := uuid.FromBytes(h.Sum(nil))
-	return id.String(), err
-}
-
-func membershipLabelValue(collection *v1alpha1.ObservedObjectCollection) (string, error) {
-	if len(collection.GetName()) <= 63 {
-		return collection.GetName(), nil
-	}
-	// Otherwise, compute md5 hash of it, to reduce it length.
-	h := md5.New() //#nosec G401 -- used only for unique name generation
-	if _, err := h.Write([]byte(collection.GetName())); err != nil {
 		return "", err
 	}
 	id, err := uuid.FromBytes(h.Sum(nil))
@@ -299,14 +270,18 @@ func observedObjectPatch(name string, matchedObject unstructured.Unstructured, c
 			},
 		},
 	}
+	labels := map[string]string{
+		membershipLabelKey: collection.Name,
+	}
 	if t := collection.Spec.Template; t != nil {
-		if len(t.Metadata.Labels) > 0 {
-			observedObject.SetLabels(t.Metadata.Labels)
+		for k, v := range t.Metadata.Labels {
+			labels[k] = v
 		}
 		if len(t.Metadata.Annotations) > 0 {
 			observedObject.SetAnnotations(t.Metadata.Annotations)
 		}
 	}
+	observedObject.SetLabels(labels)
 	v, err := runtime.DefaultUnstructuredConverter.ToUnstructured(observedObject)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot convert to unstructured")

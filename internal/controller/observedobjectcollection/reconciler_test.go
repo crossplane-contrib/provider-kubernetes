@@ -163,18 +163,13 @@ func TestReconciler(t *testing.T) {
 					MockStatusUpdate: func(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 						c := obj.(*v1alpha1.ObservedObjectCollection)
 						if cnd := c.Status.GetCondition(xpv1.TypeSynced); cnd.Status != corev1.ConditionTrue {
-							return fmt.Errorf("Object sync condition not true: %v", cnd.Message)
+							panic(fmt.Sprintf("Object sync condition not true: %v", cnd.Message))
 						}
 						if cnd := c.Status.GetCondition(xpv1.TypeReady); cnd.Status != corev1.ConditionTrue {
-							return fmt.Errorf("Object ready condition not true: %v", cnd.Message)
+							panic(fmt.Sprintf("Object ready condition not true: %v", cnd.Message))
 						}
-
-						if l := len(c.Status.ObjectRefs); l != 2 {
-							return fmt.Errorf("Expected 2 objects refs, but got %v", l)
-						}
-
 						if v := c.Status.MembershipLabel[membershipLabelKey]; v != collectionName.Name {
-							return fmt.Errorf("Expected membership label %v but got %v", collectionName.Name, v)
+							panic(fmt.Sprintf("Expected membership label %v but got %v", collectionName.Name, v))
 						}
 						return nil
 					},
@@ -270,11 +265,6 @@ func TestReconciler(t *testing.T) {
 						if cnd := c.Status.GetCondition(xpv1.TypeReady); cnd.Status != corev1.ConditionTrue {
 							return fmt.Errorf("Object ready condition not true: %v", cnd.Message)
 						}
-
-						if l := len(c.Status.ObjectRefs); l != 2 {
-							return fmt.Errorf("Expected 2 objects refs, but got %v", l)
-						}
-
 						if v := c.Status.MembershipLabel[membershipLabelKey]; v != collectionName.Name {
 							return fmt.Errorf("Expected membership label %v but got %v", collectionName.Name, v)
 						}
@@ -402,7 +392,7 @@ func TestReconciler(t *testing.T) {
 			}
 			got, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: collectionName})
 			if !errors.Is(err, tc.want.err) {
-				t.Errorf("\n%s\nr.Reconcile(...): want error %v, got error %v", tc.reason, tc.want.err, err)
+				t.Errorf("\n%s\nr.Reconcile(...): want error: %v, got error: %v", tc.reason, tc.want.err, err)
 			}
 			if diff := cmp.Diff(tc.want.r, got, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\nr.Reconcile(...): -want, +got:\n%s", tc.reason, diff)
