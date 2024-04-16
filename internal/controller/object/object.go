@@ -52,6 +52,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
+	"github.com/crossplane/crossplane-runtime/pkg/statemetrics"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
@@ -126,6 +127,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		managed.WithLogger(l),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
 		managed.WithConnectionPublishers(cps...),
+		managed.WithMetricRecorder(o.MetricOptions.MRMetrics),
 	}
 
 	conn := &connector{
@@ -176,6 +178,11 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
 		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
+	}
+
+	if err := mgr.Add(statemetrics.NewMRStateRecorder(
+		mgr.GetClient(), o.Logger, o.MetricOptions.MRStateMetrics, &v1alpha2.ObjectList{}, o.MetricOptions.PollStateMetricInterval)); err != nil {
+		return err
 	}
 
 	return cb.Complete(ratelimiter.NewReconciler(name, managed.NewReconciler(mgr,
