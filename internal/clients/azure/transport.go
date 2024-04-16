@@ -29,12 +29,12 @@ func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}()
 	}
 
-	tkn, err := t.Provider.Token()
+	tkn, err := t.Provider.GetAccessToken(req.Context())
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get azure token")
 	}
 	req2 := cloneRequest(req) // per RoundTripper contract
-	req2.Header.Set("Authorization", "Bearer "+tkn.AccessToken)
+	req2.Header.Set("Authorization", "Bearer "+tkn.Token)
 
 	// req.Body is assumed to be closed by the base RoundTripper.
 	reqBodyClosed = true
