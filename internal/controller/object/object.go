@@ -254,6 +254,10 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
+	
+	if c.kindObserver != nil {
+		c.kindObserver.WatchResources(c.client.GetConfig(), cr.Spec.ProviderConfigReference.Name, desired.GroupVersionKind())
+	}
 
 	observed := desired.DeepCopy()
 
@@ -268,12 +272,6 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	if err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObject)
-	}
-
-	// We know the resource exists, so we can start watching it for realtime
-	// events if we have the kindObserver (i.e. watches enabled).
-	if c.kindObserver != nil {
-		c.kindObserver.WatchResources(c.client.GetConfig(), cr.Spec.ProviderConfigReference.Name, observed.GroupVersionKind())
 	}
 
 	if err = c.setObserved(cr, observed); err != nil {
