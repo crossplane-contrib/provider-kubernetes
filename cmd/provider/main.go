@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 	"io"
 	"os"
 	"path/filepath"
@@ -50,15 +51,17 @@ const (
 
 func main() {
 	var (
-		app                      = kingpin.New(filepath.Base(os.Args[0]), "Template support for Crossplane.").DefaultEnvars()
-		debug                    = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
-		syncInterval             = app.Flag("sync", "Controller manager sync period such as 300ms, 1.5h, or 2h45m").Short('s').Default("1h").Duration()
-		pollInterval             = app.Flag("poll", "Poll interval controls how often an individual resource should be checked for drift.").Default("10m").Duration()
-		pollJitterPercentage     = app.Flag("poll-jitter-percentage", "Percentage of jitter to apply to poll interval. It cannot be negative, and must be less than 100.").Default("10").Uint()
-		leaderElection           = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
-		maxReconcileRate         = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("100").Int()
+		app                  = kingpin.New(filepath.Base(os.Args[0]), "Template support for Crossplane.").DefaultEnvars()
+		debug                = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
+		syncInterval         = app.Flag("sync", "Controller manager sync period such as 300ms, 1.5h, or 2h45m").Short('s').Default("1h").Duration()
+		pollInterval         = app.Flag("poll", "Poll interval controls how often an individual resource should be checked for drift.").Default("10m").Duration()
+		pollJitterPercentage = app.Flag("poll-jitter-percentage", "Percentage of jitter to apply to poll interval. It cannot be negative, and must be less than 100.").Default("10").Uint()
+		leaderElection       = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
+		maxReconcileRate     = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("100").Int()
+		sanitizeSecrets      = app.Flag("sanitize-secrets", "when enabled, redacts Secret data from Object status").Default("false").Envar("SANITIZE_SECRETS").Bool()
+
 		enableManagementPolicies = app.Flag("enable-management-policies", "Enable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
-		sanitizeSecrets          = app.Flag("sanitize-secrets", "when enabled, redacts Secret data from Object status").Default("false").Envar("SANITIZE_SECRETS").Bool()
+		enableWatches            = app.Flag("enable-watches", "Enable support for watching resources.").Default("false").Envar("ENABLE_WATCHES").Bool()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
@@ -133,6 +136,11 @@ func main() {
 	if *enableManagementPolicies {
 		o.Features.Enable(feature.EnableBetaManagementPolicies)
 		log.Info("Beta feature enabled", "flag", feature.EnableBetaManagementPolicies)
+	}
+
+	if *enableWatches {
+		o.Features.Enable(features.EnableAlphaWatches)
+		log.Info("Alpha feature enabled", "flag", features.EnableAlphaWatches)
 	}
 
 	// NOTE(lsviben): We are registering the conversion webhook with v1alpha1

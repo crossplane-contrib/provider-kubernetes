@@ -97,7 +97,7 @@ func (i *referencedResourceInformers) Start(ctx context.Context, h handler.Event
 // every reconcile to make referencedResourceInformers aware of the composed
 // resources the given composite resource references.
 //
-// Note that this complements cleanupReferencedResourceInformers which regularly
+// Note that this complements cleanupResourceInformers which regularly
 // garbage collects composed resource informers that are no longer referenced by
 // any composite.
 func (i *referencedResourceInformers) WatchResources(rc *rest.Config, providerConfig string, gvks ...schema.GroupVersionKind) {
@@ -183,13 +183,14 @@ func (i *referencedResourceInformers) WatchResources(rc *rest.Config, providerCo
 	}
 }
 
-// cleanupReferencedResourceInformers garbage collects composed resource informers
+// cleanupResourceInformers garbage collects composed resource informers
 // that are no longer referenced by any composite resource.
 //
 // Note that this complements WatchReferencedResources which starts informers for
 // the composed resources referenced by a composite resource.
-func (i *referencedResourceInformers) cleanupReferencedResourceInformers(ctx context.Context) {
+func (i *referencedResourceInformers) cleanupResourceInformers(ctx context.Context) {
 	// stop old informers
+	i.log.Debug("Running garbage collection for resource informers", "count", len(i.resourceCaches))
 	for gh, ca := range i.resourceCaches {
 		list := v1alpha2.ObjectList{}
 		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{objectRefGVKsIndex: refKeyGKV(ca.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version)}); err != nil {
