@@ -110,12 +110,11 @@ func refKey(providerConfig, ns, name, kind, apiVersion string) string {
 
 func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx context.Context, ev runtimeevent.UpdateEvent, q workqueue.RateLimitingInterface) {
 	return func(ctx context.Context, ev runtimeevent.UpdateEvent, q workqueue.RateLimitingInterface) {
-		config := getConfigName(ev.ObjectNew)
-		// "config" is the provider config name, which is the value for the
-		// provider config ref annotation. It will be empty for objects that
-		// are not controlled by the "Object" resource, i.e. referenced objects.
+		// "pc" is the provider pc name. It will be empty for referenced
+		// resources, as they are always on the control plane.
+		pc, _ := ctx.Value(keyProviderConfigName).(string)
 		rGVK := ev.ObjectNew.GetObjectKind().GroupVersionKind()
-		key := refKey(config, ev.ObjectNew.GetNamespace(), ev.ObjectNew.GetName(), rGVK.Kind, rGVK.GroupVersion().String())
+		key := refKey(pc, ev.ObjectNew.GetNamespace(), ev.ObjectNew.GetName(), rGVK.Kind, rGVK.GroupVersion().String())
 
 		objects := v1alpha2.ObjectList{}
 		if err := ca.List(ctx, &objects, client.MatchingFields{resourceRefsIndex: key}); err != nil {
@@ -124,16 +123,8 @@ func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx co
 		}
 		// queue those Objects for reconciliation
 		for _, o := range objects.Items {
-			log.Info("Enqueueing Object because referenced resource changed", "name", o.GetName(), "referencedGVK", rGVK.String(), "referencedName", ev.ObjectNew.GetName())
+			log.Info("Enqueueing Object because referenced resource changed", "name", o.GetName(), "referencedGVK", rGVK.String(), "referencedName", ev.ObjectNew.GetName(), "providerConfig", pc)
 			q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: o.GetName()}})
 		}
 	}
-}
-
-func getConfigName(o client.Object) string {
-	a := o.GetAnnotations()
-	if a == nil {
-		return ""
-	}
-	return a[AnnotationKeyProviderConfigRef]
 }

@@ -59,12 +59,10 @@ import (
 	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 )
 
+type key int
+
 const (
-	// AnnotationKeyProviderConfigRef is the annotation key for the provider config
-	// reference on the managed kubernetes resource. We use this to trigger the
-	// reconciler for the Object with that provider config in case of watch
-	// events. Only used when alpha watches are enabled.
-	AnnotationKeyProviderConfigRef = "kubernetes.crossplane.io/provider-config-ref"
+	keyProviderConfigName key = iota
 )
 
 const (
@@ -157,7 +155,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 			config: mgr.GetConfig(),
 
 			objectsCache:   ca,
-			resourceCaches: make(map[gvkWithHost]resourceCache),
+			resourceCaches: make(map[gvkWithConfig]resourceCache),
 		}
 		conn.kindObserver = &i
 
@@ -305,11 +303,6 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	meta.AddAnnotations(obj, map[string]string{
 		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
-	if c.kindObserver != nil {
-		meta.AddAnnotations(obj, map[string]string{
-			AnnotationKeyProviderConfigRef: cr.Spec.ProviderConfigReference.Name,
-		})
-	}
 
 	if err := c.client.Create(ctx, obj); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateObject)
@@ -334,11 +327,6 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	meta.AddAnnotations(obj, map[string]string{
 		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
-	if c.kindObserver != nil {
-		meta.AddAnnotations(obj, map[string]string{
-			AnnotationKeyProviderConfigRef: cr.Spec.ProviderConfigReference.Name,
-		})
-	}
 
 	if err := c.client.Apply(ctx, obj); err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(CleanErr(err), errApplyObject)

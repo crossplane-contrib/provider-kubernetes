@@ -2,7 +2,6 @@ package object
 
 import (
 	"context"
-	"github.com/crossplane/crossplane-runtime/pkg/errors"
 	"strings"
 	"sync"
 
@@ -18,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/crossplane/crossplane-runtime/pkg/errors"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
@@ -38,24 +38,22 @@ type resourceInformers struct {
 
 	// resourceCaches holds the resource caches. These are dynamically started
 	// and stopped based on the Objects that reference or managing them.
-	resourceCaches map[gvkWithHost]resourceCache
+	resourceCaches map[gvkWithConfig]resourceCache
 	objectsCache   cache.Cache
-	sink           func(ev runtimeevent.UpdateEvent)
+	sink           func(providerConfig string, ev runtimeevent.UpdateEvent)
 }
 
-type gvkWithHost struct {
-	host string
-	gvk  schema.GroupVersionKind
+type gvkWithConfig struct {
+	// Which provider config was used to create this cache. We will use this
+	// information to figure out whether there are Objects relying on this cache
+	// left during garbage collection of caches.
+	providerConfig string
+	gvk            schema.GroupVersionKind
 }
 
 type resourceCache struct {
 	cache    cache.Cache
 	cancelFn context.CancelFunc
-
-	// Which provider config was used to create this cache. We will use this
-	// information to figure out whether there are Objects relying on this cache
-	// left during garbage collection of caches.
-	providerConfig string
 }
 
 var _ source.Source = &resourceInformers{}
@@ -69,13 +67,13 @@ func (i *resourceInformers) Start(ctx context.Context, h handler.EventHandler, q
 	if i.sink != nil {
 		return errors.New("source already started, cannot start it again")
 	}
-	i.sink = func(ev runtimeevent.UpdateEvent) {
+	i.sink = func(providerConfig string, ev runtimeevent.UpdateEvent) {
 		for _, p := range ps {
 			if !p.Update(ev) {
 				return
 			}
 		}
-		h.Update(ctx, ev, q)
+		h.Update(context.WithValue(ctx, keyProviderConfigName, providerConfig), ev, q)
 	}
 
 	go func() {
@@ -108,11 +106,11 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 
 	// start new informers
 	for _, gvk := range gvks {
-		if _, found := i.resourceCaches[gvkWithHost{host: rc.Host, gvk: gvk}]; found {
+		if _, found := i.resourceCaches[gvkWithConfig{providerConfig: providerConfig, gvk: gvk}]; found {
 			continue
 		}
 
-		log := i.log.WithValues("host", rc.Host, "gvk", gvk.String())
+		log := i.log.WithValues("providerConfig", providerConfig, "gvk", gvk.String())
 
 		ca, err := cache.New(rc, cache.Options{})
 		if err != nil {
@@ -148,7 +146,8 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 					ObjectOld: old,
 					ObjectNew: obj,
 				}
-				i.sink(ev)
+
+				i.sink(providerConfig, ev)
 			},
 		}); err != nil {
 			cancelFn()
@@ -163,11 +162,9 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 			_ = ca.Start(ctx)
 		}()
 
-		i.resourceCaches[gvkWithHost{host: rc.Host, gvk: gvk}] = resourceCache{
+		i.resourceCaches[gvkWithConfig{providerConfig: providerConfig, gvk: gvk}] = resourceCache{
 			cache:    ca,
 			cancelFn: cancelFn,
-
-			providerConfig: providerConfig,
 		}
 
 		// wait for in the background, and only when synced add to the routed cache
@@ -189,8 +186,8 @@ func (i *resourceInformers) cleanupResourceInformers(ctx context.Context) {
 	i.log.Debug("Running garbage collection for resource informers", "count", len(i.resourceCaches))
 	for gh, ca := range i.resourceCaches {
 		list := v1alpha2.ObjectList{}
-		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{resourceRefGVKsIndex: refKeyGKV(ca.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version)}); err != nil {
-			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", resourceRefGVKsIndex+"="+refKeyGKV(ca.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version))
+		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{resourceRefGVKsIndex: refKeyGKV(gh.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version)}); err != nil {
+			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", resourceRefGVKsIndex+"="+refKeyGKV(gh.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version))
 		}
 
 		if len(list.Items) > 0 {
@@ -198,7 +195,7 @@ func (i *resourceInformers) cleanupResourceInformers(ctx context.Context) {
 		}
 
 		ca.cancelFn()
-		i.log.Info("Stopped resource watch", "provider config", ca.providerConfig, "host", gh.host, "gvk", gh.gvk)
+		i.log.Info("Stopped resource watch", "provider config", gh.providerConfig, "gvk", gh.gvk)
 		delete(i.resourceCaches, gh)
 	}
 }
