@@ -2,6 +2,7 @@ package object
 
 import (
 	"context"
+	"k8s.io/client-go/rest"
 	"strings"
 	"sync"
 
@@ -20,7 +21,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
-	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 )
 
@@ -32,30 +32,32 @@ import (
 // references to composed resources, and inform referencedResourceInformers about
 // them via the WatchReferencedResources method.
 type referencedResourceInformers struct {
-	log     logging.Logger
-	cluster clients.Cluster
+	log    logging.Logger
+	config *rest.Config
 
 	lock sync.RWMutex // everything below is protected by this lock
 
-	// cdCaches holds the composed resource informers. These are dynamically
-	// started and stopped based on the composites that reference them.
-	cdCaches     map[gvkWithConfig]cdCache
-	objectsCache cache.Cache
-	sinks        map[string]func(ev runtimeevent.UpdateEvent) // by some uid
+	// resourceCaches holds the managed resource informers. These are
+	// dynamically started and stopped based on the Objects that reference OR
+	// manages them.
+	resourceCaches map[gvkWithHost]resourceCache
+	objectsCache   cache.Cache
+	sinks          map[string]func(ev runtimeevent.UpdateEvent) // by some uid
 }
 
-type gvkWithConfig struct {
-	config string
-	gvk    schema.GroupVersionKind
+type gvkWithHost struct {
+	host string
+	gvk  schema.GroupVersionKind
 }
 
-func (g gvkWithConfig) String() string {
-	return g.config + "." + g.gvk.String()
-}
-
-type cdCache struct {
+type resourceCache struct {
 	cache    cache.Cache
 	cancelFn context.CancelFunc
+
+	// Which provider config was used to create this cache. We will use this
+	// information to figure out whether there are Objects relying on this cache
+	// left during garbage collection of caches.
+	providerConfig string
 }
 
 var _ source.Source = &referencedResourceInformers{}
@@ -98,24 +100,23 @@ func (i *referencedResourceInformers) Start(ctx context.Context, h handler.Event
 // Note that this complements cleanupReferencedResourceInformers which regularly
 // garbage collects composed resource informers that are no longer referenced by
 // any composite.
-func (i *referencedResourceInformers) WatchReferencedResources(cluster clients.Cluster, gcs ...gvkWithConfig) {
+func (i *referencedResourceInformers) WatchResources(rc *rest.Config, providerConfig string, gvks ...schema.GroupVersionKind) {
 	i.lock.RLock()
 	defer i.lock.RUnlock()
 
+	if rc == nil {
+		rc = i.config
+	}
+
 	// start new informers
-	for _, gc := range gcs {
-		if _, found := i.cdCaches[gc]; found {
+	for _, gvk := range gvks {
+		if _, found := i.resourceCaches[gvkWithHost{host: rc.Host, gvk: gvk}]; found {
 			continue
 		}
 
-		log := i.log.WithValues("config", gc.config, "gvk", gc.gvk.String())
+		log := i.log.WithValues("host", rc.Host, "gvk", gvk.String())
 
-		if cluster == nil {
-			// Default to control plane cluster.
-			cluster = i.cluster
-		}
-
-		ca, err := cache.New(cluster.GetConfig(), cache.Options{})
+		ca, err := cache.New(rc, cache.Options{})
 		if err != nil {
 			log.Debug("failed creating a cache", "error", err)
 			continue
@@ -126,7 +127,7 @@ func (i *referencedResourceInformers) WatchReferencedResources(cluster clients.C
 		ctx, cancelFn := context.WithCancel(context.Background())
 
 		u := kunstructured.Unstructured{}
-		u.SetGroupVersionKind(gc.gvk)
+		u.SetGroupVersionKind(gvk)
 		inf, err := ca.GetInformer(ctx, &u, cache.BlockUntilSynced(false)) // don't block. We wait in the go routine below.
 		if err != nil {
 			cancelFn()
@@ -166,9 +167,11 @@ func (i *referencedResourceInformers) WatchReferencedResources(cluster clients.C
 			_ = ca.Start(ctx)
 		}()
 
-		i.cdCaches[gc] = cdCache{
+		i.resourceCaches[gvkWithHost{host: rc.Host, gvk: gvk}] = resourceCache{
 			cache:    ca,
 			cancelFn: cancelFn,
+
+			providerConfig: providerConfig,
 		}
 
 		// wait for in the background, and only when synced add to the routed cache
@@ -187,19 +190,19 @@ func (i *referencedResourceInformers) WatchReferencedResources(cluster clients.C
 // the composed resources referenced by a composite resource.
 func (i *referencedResourceInformers) cleanupReferencedResourceInformers(ctx context.Context) {
 	// stop old informers
-	for gc, inf := range i.cdCaches {
+	for gh, ca := range i.resourceCaches {
 		list := v1alpha2.ObjectList{}
-		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{objectRefGVKsIndex: refKeyGKV(gc.config, gc.gvk.Kind, gc.gvk.Group, gc.gvk.Version)}); err != nil {
-			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", objectRefGVKsIndex+"="+gc.String())
+		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{objectRefGVKsIndex: refKeyGKV(ca.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version)}); err != nil {
+			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", objectRefGVKsIndex+"="+refKeyGKV(ca.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version))
 		}
 
 		if len(list.Items) > 0 {
 			continue
 		}
 
-		inf.cancelFn()
-		i.log.Info("Stopped referenced resource watch", "gc", gc.String())
-		delete(i.cdCaches, gc)
+		ca.cancelFn()
+		i.log.Info("Stopped referenced resource watch", "provider config", ca.providerConfig, "host", gh.host, "gvk", gh.gvk)
+		delete(i.resourceCaches, gh)
 	}
 }
 

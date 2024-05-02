@@ -118,8 +118,6 @@ func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx co
 			log.Debug("cannot list objects related to a reference change", "error", err, "fieldSelector", objectsRefsIndex+"="+key)
 			return
 		}
-		log.Info("Will enqueue objects for references", "len", len(objects.Items))
-
 		// queue those Objects for reconciliation
 		for _, o := range objects.Items {
 			log.Info("Enqueueing Object because referenced resource changed", "len", len(objects.Items), "name", o.GetName(), "referencedGVK", rGVK.String(), "referencedName", ev.ObjectNew.GetName())
