@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
@@ -104,40 +105,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 	cps := []managed.ConnectionPublisher{managed.NewAPISecretPublisher(mgr.GetClient(), mgr.GetScheme())}
 
-	ca := mgr.GetCache()
-	if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, objectRefGVKsIndex, IndexReferencedResourceRefGVKs); err != nil {
-		return errors.Wrap(err, "cannot add index for object reference GVKs")
-	}
-	if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, objectsRefsIndex, IndexReferencesResourcesRefs); err != nil {
-		return errors.Wrap(err, "cannot add index for object references")
-	}
-
-	i := referencedResourceInformers{
-		log:    l,
-		config: mgr.GetConfig(),
-
-		objectsCache:   ca,
-		resourceCaches: make(map[gvkWithHost]resourceCache),
-		sinks:          make(map[string]func(ev runtimeevent.UpdateEvent)),
-	}
-
-	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		// Run every 5 minutes.
-		wait.UntilWithContext(ctx, i.cleanupReferencedResourceInformers, 5*time.Second)
-		return nil
-	})); err != nil {
-		return errors.Wrap(err, "cannot add cleanup referenced resource informers runnable")
-	}
-
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithExternalConnecter(&connector{
-			logger:              o.Logger,
-			sanitizeSecrets:     sanitizeSecrets,
-			kube:                mgr.GetClient(),
-			usage:               resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
-			clientForProviderFn: clients.ClientForProvider,
-			kindObserver:        &i,
-		}),
 		managed.WithFinalizer(&objFinalizer{client: mgr.GetClient()}),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithPollIntervalHook(func(mg resource.Managed, pollInterval time.Duration) time.Duration {
@@ -154,25 +122,63 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		managed.WithConnectionPublishers(cps...),
 	}
 
+	conn := &connector{
+		logger:              o.Logger,
+		sanitizeSecrets:     sanitizeSecrets,
+		kube:                mgr.GetClient(),
+		usage:               resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
+		clientForProviderFn: clients.ClientForProvider,
+	}
+
+	cb := ctrl.NewControllerManagedBy(mgr).
+		Named(name).
+		WithOptions(o.ForControllerRuntime()).
+		For(&v1alpha2.Object{})
+
+	if o.Features.Enabled(features.EnableAlphaWatches) {
+		ca := mgr.GetCache()
+		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, objectRefGVKsIndex, IndexReferencedResourceRefGVKs); err != nil {
+			return errors.Wrap(err, "cannot add index for object reference GVKs")
+		}
+		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, objectsRefsIndex, IndexReferencesResourcesRefs); err != nil {
+			return errors.Wrap(err, "cannot add index for object references")
+		}
+
+		i := referencedResourceInformers{
+			log:    l,
+			config: mgr.GetConfig(),
+
+			objectsCache:   ca,
+			resourceCaches: make(map[gvkWithHost]resourceCache),
+			sinks:          make(map[string]func(ev runtimeevent.UpdateEvent)),
+		}
+		conn.kindObserver = &i
+
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			// Run every 5 minutes.
+			// TODO: Fix the period after development is done.
+			wait.UntilWithContext(ctx, i.cleanupResourceInformers, 5*time.Second)
+			return nil
+		})); err != nil {
+			return errors.Wrap(err, "cannot add cleanup referenced resource informers runnable")
+		}
+
+		cb = cb.WatchesRawSource(&i, handler.Funcs{
+			UpdateFunc: func(ctx context.Context, ev runtimeevent.UpdateEvent, q workqueue.RateLimitingInterface) {
+				enqueueObjectsForReferences(ca, l)(ctx, ev, q)
+			},
+		})
+	}
+	reconcilerOptions = append(reconcilerOptions, managed.WithExternalConnecter(conn))
+
 	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
 		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
 	}
 
-	r := managed.NewReconciler(mgr,
+	return cb.Complete(ratelimiter.NewReconciler(name, managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha2.ObjectGroupVersionKind),
 		reconcilerOptions...,
-	)
-
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(name).
-		WithOptions(o.ForControllerRuntime()).
-		For(&v1alpha2.Object{}).
-		WatchesRawSource(&i, handler.Funcs{
-			UpdateFunc: func(ctx context.Context, ev runtimeevent.UpdateEvent, q workqueue.RateLimitingInterface) {
-				enqueueObjectsForReferences(ca, l)(ctx, ev, q)
-			},
-		}).
-		Complete(ratelimiter.NewReconciler(name, r, o.GlobalRateLimiter))
+	), o.GlobalRateLimiter))
 }
 
 type connector struct {
