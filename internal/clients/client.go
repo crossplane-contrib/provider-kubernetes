@@ -107,8 +107,28 @@ func restConfigFromAPIConfig(c *api.Config) (*rest.Config, error) {
 	return config, nil
 }
 
+type Cluster interface {
+	// GetConfig returns an initialized Config
+	GetConfig() *rest.Config
+}
+
+type ClusterClient interface {
+	client.Client
+	resource.Applicator
+	Cluster
+}
+
+type clusterClient struct {
+	resource.ClientApplicator
+	config *rest.Config
+}
+
+func (c *clusterClient) GetConfig() *rest.Config {
+	return c.config
+}
+
 // ClientForProvider returns the client for the given provider config
-func ClientForProvider(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error) { //nolint:gocyclo
+func ClientForProvider(ctx context.Context, inclusterClient client.Client, providerConfigName string) (ClusterClient, error) { //nolint:gocyclo
 	pc := &v1alpha1.ProviderConfig{}
 	if err := inclusterClient.Get(ctx, types.NamespacedName{Name: providerConfigName}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetPC)
@@ -171,6 +191,15 @@ func ClientForProvider(ctx context.Context, inclusterClient client.Client, provi
 			return nil, errors.Errorf("unknown identity type: %s", id.Type)
 		}
 	}
-
-	return NewKubeClient(rc)
+	k, err := NewKubeClient(rc)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot create Kubernetes client")
+	}
+	return &clusterClient{
+		ClientApplicator: resource.ClientApplicator{
+			Client:     k,
+			Applicator: resource.NewAPIPatchingApplicator(k),
+		},
+		config: rc,
+	}, nil
 }

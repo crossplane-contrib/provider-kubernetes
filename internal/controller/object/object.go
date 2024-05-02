@@ -93,7 +93,7 @@ const (
 type KindObserver interface {
 	// WatchReferencedResources starts a watch of the given kinds to trigger
 	// reconciles when a referenced object of those kinds changes.
-	WatchReferencedResources(kind ...schema.GroupVersionKind)
+	WatchReferencedResources(cluster clients.Cluster, gcs ...gvkWithConfig)
 }
 
 // Setup adds a controller that reconciles Object managed resources.
@@ -115,10 +115,9 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		log:     l,
 		cluster: mgr,
 
-		gvkRoutedCache: controller.NewGVKRoutedCache(mgr.GetScheme(), mgr.GetCache()),
-		cdCaches:       make(map[schema.GroupVersionKind]cdCache),
-		objectsCache:   ca,
-		sinks:          make(map[string]func(ev runtimeevent.UpdateEvent)),
+		cdCaches:     make(map[gvkWithConfig]cdCache),
+		objectsCache: ca,
+		sinks:        make(map[string]func(ev runtimeevent.UpdateEvent)),
 	}
 
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
@@ -183,7 +182,7 @@ type connector struct {
 
 	kindObserver KindObserver
 
-	clientForProviderFn func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error)
+	clientForProviderFn func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (clients.ClusterClient, error)
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) { //nolint:gocyclo
@@ -206,11 +205,8 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	return &external{
-		logger: c.logger,
-		client: resource.ClientApplicator{
-			Client:     k,
-			Applicator: resource.NewAPIPatchingApplicator(k),
-		},
+		logger:          c.logger,
+		client:          k,
 		localClient:     c.kube,
 		sanitizeSecrets: c.sanitizeSecrets,
 
@@ -220,7 +216,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 
 type external struct {
 	logger logging.Logger
-	client resource.ClientApplicator
+	client clients.ClusterClient
 	// localClient is specifically used to connect to local cluster
 	localClient     client.Client
 	sanitizeSecrets bool
@@ -235,7 +231,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	c.logger.Debug("Observing", "resource", cr)
-
+	
 	if err := c.resolveReferencies(ctx, cr); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errResolveResourceReferences)
 	}
@@ -254,6 +250,13 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	if kerrors.IsNotFound(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
+	}
+
+	if c.kindObserver != nil {
+		c.kindObserver.WatchReferencedResources(c.client, gvkWithConfig{
+			config: cr.Spec.ProviderConfigReference.Name,
+			gvk:    observed.GroupVersionKind(),
+		})
 	}
 
 	if err != nil {
@@ -285,7 +288,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	meta.AddAnnotations(obj, map[string]string{
-		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
+		v1.LastAppliedConfigAnnotation:                 string(cr.Spec.ForProvider.Manifest.Raw),
+		"kubernetes.crossplane.io/provider-config-ref": cr.Spec.ProviderConfigReference.Name,
 	})
 
 	if err := c.client.Create(ctx, obj); err != nil {
@@ -309,7 +313,8 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	meta.AddAnnotations(obj, map[string]string{
-		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
+		v1.LastAppliedConfigAnnotation:                 string(cr.Spec.ForProvider.Manifest.Raw),
+		"kubernetes.crossplane.io/provider-config-ref": cr.Spec.ProviderConfigReference.Name,
 	})
 
 	if err := c.client.Apply(ctx, obj); err != nil {
@@ -344,6 +349,7 @@ func getDesired(obj *v1alpha2.Object) (*unstructured.Unstructured, error) {
 	if desired.GetName() == "" {
 		desired.SetName(obj.Name)
 	}
+
 	return desired, nil
 }
 
@@ -460,7 +466,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 	c.logger.Debug("Resolving referencies.")
 
 	// Loop through references to resolve each referenced resource
-	var gvks []schema.GroupVersionKind
+	var gcs []gvkWithConfig
 	for _, ref := range obj.Spec.References {
 		if ref.DependsOn == nil && ref.PatchesFrom == nil {
 			continue
@@ -488,15 +494,18 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 		}
 
 		g, v := parseAPIVersion(refAPIVersion)
-		gvks = append(gvks, schema.GroupVersionKind{
-			Group:   g,
-			Version: v,
-			Kind:    refKind,
+		gcs = append(gcs, gvkWithConfig{
+			config: "",
+			gvk: schema.GroupVersionKind{
+				Group:   g,
+				Version: v,
+				Kind:    refKind,
+			},
 		})
 	}
 
 	if c.kindObserver != nil {
-		c.kindObserver.WatchReferencedResources(gvks...)
+		c.kindObserver.WatchReferencedResources(nil, gcs...)
 	}
 
 	return nil

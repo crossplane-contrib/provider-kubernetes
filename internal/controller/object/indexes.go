@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -59,10 +58,23 @@ func IndexReferencedResourceRefGVKs(o client.Object) []string {
 	for _, ref := range refs {
 		refAPIVersion, refKind, _, _ := getReferenceInfo(ref)
 		group, version := parseAPIVersion(refAPIVersion)
-		keys = append(keys, schema.GroupVersionKind{Group: group, Version: version, Kind: refKind}.String())
+		// References are always on control plane, so we don't pass the config name.
+		keys = append(keys, refKeyGKV("", refKind, group, version))
 	}
+
+	d, err := getDesired(obj)
+	if err == nil {
+		keys = append(keys, refKeyGKV(obj.Spec.ProviderConfigReference.Name, d.GetKind(), d.GroupVersionKind().Group, d.GroupVersionKind().Version)) // unification is done by the informer.
+	} else {
+		// TODO: what to do here?
+	}
+
 	// unification is done by the informer.
 	return keys
+}
+
+func refKeyGKV(config, kind, group, version string) string {
+	return fmt.Sprintf("%s.%s.%s.%s", config, kind, group, version)
 }
 
 // IndexReferencesResourcesRefs assumes the passed object is a composite. It
@@ -76,30 +88,50 @@ func IndexReferencesResourcesRefs(o client.Object) []string {
 	keys := make([]string, 0, len(refs))
 	for _, ref := range refs {
 		refAPIVersion, refKind, refNamespace, refName := getReferenceInfo(ref)
-		keys = append(keys, refKey(refNamespace, refName, refKind, refAPIVersion))
+		// References are always on control plane, so we don't pass the config name.
+		keys = append(keys, refKey("", refNamespace, refName, refKind, refAPIVersion))
+	}
+	d, err := getDesired(obj)
+	if err == nil {
+		keys = append(keys, refKey(obj.Spec.ProviderConfigReference.Name, d.GetNamespace(), d.GetName(), d.GetKind(), d.GetAPIVersion())) // unification is done by the informer.
+	} else {
+		// TODO: what to do here?
 	}
 	return keys
 }
 
-func refKey(ns, name, kind, apiVersion string) string {
-	return fmt.Sprintf("%s.%s.%s.%s", name, ns, kind, apiVersion)
+func refKey(config, ns, name, kind, apiVersion string) string {
+	return fmt.Sprintf("%s.%s.%s.%s.%s", config, name, ns, kind, apiVersion)
 }
 
 func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx context.Context, ev runtimeevent.UpdateEvent, q workqueue.RateLimitingInterface) {
 	return func(ctx context.Context, ev runtimeevent.UpdateEvent, q workqueue.RateLimitingInterface) {
+		config := getConfigName(ev.ObjectNew)
+		// "config" is the provider config name, which is the value for the
+		// provider config ref annotation. It will be empty for objects that
+		// are not controlled by the "Object" resource, i.e. referenced objects.
 		rGVK := ev.ObjectNew.GetObjectKind().GroupVersionKind()
-		key := refKey(ev.ObjectNew.GetNamespace(), ev.ObjectNew.GetName(), rGVK.Kind, rGVK.GroupVersion().String())
+		key := refKey(config, ev.ObjectNew.GetNamespace(), ev.ObjectNew.GetName(), rGVK.Kind, rGVK.GroupVersion().String())
 
 		objects := v1alpha2.ObjectList{}
 		if err := ca.List(ctx, &objects, client.MatchingFields{objectsRefsIndex: key}); err != nil {
 			log.Debug("cannot list objects related to a reference change", "error", err, "fieldSelector", objectsRefsIndex+"="+key)
 			return
 		}
+		log.Info("Will enqueue objects for references", "len", len(objects.Items))
 
 		// queue those Objects for reconciliation
 		for _, o := range objects.Items {
-			log.Info("Enqueueing Object because referenced resource changed", "name", o.GetName(), "referencedGVK", rGVK.String(), "referencedName", ev.ObjectNew.GetName())
+			log.Info("Enqueueing Object because referenced resource changed", "len", len(objects.Items), "name", o.GetName(), "referencedGVK", rGVK.String(), "referencedName", ev.ObjectNew.GetName())
 			q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: o.GetName()}})
 		}
 	}
+}
+
+func getConfigName(o client.Object) string {
+	ann := o.GetAnnotations()
+	if ann == nil {
+		return ""
+	}
+	return ann["kubernetes.crossplane.io/provider-config-ref"]
 }
