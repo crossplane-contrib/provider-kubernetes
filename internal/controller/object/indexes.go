@@ -19,7 +19,6 @@ package object
 import (
 	"context"
 	"fmt"
-	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -29,16 +28,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
+
+	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 )
 
 const (
-	// objectRefGVKsIndex is an index of all GroupKinds that
-	// are in use by a Composition. It indexes from spec.resourceRefs, not
-	// from spec.resources. Hence, it will also work with functions.
-	objectRefGVKsIndex = "objectsRefsGVKs"
-	// objectsRefsIndex is an index of resourceRefs that are owned
-	// by a composite.
-	objectsRefsIndex = "objectsRefs"
+	// resourceRefGVKsIndex is an index of all GroupKinds that
+	// are in use by an Object.
+	resourceRefGVKsIndex = "objectsRefsGVKs"
+	// resourceRefsIndex is an index of resourceRefs that are referenced or
+	// managed by an Object.
+	resourceRefsIndex = "objectsRefs"
 )
 
 var (
@@ -46,13 +46,15 @@ var (
 	_ client.IndexerFunc = IndexReferencesResourcesRefs
 )
 
-// IndexReferencedResourceRefGVKs assumes the passed object is a composite. It
-// returns gvk keys for every resource referenced in the composite.
+// IndexReferencedResourceRefGVKs assumes the passed object is an Object. It
+// returns gvk keys for every resource referenced or managed by the Object.
 func IndexReferencedResourceRefGVKs(o client.Object) []string {
 	obj, ok := o.(*v1alpha2.Object)
 	if !ok {
 		return nil // should never happen
 	}
+
+	// Index references.
 	refs := obj.Spec.References
 	keys := make([]string, 0, len(refs))
 	for _, ref := range refs {
@@ -62,46 +64,48 @@ func IndexReferencedResourceRefGVKs(o client.Object) []string {
 		keys = append(keys, refKeyGKV("", refKind, group, version))
 	}
 
-	d, err := getDesired(obj)
-	if err == nil {
-		keys = append(keys, refKeyGKV(obj.Spec.ProviderConfigReference.Name, d.GetKind(), d.GroupVersionKind().Group, d.GroupVersionKind().Version)) // unification is done by the informer.
-	} else {
-		// TODO: what to do here?
-	}
+	// Index the desired object.
+	// We don't expect errors here, as the getDesired function is already called
+	// in the reconciler and the desired object already validated.
+	d, _ := getDesired(obj)
+	keys = append(keys, refKeyGKV(obj.Spec.ProviderConfigReference.Name, d.GetKind(), d.GroupVersionKind().Group, d.GroupVersionKind().Version)) // unification is done by the informer.
 
 	// unification is done by the informer.
 	return keys
 }
 
-func refKeyGKV(config, kind, group, version string) string {
-	return fmt.Sprintf("%s.%s.%s.%s", config, kind, group, version)
+func refKeyGKV(providerConfig, kind, group, version string) string {
+	return fmt.Sprintf("%s.%s.%s.%s", providerConfig, kind, group, version)
 }
 
-// IndexReferencesResourcesRefs assumes the passed object is a composite. It
-// returns keys for every composed resource referenced in the composite.
+// IndexReferencesResourcesRefs assumes the passed object is an Object. It
+// returns keys for every resource referenced or managed by the Object.
 func IndexReferencesResourcesRefs(o client.Object) []string {
 	obj, ok := o.(*v1alpha2.Object)
 	if !ok {
 		return nil // should never happen
 	}
+
+	// Index references.
 	refs := obj.Spec.References
 	keys := make([]string, 0, len(refs))
 	for _, ref := range refs {
 		refAPIVersion, refKind, refNamespace, refName := getReferenceInfo(ref)
-		// References are always on control plane, so we don't pass the config name.
+		// References are always on control plane, so we don't pass the provider config name.
 		keys = append(keys, refKey("", refNamespace, refName, refKind, refAPIVersion))
 	}
-	d, err := getDesired(obj)
-	if err == nil {
-		keys = append(keys, refKey(obj.Spec.ProviderConfigReference.Name, d.GetNamespace(), d.GetName(), d.GetKind(), d.GetAPIVersion())) // unification is done by the informer.
-	} else {
-		// TODO: what to do here?
-	}
+
+	// Index the desired object.
+	// We don't expect errors here, as the getDesired function is already called
+	// in the reconciler and the desired object already validated.
+	d, _ := getDesired(obj)
+	keys = append(keys, refKey(obj.Spec.ProviderConfigReference.Name, d.GetNamespace(), d.GetName(), d.GetKind(), d.GetAPIVersion())) // unification is done by the informer.
+
 	return keys
 }
 
-func refKey(config, ns, name, kind, apiVersion string) string {
-	return fmt.Sprintf("%s.%s.%s.%s.%s", config, name, ns, kind, apiVersion)
+func refKey(providerConfig, ns, name, kind, apiVersion string) string {
+	return fmt.Sprintf("%s.%s.%s.%s.%s", providerConfig, name, ns, kind, apiVersion)
 }
 
 func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx context.Context, ev runtimeevent.UpdateEvent, q workqueue.RateLimitingInterface) {
@@ -114,22 +118,22 @@ func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx co
 		key := refKey(config, ev.ObjectNew.GetNamespace(), ev.ObjectNew.GetName(), rGVK.Kind, rGVK.GroupVersion().String())
 
 		objects := v1alpha2.ObjectList{}
-		if err := ca.List(ctx, &objects, client.MatchingFields{objectsRefsIndex: key}); err != nil {
-			log.Debug("cannot list objects related to a reference change", "error", err, "fieldSelector", objectsRefsIndex+"="+key)
+		if err := ca.List(ctx, &objects, client.MatchingFields{resourceRefsIndex: key}); err != nil {
+			log.Debug("cannot list objects related to a reference change", "error", err, "fieldSelector", resourceRefsIndex+"="+key)
 			return
 		}
 		// queue those Objects for reconciliation
 		for _, o := range objects.Items {
-			log.Info("Enqueueing Object because referenced resource changed", "len", len(objects.Items), "name", o.GetName(), "referencedGVK", rGVK.String(), "referencedName", ev.ObjectNew.GetName())
+			log.Info("Enqueueing Object because referenced resource changed", "name", o.GetName(), "referencedGVK", rGVK.String(), "referencedName", ev.ObjectNew.GetName())
 			q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: o.GetName()}})
 		}
 	}
 }
 
 func getConfigName(o client.Object) string {
-	ann := o.GetAnnotations()
-	if ann == nil {
+	a := o.GetAnnotations()
+	if a == nil {
 		return ""
 	}
-	return ann["kubernetes.crossplane.io/provider-config-ref"]
+	return a[AnnotationKeyProviderConfigRef]
 }

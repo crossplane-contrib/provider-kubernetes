@@ -17,7 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 	"io"
 	"os"
 	"path/filepath"
@@ -39,6 +38,7 @@ import (
 	"github.com/crossplane-contrib/provider-kubernetes/apis"
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
 	object "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )

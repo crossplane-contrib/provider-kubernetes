@@ -107,23 +107,28 @@ func restConfigFromAPIConfig(c *api.Config) (*rest.Config, error) {
 	return config, nil
 }
 
-type Cluster interface {
+// RestConfigGetter is an interface that provides a REST config.
+type RestConfigGetter interface {
 	// GetConfig returns an initialized Config
 	GetConfig() *rest.Config
 }
 
+// ClusterClient is a client that can be used to interact with a Kubernetes
+// cluster including getting its rest config.
 type ClusterClient interface {
 	client.Client
 	resource.Applicator
-	Cluster
+	RestConfigGetter
 }
 
-type clusterClient struct {
+// ApplicatorClientWithConfig is a ClusterClient that also has a rest config.
+type ApplicatorClientWithConfig struct {
 	resource.ClientApplicator
 	config *rest.Config
 }
 
-func (c *clusterClient) GetConfig() *rest.Config {
+// GetConfig returns the rest config for the client.
+func (c *ApplicatorClientWithConfig) GetConfig() *rest.Config {
 	return c.config
 }
 
@@ -195,7 +200,7 @@ func ClientForProvider(ctx context.Context, inclusterClient client.Client, provi
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot create Kubernetes client")
 	}
-	return &clusterClient{
+	return &ApplicatorClientWithConfig{
 		ClientApplicator: resource.ClientApplicator{
 			Client:     k,
 			Applicator: resource.NewAPIPatchingApplicator(k),
