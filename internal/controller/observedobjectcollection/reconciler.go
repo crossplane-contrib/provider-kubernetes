@@ -59,7 +59,7 @@ type Reconciler struct {
 	client             client.Client
 	log                logging.Logger
 	pollInterval       func() time.Duration
-	clientForProvider  func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error)
+	clientForProvider  func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (clients.ClusterClient, error)
 	observedObjectName func(collection client.Object, matchedObject client.Object) (string, error)
 }
 
