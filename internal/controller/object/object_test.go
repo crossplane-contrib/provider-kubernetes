@@ -43,6 +43,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	kubernetesv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
 )
 
 const (
@@ -238,7 +239,7 @@ func Test_connector_Connect(t *testing.T) {
 
 	type args struct {
 		client            client.Client
-		clientForProvider func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error)
+		clientForProvider func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (clients.ClusterClient, error)
 		usage             resource.Tracker
 		mg                resource.Managed
 	}
@@ -268,8 +269,12 @@ func Test_connector_Connect(t *testing.T) {
 		},
 		"Success": {
 			args: args{
-				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error) {
-					return &test.MockClient{}, nil
+				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (clients.ClusterClient, error) {
+					return &clients.ApplicatorClientWithConfig{
+						ClientApplicator: resource.ClientApplicator{
+							Client: &test.MockClient{},
+						},
+					}, nil
 				},
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 				mg:    kubernetesObject(),
@@ -280,7 +285,7 @@ func Test_connector_Connect(t *testing.T) {
 		},
 		"ErrorGettingClientForProvider": {
 			args: args{
-				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error) {
+				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (clients.ClusterClient, error) {
 					return nil, errBoom
 				},
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
@@ -309,7 +314,7 @@ func Test_connector_Connect(t *testing.T) {
 
 func Test_helmExternal_Observe(t *testing.T) {
 	type args struct {
-		client resource.ClientApplicator
+		client clients.ClusterClient
 		mg     resource.Managed
 	}
 	type want struct {
@@ -331,9 +336,11 @@ func Test_helmExternal_Observe(t *testing.T) {
 		"NoKubernetesObjectExists": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{}, "")),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{}, "")),
+						},
 					},
 				},
 			},
@@ -355,9 +362,11 @@ func Test_helmExternal_Observe(t *testing.T) {
 		"FailedToGet": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(errBoom),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: test.NewMockGetFn(errBoom),
+						},
 					},
 				},
 			},
@@ -368,12 +377,14 @@ func Test_helmExternal_Observe(t *testing.T) {
 		"NoLastAppliedAnnotation": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) = *externalResource()
-							return nil
-						}),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+								*obj.(*unstructured.Unstructured) = *externalResource()
+								return nil
+							}),
+						},
 					},
 				},
 			},
@@ -385,15 +396,17 @@ func Test_helmExternal_Observe(t *testing.T) {
 		"NotUpToDate": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) =
-								*externalResourceWithLastAppliedConfigAnnotation(
-									`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"crossplane-system", "labels": {"old-label":"gone"}}}`,
-								)
-							return nil
-						}),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+								*obj.(*unstructured.Unstructured) =
+									*externalResourceWithLastAppliedConfigAnnotation(
+										`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"crossplane-system", "labels": {"old-label":"gone"}}}`,
+									)
+								return nil
+							}),
+						},
 					},
 				},
 			},
@@ -409,15 +422,17 @@ func Test_helmExternal_Observe(t *testing.T) {
 				    "apiVersion": "v1",
 				    "kind": "Namespace" }`)
 				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) =
-								*externalResourceWithLastAppliedConfigAnnotation(
-									`{"apiVersion":"v1","kind":"Namespace"}`,
-								)
-							return nil
-						}),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+								*obj.(*unstructured.Unstructured) =
+									*externalResourceWithLastAppliedConfigAnnotation(
+										`{"apiVersion":"v1","kind":"Namespace"}`,
+									)
+								return nil
+							}),
+						},
 					},
 				},
 			},
@@ -433,12 +448,14 @@ func Test_helmExternal_Observe(t *testing.T) {
 		"UpToDate": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
-							return nil
-						}),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+								*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
+								return nil
+							}),
+						},
 					},
 				},
 			},
@@ -457,12 +474,14 @@ func Test_helmExternal_Observe(t *testing.T) {
 					obj.Spec.References = objectReferences()
 					obj.Spec.References[0].PatchesFrom.FieldPath = ptr.To("nonexistent_field")
 				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) = *referenceObject()
-							return nil
-						}),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+								*obj.(*unstructured.Unstructured) = *referenceObject()
+								return nil
+							}),
+						},
 					},
 				},
 			},
@@ -477,9 +496,11 @@ func Test_helmExternal_Observe(t *testing.T) {
 				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.References = objectReferences()
 				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(errBoom),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: test.NewMockGetFn(errBoom),
+						},
 					},
 				},
 			},
@@ -495,18 +516,20 @@ func Test_helmExternal_Observe(t *testing.T) {
 					obj.ObjectMeta.DeletionTimestamp = &metav1.Time{Time: time.Now()}
 					obj.Spec.References = objectReferences()
 				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-							if key.Name == testReferenceObjectName {
-								*obj.(*unstructured.Unstructured) = *referenceObject()
-								return nil
-							} else if key.Name == externalResourceName {
-								return kerrors.NewNotFound(schema.GroupResource{}, "")
-							}
-							return errBoom
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+								if key.Name == testReferenceObjectName {
+									*obj.(*unstructured.Unstructured) = *referenceObject()
+									return nil
+								} else if key.Name == externalResourceName {
+									return kerrors.NewNotFound(schema.GroupResource{}, "")
+								}
+								return errBoom
+							},
+							MockUpdate: test.NewMockUpdateFn(nil),
 						},
-						MockUpdate: test.NewMockUpdateFn(nil),
 					},
 				},
 			},
@@ -520,19 +543,21 @@ func Test_helmExternal_Observe(t *testing.T) {
 				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.References = objectReferences()
 				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-							if key.Name == testReferenceObjectName {
-								*obj.(*unstructured.Unstructured) = *referenceObject()
-								return nil
-							} else if key.Name == externalResourceName {
-								*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
-								return nil
-							}
-							return errBoom
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+								if key.Name == testReferenceObjectName {
+									*obj.(*unstructured.Unstructured) = *referenceObject()
+									return nil
+								} else if key.Name == externalResourceName {
+									*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
+									return nil
+								}
+								return errBoom
+							},
+							MockUpdate: test.NewMockUpdateFn(nil),
 						},
-						MockUpdate: test.NewMockUpdateFn(nil),
 					},
 				},
 			},
@@ -550,9 +575,11 @@ func Test_helmExternal_Observe(t *testing.T) {
 				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.References = []v1alpha2.Reference{{}}
 				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: test.NewMockGetFn(nil),
+						},
 					},
 				},
 			},
@@ -578,22 +605,24 @@ func Test_helmExternal_Observe(t *testing.T) {
 						},
 					}
 				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-							switch key.Name {
-							case externalResourceName:
-								*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
-							case testSecretName:
-								*obj.(*unstructured.Unstructured) = unstructured.Unstructured{
-									Object: map[string]interface{}{
-										"data": map[string]interface{}{
-											"db-password": "MTIzNDU=",
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+								switch key.Name {
+								case externalResourceName:
+									*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
+								case testSecretName:
+									*obj.(*unstructured.Unstructured) = unstructured.Unstructured{
+										Object: map[string]interface{}{
+											"data": map[string]interface{}{
+												"db-password": "MTIzNDU=",
+											},
 										},
-									},
+									}
 								}
-							}
-							return nil
+								return nil
+							},
 						},
 					},
 				},
@@ -624,16 +653,18 @@ func Test_helmExternal_Observe(t *testing.T) {
 						},
 					}
 				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-							switch key.Name {
-							case externalResourceName:
-								*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
-							case testSecretName:
-								return errBoom
-							}
-							return nil
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+								switch key.Name {
+								case externalResourceName:
+									*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
+								case testSecretName:
+									return errBoom
+								}
+								return nil
+							},
 						},
 					},
 				},
@@ -647,15 +678,17 @@ func Test_helmExternal_Observe(t *testing.T) {
 				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionObserve}
 				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) =
-								*externalResourceWithLastAppliedConfigAnnotation(
-									`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"crossplane-system", "labels": {"old-label":"gone"}}}`,
-								)
-							return nil
-						}),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+								*obj.(*unstructured.Unstructured) =
+									*externalResourceWithLastAppliedConfigAnnotation(
+										`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"crossplane-system", "labels": {"old-label":"gone"}}}`,
+									)
+								return nil
+							}),
+						},
 					},
 				},
 			},
@@ -686,7 +719,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 
 func Test_helmExternal_Create(t *testing.T) {
 	type args struct {
-		client resource.ClientApplicator
+		client clients.ClusterClient
 		mg     resource.Managed
 	}
 	type want struct {
@@ -718,9 +751,11 @@ func Test_helmExternal_Create(t *testing.T) {
 		"FailedToCreate": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockCreate: test.NewMockCreateFn(errBoom),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockCreate: test.NewMockCreateFn(errBoom),
+						},
 					},
 				},
 			},
@@ -735,18 +770,20 @@ func Test_helmExternal_Create(t *testing.T) {
 				    "apiVersion": "v1",
 				    "kind": "Namespace" }`)
 				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockCreate: test.NewMockCreateFn(nil, func(obj client.Object) error {
-							_, ok := obj.GetAnnotations()[corev1.LastAppliedConfigAnnotation]
-							if !ok {
-								t.Errorf("Last applied annotation not set with create")
-							}
-							if obj.GetName() != testObjectName {
-								t.Errorf("Name should default to object name when not provider in manifest")
-							}
-							return nil
-						}),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockCreate: test.NewMockCreateFn(nil, func(obj client.Object) error {
+								_, ok := obj.GetAnnotations()[corev1.LastAppliedConfigAnnotation]
+								if !ok {
+									t.Errorf("Last applied annotation not set with create")
+								}
+								if obj.GetName() != testObjectName {
+									t.Errorf("Name should default to object name when not provider in manifest")
+								}
+								return nil
+							}),
+						},
 					},
 				},
 			},
@@ -757,15 +794,17 @@ func Test_helmExternal_Create(t *testing.T) {
 		"Success": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockCreate: test.NewMockCreateFn(nil, func(obj client.Object) error {
-							_, ok := obj.GetAnnotations()[corev1.LastAppliedConfigAnnotation]
-							if !ok {
-								t.Errorf("Last applied annotation not set with create")
-							}
-							return nil
-						}),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockCreate: test.NewMockCreateFn(nil, func(obj client.Object) error {
+								_, ok := obj.GetAnnotations()[corev1.LastAppliedConfigAnnotation]
+								if !ok {
+									t.Errorf("Last applied annotation not set with create")
+								}
+								return nil
+							}),
+						},
 					},
 				},
 			},
@@ -794,7 +833,7 @@ func Test_helmExternal_Create(t *testing.T) {
 
 func Test_helmExternal_Update(t *testing.T) {
 	type args struct {
-		client resource.ClientApplicator
+		client clients.ClusterClient
 		mg     resource.Managed
 	}
 	type want struct {
@@ -826,10 +865,12 @@ func Test_helmExternal_Update(t *testing.T) {
 		"FailedToApply": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Applicator: resource.ApplyFn(func(context.Context, client.Object, ...resource.ApplyOption) error {
-						return errBoom
-					}),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Applicator: resource.ApplyFn(func(context.Context, client.Object, ...resource.ApplyOption) error {
+							return errBoom
+						}),
+					},
 				},
 			},
 			want: want{
@@ -843,13 +884,15 @@ func Test_helmExternal_Update(t *testing.T) {
 				    "apiVersion": "v1",
 				    "kind": "Namespace" }`)
 				}),
-				client: resource.ClientApplicator{
-					Applicator: resource.ApplyFn(func(ctx context.Context, obj client.Object, op ...resource.ApplyOption) error {
-						if obj.GetName() != testObjectName {
-							t.Errorf("Name should default to object name when not provider in manifest")
-						}
-						return nil
-					}),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Applicator: resource.ApplyFn(func(ctx context.Context, obj client.Object, op ...resource.ApplyOption) error {
+							if obj.GetName() != testObjectName {
+								t.Errorf("Name should default to object name when not provider in manifest")
+							}
+							return nil
+						}),
+					},
 				},
 			},
 			want: want{
@@ -859,10 +902,12 @@ func Test_helmExternal_Update(t *testing.T) {
 		"Success": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Applicator: resource.ApplyFn(func(context.Context, client.Object, ...resource.ApplyOption) error {
-						return nil
-					}),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Applicator: resource.ApplyFn(func(context.Context, client.Object, ...resource.ApplyOption) error {
+							return nil
+						}),
+					},
 				},
 			},
 			want: want{
@@ -890,7 +935,7 @@ func Test_helmExternal_Update(t *testing.T) {
 
 func Test_helmExternal_Delete(t *testing.T) {
 	type args struct {
-		client resource.ClientApplicator
+		client clients.ClusterClient
 		mg     resource.Managed
 	}
 	type want struct {
@@ -921,9 +966,11 @@ func Test_helmExternal_Delete(t *testing.T) {
 		"FailedToDelete": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockDelete: test.NewMockDeleteFn(errBoom),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockDelete: test.NewMockDeleteFn(errBoom),
+						},
 					},
 				},
 			},
@@ -938,14 +985,16 @@ func Test_helmExternal_Delete(t *testing.T) {
 				    "apiVersion": "v1",
 				    "kind": "Namespace" }`)
 				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockDelete: test.NewMockDeleteFn(nil, func(obj client.Object) error {
-							if obj.GetName() != testObjectName {
-								t.Errorf("Name should default to object name when not provider in manifest")
-							}
-							return nil
-						}),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockDelete: test.NewMockDeleteFn(nil, func(obj client.Object) error {
+								if obj.GetName() != testObjectName {
+									t.Errorf("Name should default to object name when not provider in manifest")
+								}
+								return nil
+							}),
+						},
 					},
 				},
 			},
@@ -956,9 +1005,11 @@ func Test_helmExternal_Delete(t *testing.T) {
 		"Success": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockDelete: test.NewMockDeleteFn(nil),
+				client: &clients.ApplicatorClientWithConfig{
+					ClientApplicator: resource.ClientApplicator{
+						Client: &test.MockClient{
+							MockDelete: test.NewMockDeleteFn(nil),
+						},
 					},
 				},
 			},

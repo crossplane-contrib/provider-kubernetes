@@ -38,10 +38,12 @@ import (
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
+	"github.com/crossplane/crossplane-runtime/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/pkg/test"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	"github.com/crossplane-contrib/provider-kubernetes/apis/observedobjectcollection/v1alpha1"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
 )
 
 func TestReconciler(t *testing.T) {
@@ -380,8 +382,12 @@ func TestReconciler(t *testing.T) {
 			r := &Reconciler{
 				client: tc.args.client,
 				log:    logging.NewNopLogger(),
-				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error) {
-					return tc.args.client, nil
+				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (clients.ClusterClient, error) {
+					return &clients.ApplicatorClientWithConfig{
+						ClientApplicator: resource.ClientApplicator{
+							Client: tc.args.client,
+						},
+					}, nil
 				},
 				observedObjectName: func(collection client.Object, matchedObject client.Object) (string, error) {
 					return fmt.Sprintf("%s-%s", collection.GetName(), matchedObject.GetName()), nil

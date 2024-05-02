@@ -20,15 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/util/workqueue"
 	"math/rand"
-	runtimeevent "sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"strings"
 	"time"
 
@@ -37,11 +29,18 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	runtimeevent "sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
@@ -57,6 +56,15 @@ import (
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
+)
+
+const (
+	// AnnotationKeyProviderConfigRef is the annotation key for the provider config
+	// reference on the managed kubernetes resource. We use this to trigger the
+	// reconciler for the Object with that provider config in case of watch
+	// events. Only used when alpha watches are enabled.
+	AnnotationKeyProviderConfigRef = "kubernetes.crossplane.io/provider-config-ref"
 )
 
 const (
@@ -137,27 +145,25 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 	if o.Features.Enabled(features.EnableAlphaWatches) {
 		ca := mgr.GetCache()
-		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, objectRefGVKsIndex, IndexReferencedResourceRefGVKs); err != nil {
+		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, resourceRefGVKsIndex, IndexReferencedResourceRefGVKs); err != nil {
 			return errors.Wrap(err, "cannot add index for object reference GVKs")
 		}
-		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, objectsRefsIndex, IndexReferencesResourcesRefs); err != nil {
+		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, resourceRefsIndex, IndexReferencesResourcesRefs); err != nil {
 			return errors.Wrap(err, "cannot add index for object references")
 		}
 
-		i := referencedResourceInformers{
+		i := resourceInformers{
 			log:    l,
 			config: mgr.GetConfig(),
 
 			objectsCache:   ca,
 			resourceCaches: make(map[gvkWithHost]resourceCache),
-			sinks:          make(map[string]func(ev runtimeevent.UpdateEvent)),
 		}
 		conn.kindObserver = &i
 
 		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 			// Run every 5 minutes.
-			// TODO: Fix the period after development is done.
-			wait.UntilWithContext(ctx, i.cleanupResourceInformers, 5*time.Second)
+			wait.UntilWithContext(ctx, i.cleanupResourceInformers, 5*time.Minute)
 			return nil
 		})); err != nil {
 			return errors.Wrap(err, "cannot add cleanup referenced resource informers runnable")
@@ -267,7 +273,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	// We know the resource exists, so we can start watching it for realtime
-	// events.
+	// events if we have the kindObserver (i.e. watches enabled).
 	if c.kindObserver != nil {
 		c.kindObserver.WatchResources(c.client.GetConfig(), cr.Spec.ProviderConfigReference.Name, observed.GroupVersionKind())
 	}
@@ -297,9 +303,13 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	meta.AddAnnotations(obj, map[string]string{
-		v1.LastAppliedConfigAnnotation:                 string(cr.Spec.ForProvider.Manifest.Raw),
-		"kubernetes.crossplane.io/provider-config-ref": cr.Spec.ProviderConfigReference.Name,
+		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
+	if c.kindObserver != nil {
+		meta.AddAnnotations(obj, map[string]string{
+			AnnotationKeyProviderConfigRef: cr.Spec.ProviderConfigReference.Name,
+		})
+	}
 
 	if err := c.client.Create(ctx, obj); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateObject)
@@ -322,9 +332,13 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	meta.AddAnnotations(obj, map[string]string{
-		v1.LastAppliedConfigAnnotation:                 string(cr.Spec.ForProvider.Manifest.Raw),
-		"kubernetes.crossplane.io/provider-config-ref": cr.Spec.ProviderConfigReference.Name,
+		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
+	if c.kindObserver != nil {
+		meta.AddAnnotations(obj, map[string]string{
+			AnnotationKeyProviderConfigRef: cr.Spec.ProviderConfigReference.Name,
+		})
+	}
 
 	if err := c.client.Apply(ctx, obj); err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(CleanErr(err), errApplyObject)
@@ -475,7 +489,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 	c.logger.Debug("Resolving referencies.")
 
 	// Loop through references to resolve each referenced resource
-	var gvks []schema.GroupVersionKind
+	gvks := make([]schema.GroupVersionKind, 0, len(obj.Spec.References))
 	for _, ref := range obj.Spec.References {
 		if ref.DependsOn == nil && ref.PatchesFrom == nil {
 			continue
@@ -512,8 +526,8 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 
 	if c.kindObserver != nil {
 		// Referenced resources always live on the control plane (i.e. local cluster),
-		// so we don't pass an extra rest config or provider config with the
-		// watch call.
+		// so we don't pass an extra rest config (defaulting local rest config)
+		// or provider config with the watch call.
 		c.kindObserver.WatchResources(nil, "", gvks...)
 	}
 
