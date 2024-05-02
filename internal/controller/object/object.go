@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	"math/rand"
 	runtimeevent "sigs.k8s.io/controller-runtime/pkg/event"
@@ -91,9 +92,9 @@ const (
 // KindObserver tracks kinds of referenced composed resources in order to start
 // watches for them for realtime events.
 type KindObserver interface {
-	// WatchReferencedResources starts a watch of the given kinds to trigger
-	// reconciles when a referenced object of those kinds changes.
-	WatchReferencedResources(cluster clients.Cluster, gcs ...gvkWithConfig)
+	// WatchResources starts a watch of the given kinds to trigger reconciles
+	// when a referenced or managed objects of those kinds changes.
+	WatchResources(rc *rest.Config, providerConfig string, gvks ...schema.GroupVersionKind)
 }
 
 // Setup adds a controller that reconciles Object managed resources.
@@ -112,12 +113,12 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 	}
 
 	i := referencedResourceInformers{
-		log:     l,
-		cluster: mgr,
+		log:    l,
+		config: mgr.GetConfig(),
 
-		cdCaches:     make(map[gvkWithConfig]cdCache),
-		objectsCache: ca,
-		sinks:        make(map[string]func(ev runtimeevent.UpdateEvent)),
+		objectsCache:   ca,
+		resourceCaches: make(map[gvkWithHost]resourceCache),
+		sinks:          make(map[string]func(ev runtimeevent.UpdateEvent)),
 	}
 
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
@@ -252,15 +253,14 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
-	if c.kindObserver != nil {
-		c.kindObserver.WatchReferencedResources(c.client, gvkWithConfig{
-			config: cr.Spec.ProviderConfigReference.Name,
-			gvk:    observed.GroupVersionKind(),
-		})
-	}
-
 	if err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObject)
+	}
+
+	// We know the resource exists, so we can start watching it for realtime
+	// events.
+	if c.kindObserver != nil {
+		c.kindObserver.WatchResources(c.client.GetConfig(), cr.Spec.ProviderConfigReference.Name, observed.GroupVersionKind())
 	}
 
 	if err = c.setObserved(cr, observed); err != nil {
@@ -466,7 +466,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 	c.logger.Debug("Resolving referencies.")
 
 	// Loop through references to resolve each referenced resource
-	var gcs []gvkWithConfig
+	var gvks []schema.GroupVersionKind
 	for _, ref := range obj.Spec.References {
 		if ref.DependsOn == nil && ref.PatchesFrom == nil {
 			continue
@@ -494,18 +494,18 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 		}
 
 		g, v := parseAPIVersion(refAPIVersion)
-		gcs = append(gcs, gvkWithConfig{
-			config: "",
-			gvk: schema.GroupVersionKind{
-				Group:   g,
-				Version: v,
-				Kind:    refKind,
-			},
+		gvks = append(gvks, schema.GroupVersionKind{
+			Group:   g,
+			Version: v,
+			Kind:    refKind,
 		})
 	}
 
 	if c.kindObserver != nil {
-		c.kindObserver.WatchReferencedResources(nil, gcs...)
+		// Referenced resources always live on the control plane (i.e. local cluster),
+		// so we don't pass an extra rest config or provider config with the
+		// watch call.
+		c.kindObserver.WatchResources(nil, "", gvks...)
 	}
 
 	return nil
