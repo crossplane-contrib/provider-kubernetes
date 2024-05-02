@@ -232,9 +232,12 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	c.logger.Debug("Observing", "resource", cr)
-	
-	if err := c.resolveReferencies(ctx, cr); err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errResolveResourceReferences)
+
+	if !meta.WasDeleted(cr) {
+		// If the object is not being deleted, we need to resolve references
+		if err := c.resolveReferencies(ctx, cr); err != nil {
+			return managed.ExternalObservation{}, errors.Wrap(err, errResolveResourceReferences)
+		}
 	}
 
 	desired, err := getDesired(cr)
