@@ -3,6 +3,10 @@ kind: Object
 metadata:
   name: sample-namespace
 spec:
+  # Watch for changes to the Namespace object.
+  # Watching resources is an alpha feature and needs to be enabled with --enable-watches
+  # in the provider to get this configuration working.
+  # watch: true
   forProvider:
     manifest:
       apiVersion: v1
