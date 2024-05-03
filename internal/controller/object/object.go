@@ -168,7 +168,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		}
 
 		cb = cb.WatchesRawSource(&i, handler.Funcs{
-			UpdateFunc: func(ctx context.Context, ev runtimeevent.UpdateEvent, q workqueue.RateLimitingInterface) {
+			GenericFunc: func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.RateLimitingInterface) {
 				enqueueObjectsForReferences(ca, l)(ctx, ev, q)
 			},
 		})
@@ -254,7 +254,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
-	
+
 	if c.kindObserver != nil {
 		c.kindObserver.WatchResources(c.client.GetConfig(), cr.Spec.ProviderConfigReference.Name, desired.GroupVersionKind())
 	}

@@ -40,7 +40,7 @@ type resourceInformers struct {
 	// and stopped based on the Objects that reference or managing them.
 	resourceCaches map[gvkWithConfig]resourceCache
 	objectsCache   cache.Cache
-	sink           func(providerConfig string, ev runtimeevent.UpdateEvent)
+	sink           func(providerConfig string, ev runtimeevent.GenericEvent)
 }
 
 type gvkWithConfig struct {
@@ -67,13 +67,13 @@ func (i *resourceInformers) Start(ctx context.Context, h handler.EventHandler, q
 	if i.sink != nil {
 		return errors.New("source already started, cannot start it again")
 	}
-	i.sink = func(providerConfig string, ev runtimeevent.UpdateEvent) {
+	i.sink = func(providerConfig string, ev runtimeevent.GenericEvent) {
 		for _, p := range ps {
-			if !p.Update(ev) {
+			if !p.Generic(ev) {
 				return
 			}
 		}
-		h.Update(context.WithValue(ctx, keyProviderConfigName, providerConfig), ev, q)
+		h.Generic(context.WithValue(ctx, keyProviderConfigName, providerConfig), ev, q)
 	}
 
 	go func() {
@@ -132,6 +132,16 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 		}
 
 		if _, err := inf.AddEventHandler(kcache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				i.lock.RLock()
+				defer i.lock.RUnlock()
+
+				ev := runtimeevent.GenericEvent{
+					Object: obj.(client.Object),
+				}
+
+				i.sink(providerConfig, ev)
+			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				old := oldObj.(client.Object) //nolint:forcetypeassert // Will always be client.Object.
 				obj := newObj.(client.Object) //nolint:forcetypeassert // Will always be client.Object.
@@ -142,9 +152,18 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 				i.lock.RLock()
 				defer i.lock.RUnlock()
 
-				ev := runtimeevent.UpdateEvent{
-					ObjectOld: old,
-					ObjectNew: obj,
+				ev := runtimeevent.GenericEvent{
+					Object: obj,
+				}
+
+				i.sink(providerConfig, ev)
+			},
+			DeleteFunc: func(obj interface{}) {
+				i.lock.RLock()
+				defer i.lock.RUnlock()
+
+				ev := runtimeevent.GenericEvent{
+					Object: obj.(client.Object),
 				}
 
 				i.sink(providerConfig, ev)

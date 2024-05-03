@@ -108,13 +108,13 @@ func refKey(providerConfig, ns, name, kind, apiVersion string) string {
 	return fmt.Sprintf("%s.%s.%s.%s.%s", providerConfig, name, ns, kind, apiVersion)
 }
 
-func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx context.Context, ev runtimeevent.UpdateEvent, q workqueue.RateLimitingInterface) {
-	return func(ctx context.Context, ev runtimeevent.UpdateEvent, q workqueue.RateLimitingInterface) {
+func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.RateLimitingInterface) {
+	return func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.RateLimitingInterface) {
 		// "pc" is the provider pc name. It will be empty for referenced
 		// resources, as they are always on the control plane.
 		pc, _ := ctx.Value(keyProviderConfigName).(string)
-		rGVK := ev.ObjectNew.GetObjectKind().GroupVersionKind()
-		key := refKey(pc, ev.ObjectNew.GetNamespace(), ev.ObjectNew.GetName(), rGVK.Kind, rGVK.GroupVersion().String())
+		rGVK := ev.Object.GetObjectKind().GroupVersionKind()
+		key := refKey(pc, ev.Object.GetNamespace(), ev.Object.GetName(), rGVK.Kind, rGVK.GroupVersion().String())
 
 		objects := v1alpha2.ObjectList{}
 		if err := ca.List(ctx, &objects, client.MatchingFields{resourceRefsIndex: key}); err != nil {
@@ -123,7 +123,7 @@ func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx co
 		}
 		// queue those Objects for reconciliation
 		for _, o := range objects.Items {
-			log.Info("Enqueueing Object because referenced resource changed", "name", o.GetName(), "referencedGVK", rGVK.String(), "referencedName", ev.ObjectNew.GetName(), "providerConfig", pc)
+			log.Info("Enqueueing Object because referenced resource changed", "name", o.GetName(), "referencedGVK", rGVK.String(), "referencedName", ev.Object.GetName(), "providerConfig", pc)
 			q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: o.GetName()}})
 		}
 	}
