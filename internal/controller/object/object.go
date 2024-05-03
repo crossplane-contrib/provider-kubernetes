@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	runtimeevent "sigs.k8s.io/controller-runtime/pkg/event"
@@ -258,7 +259,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, err
 	}
 
-	if c.kindObserver != nil {
+	if c.shouldWatch(cr) {
 		c.kindObserver.WatchResources(c.client.GetConfig(), cr.Spec.ProviderConfigReference.Name, desired.GroupVersionKind())
 	}
 
@@ -349,7 +350,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return err
 	}
 
-	if c.kindObserver != nil {
+	if c.shouldWatch(cr) {
 		c.kindObserver.StopWatchingResources(ctx, cr.Spec.ProviderConfigReference.Name, obj.GroupVersionKind())
 		if len(cr.Spec.References) > 0 {
 			gvks := make([]schema.GroupVersionKind, 0, len(cr.Spec.References))
@@ -534,7 +535,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 		})
 	}
 
-	if c.kindObserver != nil {
+	if c.shouldWatch(obj) {
 		// Referenced resources always live on the control plane (i.e. local cluster),
 		// so we don't pass an extra rest config (defaulting local rest config)
 		// or provider config with the watch call.
@@ -713,6 +714,10 @@ func connectionDetails(ctx context.Context, kube client.Client, connDetails []v1
 	}
 
 	return mcd, nil
+}
+
+func (c *external) shouldWatch(cr *v1alpha2.Object) bool {
+	return c.kindObserver != nil && ptr.Deref(cr.Spec.Watch, false)
 }
 
 func unstructuredFromObjectRef(r v1.ObjectReference) unstructured.Unstructured {

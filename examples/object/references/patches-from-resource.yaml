@@ -4,6 +4,10 @@ kind: Object
 metadata:
   name: foo
 spec:
+  # Watch for changes to the Namespace object.
+  # Watching resources is an alpha feature and needs to be enabled with --enable-watches
+  # in the provider to get this configuration working.
+  # watch: true
   references:
   # Use patchesFrom to patch field from other k8s resource to this object
   - patchesFrom:
