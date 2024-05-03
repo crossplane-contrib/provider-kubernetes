@@ -31,16 +31,15 @@ import (
 // resources, and inform resourceInformers about them via the
 // WatchReferencedResources method.
 type resourceInformers struct {
-	log    logging.Logger
-	config *rest.Config
+	log          logging.Logger
+	config       *rest.Config
+	objectsCache cache.Cache
+	sink         func(providerConfig string, ev runtimeevent.GenericEvent)
 
 	lock sync.RWMutex // everything below is protected by this lock
-
 	// resourceCaches holds the resource caches. These are dynamically started
 	// and stopped based on the Objects that reference or managing them.
 	resourceCaches map[gvkWithConfig]resourceCache
-	objectsCache   cache.Cache
-	sink           func(providerConfig string, ev runtimeevent.GenericEvent)
 }
 
 type gvkWithConfig struct {
@@ -62,8 +61,6 @@ var _ source.Source = &resourceInformers{}
 // source with h as the sink of update events. It keeps sending events until
 // ctx is done.
 func (i *resourceInformers) Start(ctx context.Context, h handler.EventHandler, q workqueue.RateLimitingInterface, ps ...predicate.Predicate) error {
-	i.lock.Lock()
-	defer i.lock.Unlock()
 	if i.sink != nil {
 		return errors.New("source already started, cannot start it again")
 	}
@@ -78,9 +75,6 @@ func (i *resourceInformers) Start(ctx context.Context, h handler.EventHandler, q
 
 	go func() {
 		<-ctx.Done()
-
-		i.lock.Lock()
-		defer i.lock.Unlock()
 		i.sink = nil
 	}()
 
@@ -93,20 +87,20 @@ func (i *resourceInformers) Start(ctx context.Context, h handler.EventHandler, q
 // every reconcile to make resourceInformers aware of the referenced or managed
 // resources of the given Object.
 //
-// Note that this complements cleanupResourceInformers which regularly
+// Note that this complements garbageCollectResourceInformers which regularly
 // garbage collects resource informers that are no longer referenced by
 // any Object.
 func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig string, gvks ...schema.GroupVersionKind) {
-	i.lock.RLock()
-	defer i.lock.RUnlock()
-
 	if rc == nil {
 		rc = i.config
 	}
 
 	// start new informers
 	for _, gvk := range gvks {
-		if _, found := i.resourceCaches[gvkWithConfig{providerConfig: providerConfig, gvk: gvk}]; found {
+		i.lock.RLock()
+		_, found := i.resourceCaches[gvkWithConfig{providerConfig: providerConfig, gvk: gvk}]
+		i.lock.RUnlock()
+		if found {
 			continue
 		}
 
@@ -133,9 +127,6 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 
 		if _, err := inf.AddEventHandler(kcache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				i.lock.RLock()
-				defer i.lock.RUnlock()
-
 				ev := runtimeevent.GenericEvent{
 					Object: obj.(client.Object),
 				}
@@ -149,9 +140,6 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 					return
 				}
 
-				i.lock.RLock()
-				defer i.lock.RUnlock()
-
 				ev := runtimeevent.GenericEvent{
 					Object: obj,
 				}
@@ -159,9 +147,6 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 				i.sink(providerConfig, ev)
 			},
 			DeleteFunc: func(obj interface{}) {
-				i.lock.RLock()
-				defer i.lock.RUnlock()
-
 				ev := runtimeevent.GenericEvent{
 					Object: obj.(client.Object),
 				}
@@ -181,10 +166,12 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 			_ = ca.Start(ctx)
 		}()
 
+		i.lock.Lock()
 		i.resourceCaches[gvkWithConfig{providerConfig: providerConfig, gvk: gvk}] = resourceCache{
 			cache:    ca,
 			cancelFn: cancelFn,
 		}
+		i.lock.Unlock()
 
 		// wait for in the background, and only when synced add to the routed cache
 		go func() {
@@ -195,12 +182,50 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 	}
 }
 
-// cleanupResourceInformers garbage collects resource informers that are no
-// longer referenced by any Object.
-//
-// Note that this complements WatchResources which starts informers for
-// the resources referenced or managed by an Object.
-func (i *resourceInformers) cleanupResourceInformers(ctx context.Context) {
+func (i *resourceInformers) StopWatchingResources(ctx context.Context, providerConfig string, gvks ...schema.GroupVersionKind) {
+	i.lock.Lock()
+	defer i.lock.Unlock()
+
+	for _, gvk := range gvks {
+		ca, found := i.resourceCaches[gvkWithConfig{providerConfig: providerConfig, gvk: gvk}]
+		if !found {
+			continue
+		}
+		// Check if there are any other objects referencing this resource GVK.
+		list := v1alpha2.ObjectList{}
+		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{resourceRefGVKsIndex: refKeyGKV(providerConfig, gvk.Kind, gvk.Group, gvk.Version)}); err != nil {
+			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", resourceRefGVKsIndex+"="+refKeyGKV(providerConfig, gvk.Kind, gvk.Group, gvk.Version))
+		}
+
+		inUse := false
+		for _, o := range list.Items {
+			// We only care about objects that are not being deleted. Otherwise,
+			// we are getting into deadlocks while stopping the watches during
+			// deletion.
+			if o.GetDeletionTimestamp().IsZero() {
+				inUse = true
+				break
+			}
+		}
+		if inUse {
+			continue
+		}
+
+		ca.cancelFn()
+		i.log.Info("Stopped resource watch", "provider config", providerConfig, "gvk", gvk)
+		delete(i.resourceCaches, gvkWithConfig{providerConfig: providerConfig, gvk: gvk})
+	}
+}
+
+// garbageCollectResourceInformers garbage collects resource informers that are
+// no longer referenced by any Object. Ideally, all resource informers should
+// stopped/cleaned up when the Object is deleted. However, in practice, this
+// is not always the case. This method is a safety net to clean up resource
+// informers that are no longer referenced by any Object.
+func (i *resourceInformers) garbageCollectResourceInformers(ctx context.Context) {
+	i.lock.Lock()
+	defer i.lock.Unlock()
+
 	// stop old informers
 	i.log.Debug("Running garbage collection for resource informers", "count", len(i.resourceCaches))
 	for gh, ca := range i.resourceCaches {

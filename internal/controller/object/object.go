@@ -102,6 +102,10 @@ type KindObserver interface {
 	// WatchResources starts a watch of the given kinds to trigger reconciles
 	// when a referenced or managed objects of those kinds changes.
 	WatchResources(rc *rest.Config, providerConfig string, gvks ...schema.GroupVersionKind)
+
+	// UnwatchResources stops watching the given kinds if they are no longer
+	// referenced or managed by any other Object that is not being deleted.
+	StopWatchingResources(ctx context.Context, providerConfig string, gvks ...schema.GroupVersionKind)
 }
 
 // Setup adds a controller that reconciles Object managed resources.
@@ -160,8 +164,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		conn.kindObserver = &i
 
 		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-			// Run every 5 minutes.
-			wait.UntilWithContext(ctx, i.cleanupResourceInformers, 5*time.Minute)
+			wait.UntilWithContext(ctx, i.garbageCollectResourceInformers, time.Minute)
 			return nil
 		})); err != nil {
 			return errors.Wrap(err, "cannot add cleanup referenced resource informers runnable")
@@ -344,6 +347,27 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	obj, err := getDesired(cr)
 	if err != nil {
 		return err
+	}
+
+	if c.kindObserver != nil {
+		c.kindObserver.StopWatchingResources(ctx, cr.Spec.ProviderConfigReference.Name, obj.GroupVersionKind())
+		if len(cr.Spec.References) > 0 {
+			gvks := make([]schema.GroupVersionKind, 0, len(cr.Spec.References))
+			for _, ref := range cr.Spec.References {
+				if ref.DependsOn == nil && ref.PatchesFrom == nil {
+					continue
+				}
+
+				refAPIVersion, refKind, _, _ := getReferenceInfo(ref)
+				g, v := parseAPIVersion(refAPIVersion)
+				gvks = append(gvks, schema.GroupVersionKind{
+					Group:   g,
+					Version: v,
+					Kind:    refKind,
+				})
+			}
+			c.kindObserver.StopWatchingResources(ctx, "", gvks...)
+		}
 	}
 
 	return errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, obj)), errDeleteObject)
