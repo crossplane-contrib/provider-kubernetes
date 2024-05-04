@@ -1,5 +1,5 @@
 /*
-Copyright 2023 The Crossplane Authors.
+Copyright 2024 The Crossplane Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -42,13 +42,14 @@ const (
 )
 
 var (
-	_ client.IndexerFunc = IndexReferencedResourceRefGVKs
-	_ client.IndexerFunc = IndexReferencesResourcesRefs
+	_ client.IndexerFunc = IndexByProviderGVK
+	_ client.IndexerFunc = IndexByProviderNamespacedNameGVK
 )
 
-// IndexReferencedResourceRefGVKs assumes the passed object is an Object. It
-// returns gvk keys for every resource referenced or managed by the Object.
-func IndexReferencedResourceRefGVKs(o client.Object) []string {
+// IndexByProviderGVK assumes the passed object is an Object. It returns keys
+// with "ProviderConfig + GVK" for every resource referenced or managed by the
+// Object.
+func IndexByProviderGVK(o client.Object) []string {
 	obj, ok := o.(*v1alpha2.Object)
 	if !ok {
 		return nil // should never happen
@@ -60,27 +61,28 @@ func IndexReferencedResourceRefGVKs(o client.Object) []string {
 	for _, ref := range refs {
 		refAPIVersion, refKind, _, _ := getReferenceInfo(ref)
 		group, version := parseAPIVersion(refAPIVersion)
-		// References are always on control plane, so we don't pass the config name.
-		keys = append(keys, refKeyGKV("", refKind, group, version))
+		providerConfig := "" // references are always local (i.e. on the control plane), which we represent as an empty provider config.
+		keys = append(keys, refKeyProviderGVK(providerConfig, refKind, group, version))
 	}
 
 	// Index the desired object.
 	// We don't expect errors here, as the getDesired function is already called
 	// in the reconciler and the desired object already validated.
 	d, _ := getDesired(obj)
-	keys = append(keys, refKeyGKV(obj.Spec.ProviderConfigReference.Name, d.GetKind(), d.GroupVersionKind().Group, d.GroupVersionKind().Version)) // unification is done by the informer.
+	keys = append(keys, refKeyProviderGVK(obj.Spec.ProviderConfigReference.Name, d.GetKind(), d.GroupVersionKind().Group, d.GroupVersionKind().Version)) // unification is done by the informer.
 
 	// unification is done by the informer.
 	return keys
 }
 
-func refKeyGKV(providerConfig, kind, group, version string) string {
+func refKeyProviderGVK(providerConfig, kind, group, version string) string {
 	return fmt.Sprintf("%s.%s.%s.%s", providerConfig, kind, group, version)
 }
 
-// IndexReferencesResourcesRefs assumes the passed object is an Object. It
-// returns keys for every resource referenced or managed by the Object.
-func IndexReferencesResourcesRefs(o client.Object) []string {
+// IndexByProviderNamespacedNameGVK assumes the passed object is an Object. It
+// returns keys with "ProviderConfig + NamespacedName + GVK" for every resource
+// referenced or managed by the Object.
+func IndexByProviderNamespacedNameGVK(o client.Object) []string {
 	obj, ok := o.(*v1alpha2.Object)
 	if !ok {
 		return nil // should never happen
@@ -91,30 +93,28 @@ func IndexReferencesResourcesRefs(o client.Object) []string {
 	keys := make([]string, 0, len(refs))
 	for _, ref := range refs {
 		refAPIVersion, refKind, refNamespace, refName := getReferenceInfo(ref)
-		// References are always on control plane, so we don't pass the provider config name.
-		keys = append(keys, refKey("", refNamespace, refName, refKind, refAPIVersion))
+		providerConfig := "" // references are always local (i.e. on the control plane), which we represent as an empty provider config.
+		keys = append(keys, refKeyProviderNamespacedNameGVK(providerConfig, refNamespace, refName, refKind, refAPIVersion))
 	}
 
 	// Index the desired object.
 	// We don't expect errors here, as the getDesired function is already called
 	// in the reconciler and the desired object already validated.
 	d, _ := getDesired(obj)
-	keys = append(keys, refKey(obj.Spec.ProviderConfigReference.Name, d.GetNamespace(), d.GetName(), d.GetKind(), d.GetAPIVersion())) // unification is done by the informer.
+	keys = append(keys, refKeyProviderNamespacedNameGVK(obj.Spec.ProviderConfigReference.Name, d.GetNamespace(), d.GetName(), d.GetKind(), d.GetAPIVersion())) // unification is done by the informer.
 
 	return keys
 }
 
-func refKey(providerConfig, ns, name, kind, apiVersion string) string {
+func refKeyProviderNamespacedNameGVK(providerConfig, ns, name, kind, apiVersion string) string {
 	return fmt.Sprintf("%s.%s.%s.%s.%s", providerConfig, name, ns, kind, apiVersion)
 }
 
 func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.RateLimitingInterface) {
 	return func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.RateLimitingInterface) {
-		// "pc" is the provider pc name. It will be empty for referenced
-		// resources, as they are always on the control plane.
 		pc, _ := ctx.Value(keyProviderConfigName).(string)
 		rGVK := ev.Object.GetObjectKind().GroupVersionKind()
-		key := refKey(pc, ev.Object.GetNamespace(), ev.Object.GetName(), rGVK.Kind, rGVK.GroupVersion().String())
+		key := refKeyProviderNamespacedNameGVK(pc, ev.Object.GetNamespace(), ev.Object.GetName(), rGVK.Kind, rGVK.GroupVersion().String())
 
 		objects := v1alpha2.ObjectList{}
 		if err := ca.List(ctx, &objects, client.MatchingFields{resourceRefsIndex: key}); err != nil {

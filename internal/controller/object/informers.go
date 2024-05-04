@@ -1,3 +1,19 @@
+/*
+Copyright 2024 The Crossplane Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package object
 
 import (
@@ -193,8 +209,8 @@ func (i *resourceInformers) StopWatchingResources(ctx context.Context, providerC
 		}
 		// Check if there are any other objects referencing this resource GVK.
 		list := v1alpha2.ObjectList{}
-		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{resourceRefGVKsIndex: refKeyGKV(providerConfig, gvk.Kind, gvk.Group, gvk.Version)}); err != nil {
-			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", resourceRefGVKsIndex+"="+refKeyGKV(providerConfig, gvk.Kind, gvk.Group, gvk.Version))
+		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{resourceRefGVKsIndex: refKeyProviderGVK(providerConfig, gvk.Kind, gvk.Group, gvk.Version)}); err != nil {
+			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", resourceRefGVKsIndex+"="+refKeyProviderGVK(providerConfig, gvk.Kind, gvk.Group, gvk.Version))
 		}
 
 		inUse := false
@@ -230,8 +246,8 @@ func (i *resourceInformers) garbageCollectResourceInformers(ctx context.Context)
 	i.log.Debug("Running garbage collection for resource informers", "count", len(i.resourceCaches))
 	for gh, ca := range i.resourceCaches {
 		list := v1alpha2.ObjectList{}
-		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{resourceRefGVKsIndex: refKeyGKV(gh.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version)}); err != nil {
-			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", resourceRefGVKsIndex+"="+refKeyGKV(gh.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version))
+		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{resourceRefGVKsIndex: refKeyProviderGVK(gh.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version)}); err != nil {
+			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", resourceRefGVKsIndex+"="+refKeyProviderGVK(gh.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version))
 		}
 
 		if len(list.Items) > 0 {
