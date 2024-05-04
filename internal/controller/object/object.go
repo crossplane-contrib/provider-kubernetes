@@ -148,10 +148,10 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 	if o.Features.Enabled(features.EnableAlphaWatches) {
 		ca := mgr.GetCache()
-		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, resourceRefGVKsIndex, IndexReferencedResourceRefGVKs); err != nil {
+		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, resourceRefGVKsIndex, IndexByProviderGVK); err != nil {
 			return errors.Wrap(err, "cannot add index for object reference GVKs")
 		}
-		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, resourceRefsIndex, IndexReferencesResourcesRefs); err != nil {
+		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, resourceRefsIndex, IndexByProviderNamespacedNameGVK); err != nil {
 			return errors.Wrap(err, "cannot add index for object references")
 		}
 
