@@ -14,7 +14,7 @@ so using the Crossplane CLI in a Kubernetes cluster where Crossplane is
 installed:
 
 ```console
-kubectl crossplane xpkg install provider xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.13.0
+crossplane xpkg install provider xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.13.0
 ```
 
 You may also manually install `provider-kubernetes` by creating a `Provider` directly:
