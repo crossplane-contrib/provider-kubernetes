@@ -131,7 +131,7 @@ type ObjectSpec struct {
 	// changed or removed without notice.
 	// +optional
 	// +kubebuilder:default=false
-	Watch *bool `json:"watch,omitempty"`
+	Watch bool `json:"watch,omitempty"`
 }
 
 // ReadinessPolicy defines how the Object's readiness condition should be computed.
