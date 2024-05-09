@@ -183,13 +183,21 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 		}()
 
 		i.lock.Lock()
+		_, ok := i.resourceCaches[gvkWithConfig{providerConfig: providerConfig, gvk: gvk}]
+		if ok {
+			// Another goroutine already started the cache in parallel. We
+			// should cancel the new one.
+			cancelFn()
+			i.lock.Unlock()
+			continue
+		}
 		i.resourceCaches[gvkWithConfig{providerConfig: providerConfig, gvk: gvk}] = resourceCache{
 			cache:    ca,
 			cancelFn: cancelFn,
 		}
 		i.lock.Unlock()
 
-		// wait for in the background, and only when synced add to the routed cache
+		// wait for in the background.
 		go func() {
 			if synced := ca.WaitForCacheSync(ctx); synced {
 				log.Debug("Resource cache synced")
@@ -211,6 +219,7 @@ func (i *resourceInformers) StopWatchingResources(ctx context.Context, providerC
 		list := v1alpha2.ObjectList{}
 		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{resourceRefGVKsIndex: refKeyProviderGVK(providerConfig, gvk.Kind, gvk.Group, gvk.Version)}); err != nil {
 			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", resourceRefGVKsIndex+"="+refKeyProviderGVK(providerConfig, gvk.Kind, gvk.Group, gvk.Version))
+			continue
 		}
 
 		inUse := false
@@ -248,6 +257,7 @@ func (i *resourceInformers) garbageCollectResourceInformers(ctx context.Context)
 		list := v1alpha2.ObjectList{}
 		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{resourceRefGVKsIndex: refKeyProviderGVK(gh.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version)}); err != nil {
 			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", resourceRefGVKsIndex+"="+refKeyProviderGVK(gh.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version))
+			continue
 		}
 
 		if len(list.Items) > 0 {
