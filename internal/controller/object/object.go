@@ -36,7 +36,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	runtimeevent "sigs.k8s.io/controller-runtime/pkg/event"
@@ -717,7 +716,7 @@ func connectionDetails(ctx context.Context, kube client.Client, connDetails []v1
 }
 
 func (c *external) shouldWatch(cr *v1alpha2.Object) bool {
-	return c.kindObserver != nil && ptr.Deref(cr.Spec.Watch, false)
+	return c.kindObserver != nil && cr.Spec.Watch
 }
 
 func unstructuredFromObjectRef(r v1.ObjectReference) unstructured.Unstructured {
