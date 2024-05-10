@@ -55,7 +55,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
-	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/kube"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 )
 
@@ -137,7 +137,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		sanitizeSecrets:     sanitizeSecrets,
 		kube:                mgr.GetClient(),
 		usage:               resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
-		clientForProviderFn: clients.ClientForProvider,
+		clientForProviderFn: kube.ClientForProvider,
 	}
 
 	cb := ctrl.NewControllerManagedBy(mgr).
@@ -196,7 +196,7 @@ type connector struct {
 
 	kindObserver KindObserver
 
-	clientForProviderFn func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (clients.ClusterClient, error)
+	clientForProviderFn func(ctx context.Context, local client.Client, providerConfigName string) (client.Client, *rest.Config, error)
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) { //nolint:gocyclo
@@ -212,15 +212,19 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
-	k, err := c.clientForProviderFn(ctx, c.kube, cr.GetProviderConfigReference().Name)
+	k, rc, err := c.clientForProviderFn(ctx, c.kube, cr.GetProviderConfigReference().Name)
 
 	if err != nil {
 		return nil, errors.Wrap(err, errNewKubernetesClient)
 	}
 
 	return &external{
-		logger:          c.logger,
-		client:          k,
+		logger: c.logger,
+		client: resource.ClientApplicator{
+			Client:     k,
+			Applicator: resource.NewAPIPatchingApplicator(k),
+		},
+		rest:            rc,
 		localClient:     c.kube,
 		sanitizeSecrets: c.sanitizeSecrets,
 
@@ -230,8 +234,9 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 
 type external struct {
 	logger logging.Logger
-	client clients.ClusterClient
-	// localClient is specifically used to connect to local cluster
+	client resource.ClientApplicator
+	rest   *rest.Config
+	// localClient is specifically used to connect to local cluster, a.k.a control plane.
 	localClient     client.Client
 	sanitizeSecrets bool
 
@@ -259,7 +264,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	if c.shouldWatch(cr) {
-		c.kindObserver.WatchResources(c.client.GetConfig(), cr.Spec.ProviderConfigReference.Name, desired.GroupVersionKind())
+		c.kindObserver.WatchResources(c.rest, cr.Spec.ProviderConfigReference.Name, desired.GroupVersionKind())
 	}
 
 	observed := desired.DeepCopy()

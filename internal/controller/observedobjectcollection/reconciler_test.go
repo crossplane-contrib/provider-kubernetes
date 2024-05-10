@@ -32,18 +32,17 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
-	"github.com/crossplane/crossplane-runtime/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/pkg/test"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	"github.com/crossplane-contrib/provider-kubernetes/apis/observedobjectcollection/v1alpha1"
-	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
 )
 
 func TestReconciler(t *testing.T) {
@@ -382,12 +381,8 @@ func TestReconciler(t *testing.T) {
 			r := &Reconciler{
 				client: tc.args.client,
 				log:    logging.NewNopLogger(),
-				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (clients.ClusterClient, error) {
-					return &clients.ApplicatorClientWithConfig{
-						ClientApplicator: resource.ClientApplicator{
-							Client: tc.args.client,
-						},
-					}, nil
+				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, *rest.Config, error) {
+					return tc.args.client, nil, nil
 				},
 				observedObjectName: func(collection client.Object, matchedObject client.Object) (string, error) {
 					return fmt.Sprintf("%s-%s", collection.GetName(), matchedObject.GetName()), nil
