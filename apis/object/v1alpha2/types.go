@@ -100,8 +100,8 @@ type ObjectSpec struct {
 	// Watch enables watching the referenced or managed kubernetes resources.
 	//
 	// THIS IS AN ALPHA FIELD. Do not use it in production. It is not honored
-	// unless the relevant Crossplane feature flag is enabled, and may be
-	// changed or removed without notice.
+	// unless "watches" feature gate is enabled, and may be changed or removed
+	// without notice.
 	// +optional
 	// +kubebuilder:default=false
 	Watch bool `json:"watch,omitempty"`

@@ -407,8 +407,8 @@ spec:
 
 
                   THIS IS AN ALPHA FIELD. Do not use it in production. It is not honored
-                  unless the relevant Crossplane feature flag is enabled, and may be
-                  changed or removed without notice.
+                  unless "watches" feature gate is enabled, and may be changed or removed
+                  without notice.
                 type: boolean
               writeConnectionSecretToRef:
                 description: |-
@@ -851,8 +851,8 @@ spec:
 
 
                   THIS IS AN ALPHA FIELD. Do not use it in production. It is not honored
-                  unless the relevant Crossplane feature flag is enabled, and may be
-                  changed or removed without notice.
+                  unless "watches" feature gate is enabled, and may be changed or removed
+                  without notice.
                 type: boolean
               writeConnectionSecretToRef:
                 description: |-
