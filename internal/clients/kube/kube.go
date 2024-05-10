@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Crossplane Authors.
+Copyright 2024 The Crossplane Authors.
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -11,7 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package clients
+package kube
 
 import (
 	"context"
@@ -41,27 +41,94 @@ const (
 	errInjectAzureCredentials   = "failed to wrap REST client with Azure Application Credentials"
 )
 
-// NewRESTConfig returns a rest config given a secret with connection information.
-func NewRESTConfig(kubeconfig []byte) (*rest.Config, error) {
-	ac, err := clientcmd.Load(kubeconfig)
+// ClientForProvider returns the client and *rest.config for the given provider
+// config.
+func ClientForProvider(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, *rest.Config, error) { //nolint:gocyclo
+	rc, err := configForProvider(ctx, inclusterClient, providerConfigName)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to load kubeconfig")
+		return nil, nil, errors.Wrapf(err, "cannot get REST config for provider %q", providerConfigName)
 	}
-	return restConfigFromAPIConfig(ac)
+	k, err := client.New(rc, client.Options{})
+	if err != nil {
+		return nil, nil, errors.Wrapf(err, "cannot create Kubernetes client for provider %q", providerConfigName)
+	}
+	return k, rc, nil
 }
 
-// NewKubeClient returns a kubernetes client given a secret with connection
-// information.
-func NewKubeClient(config *rest.Config) (client.Client, error) {
-	kc, err := client.New(config, client.Options{})
-	if err != nil {
-		return nil, errors.Wrap(err, "cannot create Kubernetes client")
+// ConfigForProvider returns the *rest.config for the given provider config.
+func configForProvider(ctx context.Context, local client.Client, providerConfigName string) (*rest.Config, error) { // nolint:gocyclo
+	pc := &v1alpha1.ProviderConfig{}
+	if err := local.Get(ctx, types.NamespacedName{Name: providerConfigName}, pc); err != nil {
+		return nil, errors.Wrap(err, errGetPC)
 	}
 
-	return kc, nil
+	var rc *rest.Config
+	var err error
+
+	switch cd := pc.Spec.Credentials; cd.Source { //nolint:exhaustive
+	case xpv1.CredentialsSourceInjectedIdentity:
+		rc, err = rest.InClusterConfig()
+		if err != nil {
+			return nil, errors.Wrap(err, errCreateRestConfig)
+		}
+	default:
+		kc, err := resource.CommonCredentialExtractor(ctx, cd.Source, local, cd.CommonCredentialSelectors)
+		if err != nil {
+			return nil, errors.Wrap(err, errGetCreds)
+		}
+
+		ac, err := clientcmd.Load(kc)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to load kubeconfig")
+		}
+
+		if rc, err = fromAPIConfig(ac); err != nil {
+			return nil, errors.Wrap(err, errCreateRestConfig)
+		}
+	}
+
+	if id := pc.Spec.Identity; id != nil {
+		switch id.Type {
+		case v1alpha1.IdentityTypeGoogleApplicationCredentials:
+			switch id.Source { //nolint:exhaustive
+			case xpv1.CredentialsSourceInjectedIdentity:
+				if err := gke.WrapRESTConfig(ctx, rc, nil, gke.DefaultScopes...); err != nil {
+					return nil, errors.Wrap(err, errInjectGoogleCredentials)
+				}
+			default:
+				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, local, id.CommonCredentialSelectors)
+				if err != nil {
+					return nil, errors.Wrap(err, errExtractGoogleCredentials)
+				}
+
+				if err := gke.WrapRESTConfig(ctx, rc, creds, gke.DefaultScopes...); err != nil {
+					return nil, errors.Wrap(err, errInjectGoogleCredentials)
+				}
+			}
+		case v1alpha1.IdentityTypeAzureServicePrincipalCredentials:
+			switch id.Source { //nolint:exhaustive
+			case xpv1.CredentialsSourceInjectedIdentity:
+				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
+					xpv1.CredentialsSourceInjectedIdentity, v1alpha1.IdentityTypeAzureServicePrincipalCredentials)
+			default:
+				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, local, id.CommonCredentialSelectors)
+				if err != nil {
+					return nil, errors.Wrap(err, errExtractAzureCredentials)
+				}
+
+				if err := azure.WrapRESTConfig(ctx, rc, creds); err != nil {
+					return nil, errors.Wrap(err, errInjectAzureCredentials)
+				}
+			}
+		default:
+			return nil, errors.Errorf("unknown identity type: %s", id.Type)
+		}
+	}
+
+	return rc, nil
 }
 
-func restConfigFromAPIConfig(c *api.Config) (*rest.Config, error) {
+func fromAPIConfig(c *api.Config) (*rest.Config, error) {
 	if c.CurrentContext == "" {
 		return nil, errors.New("currentContext not set in kubeconfig")
 	}
@@ -105,72 +172,4 @@ func restConfigFromAPIConfig(c *api.Config) (*rest.Config, error) {
 	config.QPS = 50
 
 	return config, nil
-}
-
-// ClientForProvider returns the client for the given provider config
-func ClientForProvider(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error) { //nolint:gocyclo
-	pc := &v1alpha1.ProviderConfig{}
-	if err := inclusterClient.Get(ctx, types.NamespacedName{Name: providerConfigName}, pc); err != nil {
-		return nil, errors.Wrap(err, errGetPC)
-	}
-
-	var rc *rest.Config
-	var err error
-
-	switch cd := pc.Spec.Credentials; cd.Source { //nolint:exhaustive
-	case xpv1.CredentialsSourceInjectedIdentity:
-		rc, err = rest.InClusterConfig()
-		if err != nil {
-			return nil, errors.Wrap(err, errCreateRestConfig)
-		}
-	default:
-		kc, err := resource.CommonCredentialExtractor(ctx, cd.Source, inclusterClient, cd.CommonCredentialSelectors)
-		if err != nil {
-			return nil, errors.Wrap(err, errGetCreds)
-		}
-
-		if rc, err = NewRESTConfig(kc); err != nil {
-			return nil, errors.Wrap(err, errCreateRestConfig)
-		}
-	}
-
-	if id := pc.Spec.Identity; id != nil {
-		switch id.Type {
-		case v1alpha1.IdentityTypeGoogleApplicationCredentials:
-			switch id.Source { //nolint:exhaustive
-			case xpv1.CredentialsSourceInjectedIdentity:
-				if err := gke.WrapRESTConfig(ctx, rc, nil, gke.DefaultScopes...); err != nil {
-					return nil, errors.Wrap(err, errInjectGoogleCredentials)
-				}
-			default:
-				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, inclusterClient, id.CommonCredentialSelectors)
-				if err != nil {
-					return nil, errors.Wrap(err, errExtractGoogleCredentials)
-				}
-
-				if err := gke.WrapRESTConfig(ctx, rc, creds, gke.DefaultScopes...); err != nil {
-					return nil, errors.Wrap(err, errInjectGoogleCredentials)
-				}
-			}
-		case v1alpha1.IdentityTypeAzureServicePrincipalCredentials:
-			switch id.Source { //nolint:exhaustive
-			case xpv1.CredentialsSourceInjectedIdentity:
-				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
-					xpv1.CredentialsSourceInjectedIdentity, v1alpha1.IdentityTypeAzureServicePrincipalCredentials)
-			default:
-				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, inclusterClient, id.CommonCredentialSelectors)
-				if err != nil {
-					return nil, errors.Wrap(err, errExtractAzureCredentials)
-				}
-
-				if err := azure.WrapRESTConfig(ctx, rc, creds); err != nil {
-					return nil, errors.Wrap(err, errInjectAzureCredentials)
-				}
-			}
-		default:
-			return nil, errors.Errorf("unknown identity type: %s", id.Type)
-		}
-	}
-
-	return NewKubeClient(rc)
 }

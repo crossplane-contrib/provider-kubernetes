@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -380,8 +381,8 @@ func TestReconciler(t *testing.T) {
 			r := &Reconciler{
 				client: tc.args.client,
 				log:    logging.NewNopLogger(),
-				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error) {
-					return tc.args.client, nil
+				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, *rest.Config, error) {
+					return tc.args.client, nil, nil
 				},
 				observedObjectName: func(collection client.Object, matchedObject client.Object) (string, error) {
 					return fmt.Sprintf("%s-%s", collection.GetName(), matchedObject.GetName()), nil

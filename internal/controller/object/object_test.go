@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -238,7 +239,7 @@ func Test_connector_Connect(t *testing.T) {
 
 	type args struct {
 		client            client.Client
-		clientForProvider func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error)
+		clientForProvider client.Client
 		usage             resource.Tracker
 		mg                resource.Managed
 	}
@@ -268,36 +269,24 @@ func Test_connector_Connect(t *testing.T) {
 		},
 		"Success": {
 			args: args{
-				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error) {
-					return &test.MockClient{}, nil
-				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
-				mg:    kubernetesObject(),
+				clientForProvider: &test.MockClient{},
+				usage:             resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				mg:                kubernetesObject(),
 			},
 			want: want{
 				err: nil,
-			},
-		},
-		"ErrorGettingClientForProvider": {
-			args: args{
-				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, error) {
-					return nil, errBoom
-				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
-				mg:    kubernetesObject(),
-			},
-			want: want{
-				err: errors.Wrap(errBoom, errNewKubernetesClient),
 			},
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			c := &connector{
-				logger:              logging.NewNopLogger(),
-				kube:                tc.args.client,
-				clientForProviderFn: tc.args.clientForProvider,
-				usage:               tc.usage,
+				logger: logging.NewNopLogger(),
+				kube:   tc.args.client,
+				clientForProviderFn: func(ctx context.Context, local client.Client, providerConfigName string) (client.Client, *rest.Config, error) {
+					return tc.args.clientForProvider, nil, nil
+				},
+				usage: tc.usage,
 			}
 			_, gotErr := c.Connect(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
