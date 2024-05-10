@@ -18,6 +18,7 @@ package object
 
 import (
 	"context"
+	"io"
 	"strings"
 	"sync"
 
@@ -103,10 +104,10 @@ func (i *resourceInformers) Start(ctx context.Context, h handler.EventHandler, q
 // every reconcile to make resourceInformers aware of the referenced or managed
 // resources of the given Object.
 //
-// Note that this complements garbageCollectResourceInformers which regularly
+// Note that this complements cleanupResourceInformers which regularly
 // garbage collects resource informers that are no longer referenced by
 // any Object.
-func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig string, gvks ...schema.GroupVersionKind) {
+func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig string, gvks ...schema.GroupVersionKind) { // nolint:gocyclo // we need to handle all cases.
 	if rc == nil {
 		rc = i.config
 	}
@@ -122,7 +123,15 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 
 		log := i.log.WithValues("providerConfig", providerConfig, "gvk", gvk.String())
 
-		ca, err := cache.New(rc, cache.Options{})
+		ca, err := cache.New(rc, cache.Options{
+			DefaultWatchErrorHandler: func(r *kcache.Reflector, err error) {
+				if errors.Is(io.EOF, err) {
+					// Watch closed normally.
+					return
+				}
+				log.Debug("Watch error - probably remote cluster api is gone", "error", err)
+			},
+		})
 		if err != nil {
 			log.Debug("failed creating a cache", "error", err)
 			continue
@@ -163,6 +172,9 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 				i.sink(providerConfig, ev)
 			},
 			DeleteFunc: func(obj interface{}) {
+				if final, ok := obj.(kcache.DeletedFinalStateUnknown); ok {
+					obj = final.Obj
+				}
 				ev := runtimeevent.GenericEvent{
 					Object: obj.(client.Object),
 				}
@@ -206,57 +218,26 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 	}
 }
 
-func (i *resourceInformers) StopWatchingResources(ctx context.Context, providerConfig string, gvks ...schema.GroupVersionKind) {
-	i.lock.Lock()
-	defer i.lock.Unlock()
-
-	for _, gvk := range gvks {
-		ca, found := i.resourceCaches[gvkWithConfig{providerConfig: providerConfig, gvk: gvk}]
-		if !found {
-			continue
-		}
-		// Check if there are any other objects referencing this resource GVK.
-		list := v1alpha2.ObjectList{}
-		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{resourceRefGVKsIndex: refKeyProviderGVK(providerConfig, gvk.Kind, gvk.Group, gvk.Version)}); err != nil {
-			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", resourceRefGVKsIndex+"="+refKeyProviderGVK(providerConfig, gvk.Kind, gvk.Group, gvk.Version))
-			continue
-		}
-
-		inUse := false
-		for _, o := range list.Items {
-			// We only care about objects that are not being deleted. Otherwise,
-			// we are getting into deadlocks while stopping the watches during
-			// deletion.
-			if o.GetDeletionTimestamp().IsZero() {
-				inUse = true
-				break
-			}
-		}
-		if inUse {
-			continue
-		}
-
-		ca.cancelFn()
-		i.log.Info("Stopped resource watch", "provider config", providerConfig, "gvk", gvk)
-		delete(i.resourceCaches, gvkWithConfig{providerConfig: providerConfig, gvk: gvk})
-	}
-}
-
-// garbageCollectResourceInformers garbage collects resource informers that are
+// cleanupResourceInformers garbage collects resource informers that are
 // no longer referenced by any Object. Ideally, all resource informers should
 // stopped/cleaned up when the Object is deleted. However, in practice, this
 // is not always the case. This method is a safety net to clean up resource
 // informers that are no longer referenced by any Object.
-func (i *resourceInformers) garbageCollectResourceInformers(ctx context.Context) {
-	i.lock.Lock()
-	defer i.lock.Unlock()
+func (i *resourceInformers) cleanupResourceInformers(ctx context.Context) {
+	// copy map to avoid locking it for the entire duration of the loop
+	i.lock.RLock()
+	resourceCaches := make(map[gvkWithConfig]resourceCache, len(i.resourceCaches))
+	for gc, ca := range i.resourceCaches {
+		resourceCaches[gc] = ca
+	}
+	i.lock.RUnlock()
 
 	// stop old informers
 	i.log.Debug("Running garbage collection for resource informers", "count", len(i.resourceCaches))
-	for gh, ca := range i.resourceCaches {
+	for gc, ca := range resourceCaches {
 		list := v1alpha2.ObjectList{}
-		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{resourceRefGVKsIndex: refKeyProviderGVK(gh.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version)}); err != nil {
-			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", resourceRefGVKsIndex+"="+refKeyProviderGVK(gh.providerConfig, gh.gvk.Kind, gh.gvk.Group, gh.gvk.Version))
+		if err := i.objectsCache.List(ctx, &list, client.MatchingFields{resourceRefGVKsIndex: refKeyProviderGVK(gc.providerConfig, gc.gvk.Kind, gc.gvk.Group, gc.gvk.Version)}); err != nil {
+			i.log.Debug("cannot list objects referencing a certain resource GVK", "error", err, "fieldSelector", resourceRefGVKsIndex+"="+refKeyProviderGVK(gc.providerConfig, gc.gvk.Kind, gc.gvk.Group, gc.gvk.Version))
 			continue
 		}
 
@@ -265,8 +246,10 @@ func (i *resourceInformers) garbageCollectResourceInformers(ctx context.Context)
 		}
 
 		ca.cancelFn()
-		i.log.Info("Stopped resource watch", "provider config", gh.providerConfig, "gvk", gh.gvk)
-		delete(i.resourceCaches, gh)
+		i.log.Info("Stopped resource watch", "provider config", gc.providerConfig, "gvk", gc.gvk)
+		i.lock.Lock()
+		delete(i.resourceCaches, gc)
+		i.lock.Unlock()
 	}
 }
 
