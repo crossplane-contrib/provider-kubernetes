@@ -1,0 +1,40 @@
+---
+apiVersion: kubernetes.crossplane.io/v1alpha2
+kind: Object
+metadata:
+  name: foo
+  annotations:
+    uptest.upbound.io/post-assert-hook: testhooks/validate-watching.sh
+    uptest.upbound.io/timeout: "60"
+spec:
+  # Watch for changes to the Namespace object.
+  # Watching resources is an alpha feature and needs to be enabled with --enable-watches
+  # in the provider to get this configuration working.
+  watch: true
+  references:
+  # Use patchesFrom to patch field from other k8s resource to this object
+  - patchesFrom:
+      apiVersion: v1
+      kind: Secret
+      name: bar
+      namespace: default
+      fieldPath: data.key
+    toFieldPath: data.key-from-bar
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        namespace: default
+      stringData:
+        another-key: another-value
+  providerConfigRef:
+    name: kubernetes-provider
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bar
+  namespace: default
+stringData:
+  key: some-value
