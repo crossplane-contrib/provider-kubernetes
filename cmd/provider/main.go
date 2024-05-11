@@ -66,6 +66,7 @@ func main() {
 
 		enableManagementPolicies = app.Flag("enable-management-policies", "Enable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
 		enableWatches            = app.Flag("enable-watches", "Enable support for watching resources.").Default("false").Envar("ENABLE_WATCHES").Bool()
+		enableServerSideApply    = app.Flag("enable-server-side-apply", "Enable server side apply to sync object manifests to k8s API.").Default("false").Envar("ENABLE_SERVER_SIDE_APPLY").Bool()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
@@ -158,6 +159,11 @@ func main() {
 	if *enableWatches {
 		o.Features.Enable(features.EnableAlphaWatches)
 		log.Info("Alpha feature enabled", "flag", features.EnableAlphaWatches)
+	}
+
+	if *enableServerSideApply {
+		o.Features.Enable(features.EnableAlphaServerSideApply)
+		log.Info("Alpha feature enabled", "flag", features.EnableAlphaServerSideApply)
 	}
 
 	// NOTE(lsviben): We are registering the conversion webhook with v1alpha1

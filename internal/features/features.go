@@ -23,4 +23,6 @@ const (
 	// EnableAlphaWatches enables alpha support for watching referenced and
 	// managed resources.
 	EnableAlphaWatches feature.Flag = "EnableAlphaWatches"
+	// EnableAlphaServerSideApply enables alpha support for Server Side Apply.
+	EnableAlphaServerSideApply feature.Flag = "EnableAlphaServerSideApply"
 )
