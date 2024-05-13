@@ -330,7 +330,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
 
-	if err := c.client.Apply(ctx, obj); err != nil {
+	if err := c.client.Update(ctx, obj); err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(CleanErr(err), errApplyObject)
 	}
 

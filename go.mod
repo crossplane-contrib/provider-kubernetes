@@ -13,6 +13,7 @@ require (
 	go.uber.org/zap v1.26.0
 	golang.org/x/oauth2 v0.16.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
+	gotest.tools v2.2.0+incompatible
 	k8s.io/api v0.29.1
 	k8s.io/apimachinery v0.29.1
 	k8s.io/client-go v0.29.1
