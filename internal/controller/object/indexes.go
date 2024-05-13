@@ -123,8 +123,10 @@ func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx co
 		}
 		// queue those Objects for reconciliation
 		for _, o := range objects.Items {
-			log.Info("Enqueueing Object because referenced resource changed", "name", o.GetName(), "referencedGVK", rGVK.String(), "referencedName", ev.Object.GetName(), "providerConfig", pc)
-			q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: o.GetName()}})
+			if o.Spec.Watch {
+				log.Info("Enqueueing Object because referenced resource changed", "name", o.GetName(), "referencedGVK", rGVK.String(), "referencedName", ev.Object.GetName(), "providerConfig", pc)
+				q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: o.GetName()}})
+			}
 		}
 	}
 }
