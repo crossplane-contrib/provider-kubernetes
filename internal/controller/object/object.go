@@ -37,6 +37,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	applymetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -77,8 +79,11 @@ const (
 	errApplyObject       = "cannot apply object"
 	errDeleteObject      = "cannot delete object"
 
+	errCreateDiscoveryClient = "cannot create discovery client"
+	errCreateSSAExtractor    = "cannot create new unstructured server side apply extractor"
 	errNotKubernetesObject        = "managed resource is not an Object custom resource"
 	errBuildKubeForProviderConfig = "cannot build kube client for provider config"
+
 
 	errGetLastApplied          = "cannot get last applied"
 	errUnmarshalTemplate       = "cannot unmarshal template"
@@ -151,6 +156,18 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		clientBuilder:   kubeclient.NewIdentityAwareBuilder(mgr.GetClient()),
 	}
 
+	if o.Features.Enabled(features.EnableAlphaServerSideApply) {
+		dc, err := discovery.NewDiscoveryClientForConfig(mgr.GetConfig())
+		if err != nil {
+			return errors.Wrap(err, errCreateDiscoveryClient)
+		}
+		applyExtractor, err := applymetav1.NewUnstructuredExtractor(dc)
+		if err != nil {
+			return errors.Wrap(err, errCreateSSAExtractor)
+		}
+		conn.ssaExtractor = applyExtractor
+	}
+
 	cb := ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		WithOptions(o.ForControllerRuntime()).
@@ -209,6 +226,7 @@ type connector struct {
 	usage           resource.Tracker
 	logger          logging.Logger
 	sanitizeSecrets bool
+	ssaExtractor    applymetav1.UnstructuredExtractor
 
 	kindObserver KindObserver
 
@@ -246,6 +264,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		rest:            rc,
 		localClient:     c.kube,
 		sanitizeSecrets: c.sanitizeSecrets,
+		ssaExtractor:    c.ssaExtractor,
 
 		kindObserver: c.kindObserver,
 	}, nil
@@ -258,6 +277,7 @@ type external struct {
 	// localClient is specifically used to connect to local cluster, a.k.a control plane.
 	localClient     client.Client
 	sanitizeSecrets bool
+	ssaExtractor    applymetav1.UnstructuredExtractor
 
 	kindObserver KindObserver
 }
@@ -305,11 +325,17 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, err
 	}
 
-	var last *unstructured.Unstructured
-	if last, err = getLastApplied(cr, observed); err != nil {
+	// observation contains the extracted state of the observed object that
+	// should be compared with the desired state of the object manifest to
+	// decide whether the object is up-to-date or not.
+	// If serverSideApply is enabled, we will extract the state from the
+	// observed object, otherwise we will extract the state from the last
+	// applied annotation.
+	var observation *unstructured.Unstructured
+	if observation, err = c.getObservation(cr, observed); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetLastApplied)
 	}
-	return c.handleLastApplied(ctx, cr, last, desired)
+	return c.handleObservation(ctx, cr, observation, desired)
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
@@ -325,12 +351,19 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, err
 	}
 
+	if c.ssaExtractor != nil {
+		if err = c.client.Patch(ctx, obj, client.Apply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(cr.Name))); err != nil {
+			return managed.ExternalCreation{}, errors.Wrap(CleanErr(err), errCreateObject)
+		}
+		return managed.ExternalCreation{}, c.setObserved(cr, obj)
+	}
+
 	meta.AddAnnotations(obj, map[string]string{
 		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
 	})
 
 	if err := c.client.Create(ctx, obj); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateObject)
+		return managed.ExternalCreation{}, errors.Wrap(CleanErr(err), errCreateObject)
 	}
 
 	return managed.ExternalCreation{}, c.setObserved(cr, obj)
@@ -347,6 +380,13 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	obj, err := getDesired(cr)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
+	}
+
+	if c.ssaExtractor != nil {
+		if err = c.client.Patch(ctx, obj, client.Apply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(cr.Name))); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(CleanErr(err), errApplyObject)
+		}
+		return managed.ExternalUpdate{}, c.setObserved(cr, obj)
 	}
 
 	meta.AddAnnotations(obj, map[string]string{
@@ -376,6 +416,10 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	return errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, obj)), errDeleteObject)
 }
 
+func ssaFieldOwner(name string) string {
+	return fmt.Sprintf("provider-kubernetes/%s", name)
+}
+
 func getDesired(obj *v1alpha2.Object) (*unstructured.Unstructured, error) {
 	desired := &unstructured.Unstructured{}
 	if err := json.Unmarshal(obj.Spec.ForProvider.Manifest.Raw, desired); err != nil {
@@ -389,21 +433,21 @@ func getDesired(obj *v1alpha2.Object) (*unstructured.Unstructured, error) {
 	return desired, nil
 }
 
-func getLastApplied(obj *v1alpha2.Object, observed *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+func (c *external) getObservation(obj *v1alpha2.Object, observed *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	if c.ssaExtractor != nil {
+		return c.ssaExtractor.Extract(observed, ssaFieldOwner(obj.Name))
+	}
 	lastApplied, ok := observed.GetAnnotations()[v1.LastAppliedConfigAnnotation]
 	if !ok {
 		return nil, nil
 	}
-
 	last := &unstructured.Unstructured{}
 	if err := json.Unmarshal([]byte(lastApplied), last); err != nil {
 		return nil, errors.Wrap(err, errUnmarshalTemplate)
 	}
-
 	if last.GetName() == "" {
 		last.SetName(obj.Name)
 	}
-
 	return last, nil
 }
 
@@ -441,7 +485,7 @@ func (c *external) updateConditionFromObserved(obj *v1alpha2.Object, observed *u
 	case v1alpha2.ReadinessPolicyDeriveFromCelQuery:
 		ready, err = c.checkDeriveFromCelQuery(obj, observed)
 	case v1alpha2.ReadinessPolicySuccessfulCreate, "":
-		// do nothing, will be handled by c.handleLastApplied method
+		// do nothing, will be handled by c.handleObservation method
 		// "" should never happen, but just in case we will treat it as SuccessfulCreate for backward compatibility
 		return nil
 	default:
@@ -632,7 +676,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 	return nil
 }
 
-func (c *external) handleLastApplied(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
+func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	isUpToDate := false
 
 	if !sets.New[xpv1.ManagementAction](obj.GetManagementPolicies()...).
