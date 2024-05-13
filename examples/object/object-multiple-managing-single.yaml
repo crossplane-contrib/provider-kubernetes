@@ -29,6 +29,9 @@ kind: Object
 metadata:
   name: sample-service-labeler
 spec:
+  # Note: This resource will only patch/update the manifest below.
+  # It will not delete or create the resource.
+  # As a limitation, it will not clean up the changes it made during its deletion.
   managementPolicies: ["Observe", "Update"]
   forProvider:
     manifest:
