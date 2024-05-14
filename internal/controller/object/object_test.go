@@ -816,9 +816,9 @@ func Test_helmExternal_Update(t *testing.T) {
 			args: args{
 				mg: kubernetesObject(),
 				client: resource.ClientApplicator{
-					Applicator: resource.ApplyFn(func(context.Context, client.Object, ...resource.ApplyOption) error {
-						return errBoom
-					}),
+					Client: &test.MockClient{
+						MockUpdate: test.NewMockUpdateFn(errBoom),
+					},
 				},
 			},
 			want: want{
@@ -829,16 +829,18 @@ func Test_helmExternal_Update(t *testing.T) {
 			args: args{
 				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.ForProvider.Manifest.Raw = []byte(`{
-				    "apiVersion": "v1",
-				    "kind": "Namespace" }`)
+					    "apiVersion": "v1",
+					    "kind": "Namespace" }`)
 				}),
 				client: resource.ClientApplicator{
-					Applicator: resource.ApplyFn(func(ctx context.Context, obj client.Object, op ...resource.ApplyOption) error {
-						if obj.GetName() != testObjectName {
-							t.Errorf("Name should default to object name when not provider in manifest")
-						}
-						return nil
-					}),
+					Client: &test.MockClient{
+						MockUpdate: test.NewMockUpdateFn(nil, func(obj client.Object) error {
+							if obj.GetName() != testObjectName {
+								t.Errorf("Name should default to object name when not provider in manifest")
+							}
+							return nil
+						}),
+					},
 				},
 			},
 			want: want{
@@ -849,9 +851,15 @@ func Test_helmExternal_Update(t *testing.T) {
 			args: args{
 				mg: kubernetesObject(),
 				client: resource.ClientApplicator{
-					Applicator: resource.ApplyFn(func(context.Context, client.Object, ...resource.ApplyOption) error {
-						return nil
-					}),
+					Client: &test.MockClient{
+						MockUpdate: test.NewMockUpdateFn(nil, func(obj client.Object) error {
+							_, ok := obj.GetAnnotations()[corev1.LastAppliedConfigAnnotation]
+							if !ok {
+								t.Errorf("Last applied annotation not set with create")
+							}
+							return nil
+						}),
+					},
 				},
 			},
 			want: want{
