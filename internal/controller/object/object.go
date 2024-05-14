@@ -335,6 +335,28 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	if observation, err = c.getObservation(cr, observed); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetLastApplied)
 	}
+
+	if c.ssaExtractor != nil {
+		// Note(turkenh): This dry run call is mostly a workaround for the
+		// following issue: https://github.com/kubernetes/kubernetes/issues/115563
+		// In an ideal world, we should be able to compare the extracted observation
+		// with what we will apply as desired state, however, due to the poor
+		// handling of defaults in the server-side apply, we cannot do that,
+		// since we always see a diff between the extracted state and the desired
+		// state in that case. This dry run call returns what we will see on
+		// the object including the defaults at the cost of one extra call to
+		// the apiserver, so that we can compare it with the extracted state to
+		// decide whether the object is up-to-date or not.
+		desiredObj := desired.DeepCopy()
+		if err := c.client.Patch(ctx, desiredObj, client.Apply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(cr.Name)), client.DryRunAll); err != nil {
+			return managed.ExternalObservation{}, errors.Wrap(CleanErr(err), "cannot dry run SSA")
+		}
+		desired, err = c.ssaExtractor.Extract(desiredObj, ssaFieldOwner(cr.Name))
+		if err != nil {
+			return managed.ExternalObservation{}, errors.Wrap(err, "cannot extract SSA")
+		}
+	}
+
 	return c.handleObservation(ctx, cr, observation, desired)
 }
 
