@@ -172,6 +172,7 @@ spec:
                     - AzureServicePrincipalCredentials
                     - AzureWorkloadIdentityCredentials
                     - UpboundTokens
+                    - GardenerShootAdminCredentials
                     type: string
                 required:
                 - source
