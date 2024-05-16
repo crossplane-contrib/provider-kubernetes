@@ -4,6 +4,13 @@ apiVersion: kubernetes.crossplane.io/v1alpha2
 kind: Object
 metadata:
   name: sample-service-owner
+  annotations:
+    uptest.upbound.io/pre-assert-hook: testhooks/enable-ssa.sh
+    uptest.upbound.io/post-assert-hook: testhooks/validate-ssa.sh
+    uptest.upbound.io/timeout: "60"
+    # Note(turkenh): Import restarts Crossplane pod losing the cached provider package
+    # hence preventing changes being redeployed with modified deployment runtime config.
+    uptest.upbound.io/disable-import: "true"
 spec:
   forProvider:
     manifest:
@@ -13,7 +20,7 @@ spec:
         name: sample-service
         namespace: default
         labels:
-          example: "true"
+          some-key: some-value
       spec:
         selector:
           app.kubernetes.io/name: MyApp
@@ -21,26 +28,5 @@ spec:
           - protocol: TCP
             port: 80
             targetPort: 9376
-  providerConfigRef:
-    name: kubernetes-provider
----
-apiVersion: kubernetes.crossplane.io/v1alpha2
-kind: Object
-metadata:
-  name: sample-service-labeler
-spec:
-  # Note: This resource will only patch/update the manifest below.
-  # It will not delete or create the resource.
-  # As a limitation, it will not clean up the changes it made during its deletion.
-  managementPolicies: ["Observe", "Update"]
-  forProvider:
-    manifest:
-      apiVersion: v1
-      kind: Service
-      metadata:
-        name: sample-service
-        namespace: default
-        labels:
-          another: label
   providerConfigRef:
     name: kubernetes-provider

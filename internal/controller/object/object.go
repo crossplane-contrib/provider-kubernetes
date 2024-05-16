@@ -123,7 +123,7 @@ type KindObserver interface {
 }
 
 // Setup adds a controller that reconciles Object managed resources.
-func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitterPercentage uint) error {
+func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitterPercentage uint) error { // nolint:gocyclo // Too many branches due to alpha features, hopefully we can clean them up after we graduate them.
 	name := managed.ControllerName(v1alpha2.ObjectGroupKind)
 	l := o.Logger.WithValues("controller", name)
 
@@ -282,7 +282,7 @@ type external struct {
 	kindObserver KindObserver
 }
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
+func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) { // nolint:gocyclo, mostly branches due to feature flags, hopefully will be refactored once they are promoted
 	cr, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return managed.ExternalObservation{}, errors.New(errNotKubernetesObject)
@@ -339,14 +339,15 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	if c.ssaExtractor != nil {
 		// Note(turkenh): This dry run call is mostly a workaround for the
 		// following issue: https://github.com/kubernetes/kubernetes/issues/115563
-		// In an ideal world, we should be able to compare the extracted observation
-		// with what we will apply as desired state, however, due to the poor
-		// handling of defaults in the server-side apply, we cannot do that,
-		// since we always see a diff between the extracted state and the desired
-		// state in that case. This dry run call returns what we will see on
-		// the object including the defaults at the cost of one extra call to
-		// the apiserver, so that we can compare it with the extracted state to
-		// decide whether the object is up-to-date or not.
+		// In an ideal world, we should be able to compare the extracted
+		// observation, which only contains the fields of the object that are
+		// owned by the SSA field manager, with what we will apply as desired
+		// state. However, due to the poor handling of defaults with the
+		// server-side apply, we cannot do that, since we always see a diff
+		// due to defaulted values. This dry run call returns what we will see
+		// on the object including the defaulting at the cost of one extra call
+		// to the apiserver, so that we can compare it with the extracted state
+		// to decide whether the object is up-to-date or not.
 		desiredObj := desired.DeepCopy()
 		if err := c.client.Patch(ctx, desiredObj, client.Apply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(cr.Name)), client.DryRunAll); err != nil {
 			return managed.ExternalObservation{}, errors.Wrap(CleanErr(err), "cannot dry run SSA")

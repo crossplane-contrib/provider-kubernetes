@@ -1,0 +1,28 @@
+# Note: This example is for the alpha feature of server side apply.
+# It requires the provider to be started with the --enable-server-side-apply flag.
+apiVersion: kubernetes.crossplane.io/v1alpha2
+kind: Object
+metadata:
+  name: sample-service-labeler
+  annotations:
+    # Note(turkenh): Import restarts Crossplane pod losing the cached provider package
+    # hence preventing changes being redeployed with modified deployment runtime config.
+    uptest.upbound.io/disable-import: "true"
+spec:
+  # Note: This resource will only patch/update the manifest below.
+  # It will not delete or create the resource.
+  # As a limitation, it will not clean up the changes it made during its deletion.
+  # This requires the Server Side Apply feature to be enabled in the provider
+  # with the --enable-server-side-apply flag.
+  managementPolicies: ["Observe", "Update"]
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: sample-service
+        namespace: default
+        labels:
+          another-key: another-value
+  providerConfigRef:
+    name: kubernetes-provider

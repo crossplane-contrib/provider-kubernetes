@@ -4,6 +4,9 @@ metadata:
   name: sample-namespace
   annotations:
     uptest.upbound.io/timeout: "60"
+    # Note(turkenh): Import restarts Crossplane pod losing the cached provider package
+    # hence preventing changes being redeployed with modified deployment runtime config.
+    uptest.upbound.io/disable-import: "true"
 spec:
   # Watch for changes to the Namespace object.
   # Watching resources is an alpha feature and needs to be enabled with --enable-watches
