@@ -66,9 +66,9 @@ func IndexByProviderGVK(o client.Object) []string {
 	}
 
 	// Index the desired object.
-	// We don't expect errors here, as the getDesired function is already called
+	// We don't expect errors here, as the parseManifest function is already called
 	// in the reconciler and the desired object already validated.
-	d, _ := getDesired(obj)
+	d, _ := parseManifest(obj)
 	keys = append(keys, refKeyProviderGVK(obj.Spec.ProviderConfigReference.Name, d.GetKind(), d.GroupVersionKind().Group, d.GroupVersionKind().Version)) // unification is done by the informer.
 
 	// unification is done by the informer.
@@ -98,9 +98,9 @@ func IndexByProviderNamespacedNameGVK(o client.Object) []string {
 	}
 
 	// Index the desired object.
-	// We don't expect errors here, as the getDesired function is already called
+	// We don't expect errors here, as the parseManifest function is already called
 	// in the reconciler and the desired object already validated.
-	d, _ := getDesired(obj)
+	d, _ := parseManifest(obj)
 	keys = append(keys, refKeyProviderNamespacedNameGVK(obj.Spec.ProviderConfigReference.Name, d.GetNamespace(), d.GetName(), d.GetKind(), d.GetAPIVersion())) // unification is done by the informer.
 
 	return keys
