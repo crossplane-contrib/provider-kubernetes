@@ -124,6 +124,14 @@ type ObjectSpec struct {
 	ManagementPolicy `json:"managementPolicy,omitempty"`
 	References       []Reference `json:"references,omitempty"`
 	Readiness        Readiness   `json:"readiness,omitempty"`
+	// Watch enables watching the referenced or managed kubernetes resources.
+	//
+	// THIS IS AN ALPHA FIELD. Do not use it in production. It is not honored
+	// unless "watches" feature gate is enabled, and may be changed or removed
+	// without notice.
+	// +optional
+	// +kubebuilder:default=false
+	Watch bool `json:"watch,omitempty"`
 }
 
 // ReadinessPolicy defines how the Object's readiness condition should be computed.

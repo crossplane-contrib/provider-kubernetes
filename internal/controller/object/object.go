@@ -29,12 +29,18 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	runtimeevent "sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
@@ -46,30 +52,29 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
+	"github.com/crossplane/crossplane-runtime/pkg/statemetrics"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
-	"github.com/crossplane-contrib/provider-kubernetes/internal/clients"
-	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/azure"
-	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/gke"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/kube"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
+)
+
+type key int
+
+const (
+	keyProviderConfigName key = iota
 )
 
 const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
-	errGetPC        = "cannot get ProviderConfig"
-	errGetCreds     = "cannot get credentials"
 	errGetObject    = "cannot get object"
 	errCreateObject = "cannot create object"
 	errApplyObject  = "cannot apply object"
 	errDeleteObject = "cannot delete object"
 
-	errNotKubernetesObject              = "managed resource is not an Object custom resource"
-	errNewKubernetesClient              = "cannot create new Kubernetes client"
-	errFailedToCreateRestConfig         = "cannot create new REST config using provider secret"
-	errFailedToExtractGoogleCredentials = "cannot extract Google Application Credentials"
-	errFailedToInjectGoogleCredentials  = "cannot wrap REST client with Google Application Credentials"
-	errFailedToExtractAzureCredentials  = "failed to extract Azure Application Credentials"
-	errFailedToInjectAzureCredentials   = "failed to wrap REST client with Azure Application Credentials"
+	errNotKubernetesObject = "managed resource is not an Object custom resource"
+	errNewKubernetesClient = "cannot create new Kubernetes client"
 
 	errGetLastApplied          = "cannot get last applied"
 	errUnmarshalTemplate       = "cannot unmarshal template"
@@ -92,26 +97,22 @@ const (
 	errSanitizeSecretData   = "cannot sanitize secret data"
 )
 
+// KindObserver tracks kinds of referenced composed resources in order to start
+// watches for them for realtime events.
+type KindObserver interface {
+	// WatchResources starts a watch of the given kinds to trigger reconciles
+	// when a referenced or managed objects of those kinds changes.
+	WatchResources(rc *rest.Config, providerConfig string, gvks ...schema.GroupVersionKind)
+}
+
 // Setup adds a controller that reconciles Object managed resources.
 func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitter time.Duration) error {
 	name := managed.ControllerName(v1alpha2.ObjectGroupKind)
+	l := o.Logger.WithValues("controller", name)
 
 	cps := []managed.ConnectionPublisher{managed.NewAPISecretPublisher(mgr.GetClient(), mgr.GetScheme())}
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithExternalConnecter(&connector{
-			logger:           o.Logger,
-			sanitizeSecrets:  sanitizeSecrets,
-			kube:             mgr.GetClient(),
-			usage:            resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
-			kcfgExtractorFn:  resource.CommonCredentialExtractor,
-			gcpExtractorFn:   resource.CommonCredentialExtractor,
-			gcpInjectorFn:    gke.WrapRESTConfig,
-			azureExtractorFn: resource.CommonCredentialExtractor,
-			azureInjectorFn:  azure.WrapRESTConfig,
-			newRESTConfigFn:  clients.NewRESTConfig,
-			newKubeClientFn:  clients.NewKubeClient,
-		}),
 		managed.WithFinalizer(&objFinalizer{client: mgr.GetClient()}),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithPollIntervalHook(func(mg resource.Managed, pollInterval time.Duration) time.Duration {
@@ -123,25 +124,71 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 			// https://github.com/crossplane/crossplane-runtime/blob/7fcb8c5cad6fc4abb6649813b92ab92e1832d368/pkg/reconciler/managed/reconciler.go#L573
 			return pollInterval + time.Duration((rand.Float64()-0.5)*2*float64(pollJitter)) //nolint G404 // No need for secure randomness
 		}),
-		managed.WithLogger(o.Logger.WithValues("controller", name)),
+		managed.WithLogger(l),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
 		managed.WithConnectionPublishers(cps...),
+		managed.WithMetricRecorder(o.MetricOptions.MRMetrics),
 	}
+
+	conn := &connector{
+		logger:              o.Logger,
+		sanitizeSecrets:     sanitizeSecrets,
+		kube:                mgr.GetClient(),
+		usage:               resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
+		clientForProviderFn: kube.ClientForProvider,
+	}
+
+	cb := ctrl.NewControllerManagedBy(mgr).
+		Named(name).
+		WithOptions(o.ForControllerRuntime()).
+		For(&v1alpha2.Object{})
+
+	if o.Features.Enabled(features.EnableAlphaWatches) {
+		ca := mgr.GetCache()
+		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, resourceRefGVKsIndex, IndexByProviderGVK); err != nil {
+			return errors.Wrap(err, "cannot add index for object reference GVKs")
+		}
+		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, resourceRefsIndex, IndexByProviderNamespacedNameGVK); err != nil {
+			return errors.Wrap(err, "cannot add index for object references")
+		}
+
+		i := resourceInformers{
+			log:    l,
+			config: mgr.GetConfig(),
+
+			objectsCache:   ca,
+			resourceCaches: make(map[gvkWithConfig]resourceCache),
+		}
+		conn.kindObserver = &i
+
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			wait.UntilWithContext(ctx, i.cleanupResourceInformers, time.Minute)
+			return nil
+		})); err != nil {
+			return errors.Wrap(err, "cannot add cleanup referenced resource informers runnable")
+		}
+
+		cb = cb.WatchesRawSource(&i, handler.Funcs{
+			GenericFunc: func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.RateLimitingInterface) {
+				enqueueObjectsForReferences(ca, l)(ctx, ev, q)
+			},
+		})
+	}
+	reconcilerOptions = append(reconcilerOptions, managed.WithExternalConnecter(conn))
 
 	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
 		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
 	}
 
-	r := managed.NewReconciler(mgr,
+	if err := mgr.Add(statemetrics.NewMRStateRecorder(
+		mgr.GetClient(), o.Logger, o.MetricOptions.MRStateMetrics, &v1alpha2.ObjectList{}, o.MetricOptions.PollStateMetricInterval)); err != nil {
+		return err
+	}
+
+	return cb.Complete(ratelimiter.NewReconciler(name, managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha2.ObjectGroupVersionKind),
 		reconcilerOptions...,
-	)
-
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(name).
-		WithOptions(o.ForControllerRuntime()).
-		For(&v1alpha2.Object{}).
-		Complete(ratelimiter.NewReconciler(name, r, o.GlobalRateLimiter))
+	), o.GlobalRateLimiter))
 }
 
 type connector struct {
@@ -150,13 +197,9 @@ type connector struct {
 	logger          logging.Logger
 	sanitizeSecrets bool
 
-	kcfgExtractorFn  func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
-	gcpExtractorFn   func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
-	gcpInjectorFn    func(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error
-	azureExtractorFn func(ctx context.Context, src xpv1.CredentialsSource, c client.Client, ccs xpv1.CommonCredentialSelectors) ([]byte, error)
-	azureInjectorFn  func(ctx context.Context, rc *rest.Config, credentials []byte, identityType apisv1alpha1.IdentityType, scopes ...string) error
-	newRESTConfigFn  func(kubeconfig []byte) (*rest.Config, error)
-	newKubeClientFn  func(config *rest.Config) (client.Client, error)
+	kindObserver KindObserver
+
+	clientForProviderFn func(ctx context.Context, local client.Client, providerConfigName string) (client.Client, *rest.Config, error)
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) { //nolint:gocyclo
@@ -172,70 +215,8 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
-	pc := &apisv1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: cr.GetProviderConfigReference().Name}, pc); err != nil {
-		return nil, errors.Wrap(err, errGetPC)
-	}
+	k, rc, err := c.clientForProviderFn(ctx, c.kube, cr.GetProviderConfigReference().Name)
 
-	var rc *rest.Config
-	var err error
-
-	switch cd := pc.Spec.Credentials; cd.Source { //nolint:exhaustive
-	case xpv1.CredentialsSourceInjectedIdentity:
-		rc, err = rest.InClusterConfig()
-		if err != nil {
-			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
-		}
-	default:
-		kc, err := c.kcfgExtractorFn(ctx, cd.Source, c.kube, cd.CommonCredentialSelectors)
-		if err != nil {
-			return nil, errors.Wrap(err, errGetCreds)
-		}
-
-		if rc, err = c.newRESTConfigFn(kc); err != nil {
-			return nil, errors.Wrap(err, errFailedToCreateRestConfig)
-		}
-	}
-
-	if id := pc.Spec.Identity; id != nil {
-		switch id.Type {
-		case apisv1alpha1.IdentityTypeGoogleApplicationCredentials:
-			switch id.Source { //nolint:exhaustive
-			case xpv1.CredentialsSourceInjectedIdentity:
-				if err := c.gcpInjectorFn(ctx, rc, nil, gke.DefaultScopes...); err != nil {
-					return nil, errors.Wrap(err, errFailedToInjectGoogleCredentials)
-				}
-			default:
-				creds, err := c.gcpExtractorFn(ctx, id.Source, c.kube, id.CommonCredentialSelectors)
-				if err != nil {
-					return nil, errors.Wrap(err, errFailedToExtractGoogleCredentials)
-				}
-
-				if err := c.gcpInjectorFn(ctx, rc, creds, gke.DefaultScopes...); err != nil {
-					return nil, errors.Wrap(err, errFailedToInjectGoogleCredentials)
-				}
-			}
-		case apisv1alpha1.IdentityTypeAzureServicePrincipalCredentials, apisv1alpha1.IdentityTypeAzureWorkloadIdentityCredentials:
-			switch id.Source { //nolint:exhaustive
-			case xpv1.CredentialsSourceInjectedIdentity:
-				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
-					xpv1.CredentialsSourceInjectedIdentity, apisv1alpha1.IdentityTypeAzureServicePrincipalCredentials)
-			default:
-				creds, err := c.azureExtractorFn(ctx, id.Source, c.kube, id.CommonCredentialSelectors)
-				if err != nil {
-					return nil, errors.Wrap(err, errFailedToExtractAzureCredentials)
-				}
-
-				if err := c.azureInjectorFn(ctx, rc, creds, id.Type); err != nil {
-					return nil, errors.Wrap(err, errFailedToInjectAzureCredentials)
-				}
-			}
-		default:
-			return nil, errors.Errorf("unknown identity type: %s", id.Type)
-		}
-	}
-
-	k, err := c.newKubeClientFn(rc)
 	if err != nil {
 		return nil, errors.Wrap(err, errNewKubernetesClient)
 	}
@@ -246,17 +227,23 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 			Client:     k,
 			Applicator: resource.NewAPIPatchingApplicator(k),
 		},
+		rest:            rc,
 		localClient:     c.kube,
 		sanitizeSecrets: c.sanitizeSecrets,
+
+		kindObserver: c.kindObserver,
 	}, nil
 }
 
 type external struct {
 	logger logging.Logger
 	client resource.ClientApplicator
-	// localClient is specifically used to connect to local cluster
+	rest   *rest.Config
+	// localClient is specifically used to connect to local cluster, a.k.a control plane.
 	localClient     client.Client
 	sanitizeSecrets bool
+
+	kindObserver KindObserver
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -267,13 +254,20 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	c.logger.Debug("Observing", "resource", cr)
 
-	if err := c.resolveReferencies(ctx, cr); err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errResolveResourceReferences)
+	if !meta.WasDeleted(cr) {
+		// If the object is not being deleted, we need to resolve references
+		if err := c.resolveReferencies(ctx, cr); err != nil {
+			return managed.ExternalObservation{}, errors.Wrap(err, errResolveResourceReferences)
+		}
 	}
 
 	desired, err := getDesired(cr)
 	if err != nil {
 		return managed.ExternalObservation{}, err
+	}
+
+	if c.shouldWatch(cr) {
+		c.kindObserver.WatchResources(c.rest, cr.Spec.ProviderConfigReference.Name, desired.GroupVersionKind())
 	}
 
 	observed := desired.DeepCopy()
@@ -375,6 +369,7 @@ func getDesired(obj *v1alpha2.Object) (*unstructured.Unstructured, error) {
 	if desired.GetName() == "" {
 		desired.SetName(obj.Name)
 	}
+
 	return desired, nil
 }
 
@@ -491,6 +486,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 	c.logger.Debug("Resolving referencies.")
 
 	// Loop through references to resolve each referenced resource
+	gvks := make([]schema.GroupVersionKind, 0, len(obj.Spec.References))
 	for _, ref := range obj.Spec.References {
 		if ref.DependsOn == nil && ref.PatchesFrom == nil {
 			continue
@@ -516,6 +512,20 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 				return errors.Wrap(err, errPatchFromReferencedResource)
 			}
 		}
+
+		g, v := parseAPIVersion(refAPIVersion)
+		gvks = append(gvks, schema.GroupVersionKind{
+			Group:   g,
+			Version: v,
+			Kind:    refKind,
+		})
+	}
+
+	if c.shouldWatch(obj) {
+		// Referenced resources always live on the control plane (i.e. local cluster),
+		// so we don't pass an extra rest config (defaulting local rest config)
+		// or provider config with the watch call.
+		c.kindObserver.WatchResources(nil, "", gvks...)
 	}
 
 	return nil
@@ -690,6 +700,10 @@ func connectionDetails(ctx context.Context, kube client.Client, connDetails []v1
 	}
 
 	return mcd, nil
+}
+
+func (c *external) shouldWatch(cr *v1alpha2.Object) bool {
+	return c.kindObserver != nil && cr.Spec.Watch
 }
 
 func unstructuredFromObjectRef(r v1.ObjectReference) unstructured.Unstructured {

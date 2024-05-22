@@ -25,6 +25,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/config"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/object"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/observedobjectcollection"
 )
 
 // Setup creates all Template controllers with the supplied logger and adds them to
@@ -34,6 +35,9 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		return err
 	}
 	if err := object.Setup(mgr, o, sanitizeSecrets, pollJitter); err != nil {
+		return err
+	}
+	if err := observedobjectcollection.Setup(mgr, o, pollJitter); err != nil {
 		return err
 	}
 	return nil
