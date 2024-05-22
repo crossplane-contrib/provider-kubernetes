@@ -53,12 +53,14 @@ const (
 	IdentityTypeAzureServicePrincipalCredentials = "AzureServicePrincipalCredentials"
 
 	IdentityTypeAzureWorkloadIdentityCredentials = "AzureWorkloadIdentityCredentials"
+
+	IdentityTypeUpboundToken = "UpboundToken"
 )
 
 // Identity used to authenticate.
 type Identity struct {
 	// Type of identity.
-	// +kubebuilder:validation:Enum=GoogleApplicationCredentials;AzureServicePrincipalCredentials;AzureWorkloadIdentityCredentials
+	// +kubebuilder:validation:Enum=GoogleApplicationCredentials;AzureServicePrincipalCredentials;AzureWorkloadIdentityCredentials;UpboundToken
 	Type IdentityType `json:"type"`
 
 	ProviderCredentials `json:",inline"`

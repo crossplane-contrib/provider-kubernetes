@@ -171,6 +171,7 @@ spec:
                     - GoogleApplicationCredentials
                     - AzureServicePrincipalCredentials
                     - AzureWorkloadIdentityCredentials
+                    - UpboundToken
                     type: string
                 required:
                 - source

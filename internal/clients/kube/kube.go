@@ -29,16 +29,19 @@ import (
 	"github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/azure"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/gke"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/upbound"
 )
 
 const (
-	errGetPC                    = "cannot get ProviderConfig"
-	errGetCreds                 = "cannot get credentials"
-	errCreateRestConfig         = "cannot create new REST config using provider secret"
-	errExtractGoogleCredentials = "cannot extract Google Application Credentials"
-	errInjectGoogleCredentials  = "cannot wrap REST client with Google Application Credentials"
-	errExtractAzureCredentials  = "failed to extract Azure Application Credentials"
-	errInjectAzureCredentials   = "failed to wrap REST client with Azure Application Credentials"
+	errGetPC                     = "cannot get ProviderConfig"
+	errGetCreds                  = "cannot get credentials"
+	errCreateRestConfig          = "cannot create new REST config using provider secret"
+	errExtractGoogleCredentials  = "cannot extract Google Application Credentials"
+	errInjectGoogleCredentials   = "cannot wrap REST client with Google Application Credentials"
+	errExtractAzureCredentials   = "failed to extract Azure Application Credentials"
+	errInjectAzureCredentials    = "failed to wrap REST client with Azure Application Credentials"
+	errExtractUpboundCredentials = "failed to extract Upbound token"
+	errInjectUpboundCredentials  = "failed to wrap REST client with Upbound token"
 )
 
 // ClientForProvider returns the client and *rest.config for the given provider
@@ -118,6 +121,21 @@ func configForProvider(ctx context.Context, local client.Client, providerConfigN
 
 				if err := azure.WrapRESTConfig(ctx, rc, creds, id.Type); err != nil {
 					return nil, errors.Wrap(err, errInjectAzureCredentials)
+				}
+			}
+		case v1alpha1.IdentityTypeUpboundToken:
+			switch id.Source { //nolint:exhaustive
+			case xpv1.CredentialsSourceInjectedIdentity:
+				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
+					xpv1.CredentialsSourceInjectedIdentity, v1alpha1.IdentityTypeUpboundToken)
+			default:
+				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, local, id.CommonCredentialSelectors)
+				if err != nil {
+					return nil, errors.Wrap(err, errExtractUpboundCredentials)
+				}
+
+				if err := upbound.WrapRESTConfig(ctx, rc, creds); err != nil {
+					return nil, errors.Wrap(err, errInjectUpboundCredentials)
 				}
 			}
 		default:
