@@ -105,7 +105,7 @@ func configForProvider(ctx context.Context, local client.Client, providerConfigN
 					return nil, errors.Wrap(err, errInjectGoogleCredentials)
 				}
 			}
-		case v1alpha1.IdentityTypeAzureServicePrincipalCredentials:
+		case v1alpha1.IdentityTypeAzureServicePrincipalCredentials, v1alpha1.IdentityTypeAzureWorkloadIdentityCredentials:
 			switch id.Source { //nolint:exhaustive
 			case xpv1.CredentialsSourceInjectedIdentity:
 				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
@@ -116,7 +116,7 @@ func configForProvider(ctx context.Context, local client.Client, providerConfigN
 					return nil, errors.Wrap(err, errExtractAzureCredentials)
 				}
 
-				if err := azure.WrapRESTConfig(ctx, rc, creds); err != nil {
+				if err := azure.WrapRESTConfig(ctx, rc, creds, id.Type); err != nil {
 					return nil, errors.Wrap(err, errInjectAzureCredentials)
 				}
 			}

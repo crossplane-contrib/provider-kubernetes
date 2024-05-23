@@ -170,6 +170,7 @@ spec:
                     enum:
                     - GoogleApplicationCredentials
                     - AzureServicePrincipalCredentials
+                    - AzureWorkloadIdentityCredentials
                     type: string
                 required:
                 - source
