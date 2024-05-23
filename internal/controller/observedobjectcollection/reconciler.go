@@ -259,7 +259,7 @@ func observedObjectPatch(name string, matchedObject unstructured.Unstructured, c
 			},
 			ForProvider: v1alpha2.ObjectParameters{
 				Manifest: runtime.RawExtension{
-					Raw: []byte(manifest), // here the manifest is rendered and if a secret it will contain sensitive data ?
+					Raw: []byte(manifest),
 				},
 			},
 		},

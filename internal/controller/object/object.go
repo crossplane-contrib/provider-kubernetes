@@ -533,7 +533,7 @@ func (c *external) resolveReferencesOnObserverLookup(ctx context.Context, obj *v
 			continue
 		}
 
-		// skip of secret type to not leak in to MR. secret lookup is done in Create/Update/Delete functions
+		// skip if kind is secret to not leak in to MR. secret lookup is done in Create/Update/Delete functions
 		// applied by resolveReferencesSecret from the functions.
 		if ref.PatchesFrom != nil && ref.PatchesFrom.DependsOn.Kind == secretKind {
 			continue
