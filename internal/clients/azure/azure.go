@@ -27,7 +27,7 @@ const (
 
 // WrapRESTConfig configures the supplied REST config to use OAuth2 bearer
 // tokens fetched using the supplied Azure Credentials.
-func WrapRESTConfig(_ context.Context, rc *rest.Config, credentials []byte, identityType apisv1alpha1.IdentityType, _ ...string) error {
+func WrapRESTConfig(_ context.Context, rc *rest.Config, credentials []byte, identityType apisv1alpha1.IdentityType, _ ...string) error { // nolint:gocyclo // todo: refactor
 	m := map[string]string{}
 	if err := json.Unmarshal(credentials, &m); err != nil {
 		return err
