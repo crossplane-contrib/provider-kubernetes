@@ -2,7 +2,6 @@ package upbound
 
 import (
 	"context"
-	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/token"
 	"net/http"
 	"time"
 
@@ -11,6 +10,8 @@ import (
 	"github.com/upbound/up-sdk-go/service/auth"
 	"golang.org/x/oauth2"
 	"k8s.io/client-go/rest"
+
+	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/token"
 )
 
 const (

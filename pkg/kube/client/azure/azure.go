@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/pflag"
 	"k8s.io/client-go/rest"
 
-	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
+	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )
 
 // Credentials Secret content is a json whose keys are below.
@@ -46,7 +46,7 @@ func kubeloginTokenOptionsFromRESTConfig(rc *rest.Config) (*token.Options, error
 
 // WrapRESTConfig configures the supplied REST config to use OAuth2 bearer
 // tokens fetched using the supplied Azure Credentials.
-func WrapRESTConfig(_ context.Context, rc *rest.Config, credentials []byte, identityType apisv1alpha1.IdentityType, _ ...string) error { // nolint:gocyclo // todo: refactor
+func WrapRESTConfig(_ context.Context, rc *rest.Config, credentials []byte, identityType kconfig.IdentityType, _ ...string) error { // nolint:gocyclo // todo: refactor
 	m := map[string]string{}
 	if err := json.Unmarshal(credentials, &m); err != nil {
 		return err
@@ -62,7 +62,7 @@ func WrapRESTConfig(_ context.Context, rc *rest.Config, credentials []byte, iden
 	}
 	rc.ExecProvider = nil
 	switch identityType {
-	case apisv1alpha1.IdentityTypeAzureServicePrincipalCredentials:
+	case kconfig.IdentityTypeAzureServicePrincipalCredentials:
 		opts.LoginMethod = token.ServicePrincipalLogin
 		opts.ClientID = m[CredentialsKeyClientID]
 		opts.ClientSecret = m[CredentialsKeyClientSecret]
@@ -73,7 +73,7 @@ func WrapRESTConfig(_ context.Context, rc *rest.Config, credentials []byte, iden
 				opts.ClientCertPassword = certpass
 			}
 		}
-	case apisv1alpha1.IdentityTypeAzureWorkloadIdentityCredentials:
+	case kconfig.IdentityTypeAzureWorkloadIdentityCredentials:
 		opts.LoginMethod = token.WorkloadIdentityLogin
 		opts.ClientID = m[CredentialsKeyClientID]
 		opts.TenantID = m[CredentialsKeyTenantID]
