@@ -95,6 +95,8 @@ const (
 	errGetValueAtFieldPath  = "cannot get value at fieldPath"
 	errDecodeSecretData     = "cannot decode secret data"
 	errSanitizeSecretData   = "cannot sanitize secret data"
+
+	secretKind = "Secret"
 )
 
 // KindObserver tracks kinds of referenced composed resources in order to start
@@ -256,7 +258,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	if !meta.WasDeleted(cr) {
 		// If the object is not being deleted, we need to resolve references
-		if err := c.resolveReferencies(ctx, cr); err != nil {
+		if err := c.resolveReferencesOnObserverLookup(ctx, cr); err != nil {
 			return managed.ExternalObservation{}, errors.Wrap(err, errResolveResourceReferences)
 		}
 	}
@@ -303,6 +305,11 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	c.logger.Debug("Creating", "resource", cr)
+	if cr.Kind == secretKind {
+		if err := c.resolveReferencesSecret(ctx, cr); err != nil {
+			return managed.ExternalCreation{}, errors.Wrap(err, errResolveResourceReferences)
+		}
+	}
 
 	obj, err := getDesired(cr)
 	if err != nil {
@@ -328,6 +335,11 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	c.logger.Debug("Updating", "resource", cr)
 
+	if cr.Kind == secretKind {
+		if err := c.resolveReferencesSecret(ctx, cr); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errResolveResourceReferences)
+		}
+	}
 	obj, err := getDesired(cr)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
@@ -352,6 +364,11 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	c.logger.Debug("Deleting", "resource", cr)
 
+	if cr.Kind == secretKind {
+		if err := c.resolveReferencesSecret(ctx, cr); err != nil {
+			return errors.Wrap(err, errResolveResourceReferences)
+		}
+	}
 	obj, err := getDesired(cr)
 	if err != nil {
 		return err
@@ -395,7 +412,7 @@ func (c *external) setObserved(obj *v1alpha2.Object, observed *unstructured.Unst
 	var err error
 
 	if c.sanitizeSecrets {
-		if observed.GetKind() == "Secret" && observed.GetAPIVersion() == "v1" {
+		if observed.GetKind() == secretKind && observed.GetAPIVersion() == "v1" {
 			data := map[string][]byte{"redacted": []byte(nil)}
 			if err = fieldpath.Pave(observed.Object).SetValue("data", data); err != nil {
 				return errors.Wrap(err, errSanitizeSecretData)
@@ -479,11 +496,35 @@ func getReferenceInfo(ref v1alpha2.Reference) (string, string, string, string) {
 	return apiVersion, kind, namespace, name
 }
 
-// resolveReferencies resolves references for the current Object. If it fails to
+func (c *external) resolveReferencesAndPatch(ctx context.Context, obj *v1alpha2.Object, ref v1alpha2.Reference) (string, string, bool, error) {
+	refAPIVersion, refKind, refNamespace, refName := getReferenceInfo(ref)
+	res := &unstructured.Unstructured{}
+	res.SetAPIVersion(refAPIVersion)
+	res.SetKind(refKind)
+	// Try to get referenced resource
+	err := c.localClient.Get(ctx, client.ObjectKey{
+		Namespace: refNamespace,
+		Name:      refName,
+	}, res)
+
+	if err != nil {
+		return "", "", true, errors.Wrap(err, errGetReferencedResource)
+	}
+
+	// Patch fields if any
+	if ref.PatchesFrom != nil && ref.PatchesFrom.FieldPath != nil {
+		if err := ref.ApplyFromFieldPathPatch(res, obj); err != nil {
+			return "", "", true, errors.Wrap(err, errPatchFromReferencedResource)
+		}
+	}
+	return refAPIVersion, refKind, false, nil
+}
+
+// resolveReferencesOnObserverLookup resolves references for the current Object. If it fails to
 // resolve some reference, e.g.: due to reference not ready, it will then return
 // error and requeue to wait for resolving it next time.
-func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object) error {
-	c.logger.Debug("Resolving referencies.")
+func (c *external) resolveReferencesOnObserverLookup(ctx context.Context, obj *v1alpha2.Object) error {
+	c.logger.Debug("Resolving references.")
 
 	// Loop through references to resolve each referenced resource
 	gvks := make([]schema.GroupVersionKind, 0, len(obj.Spec.References))
@@ -492,25 +533,15 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 			continue
 		}
 
-		refAPIVersion, refKind, refNamespace, refName := getReferenceInfo(ref)
-		res := &unstructured.Unstructured{}
-		res.SetAPIVersion(refAPIVersion)
-		res.SetKind(refKind)
-		// Try to get referenced resource
-		err := c.localClient.Get(ctx, client.ObjectKey{
-			Namespace: refNamespace,
-			Name:      refName,
-		}, res)
-
-		if err != nil {
-			return errors.Wrap(err, errGetReferencedResource)
+		// skip of secret type to not leak in to MR. secret lookup is done in Create/Update/Delete functions
+		// applied by resolveReferencesSecret from the functions.
+		if ref.PatchesFrom != nil && ref.PatchesFrom.DependsOn.Kind == secretKind {
+			continue
 		}
 
-		// Patch fields if any
-		if ref.PatchesFrom != nil && ref.PatchesFrom.FieldPath != nil {
-			if err := ref.ApplyFromFieldPathPatch(res, obj); err != nil {
-				return errors.Wrap(err, errPatchFromReferencedResource)
-			}
+		refAPIVersion, refKind, done, err := c.resolveReferencesAndPatch(ctx, obj, ref)
+		if done {
+			return err
 		}
 
 		g, v := parseAPIVersion(refAPIVersion)
@@ -525,6 +556,37 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 		// Referenced resources always live on the control plane (i.e. local cluster),
 		// so we don't pass an extra rest config (defaulting local rest config)
 		// or provider config with the watch call.
+		c.kindObserver.WatchResources(nil, "", gvks...)
+	}
+
+	return nil
+}
+
+// resolveReferencesSecret more or less duplicate of resolveReferencesOnObserverLookup, but it will handle the secret
+func (c *external) resolveReferencesSecret(ctx context.Context, obj *v1alpha2.Object) error {
+	c.logger.Debug("Resolving references.")
+
+	// Loop through references to resolve each referenced resource
+	gvks := make([]schema.GroupVersionKind, 0, len(obj.Spec.References))
+	for _, ref := range obj.Spec.References {
+		if ref.DependsOn == nil && ref.PatchesFrom == nil {
+			continue
+		}
+
+		refAPIVersion, refKind, done, err := c.resolveReferencesAndPatch(ctx, obj, ref)
+		if done {
+			return err
+		}
+
+		g, v := parseAPIVersion(refAPIVersion)
+		gvks = append(gvks, schema.GroupVersionKind{
+			Group:   g,
+			Version: v,
+			Kind:    refKind,
+		})
+	}
+
+	if c.shouldWatch(obj) {
 		c.kindObserver.WatchResources(nil, "", gvks...)
 	}
 
@@ -689,7 +751,7 @@ func connectionDetails(ctx context.Context, kube client.Client, connDetails []v1
 		s := fmt.Sprintf("%v", v)
 		fv := []byte(s)
 		// prevent secret data being encoded twice
-		if cd.Kind == "Secret" && cd.APIVersion == "v1" && strings.HasPrefix(cd.FieldPath, "data") {
+		if cd.Kind == secretKind && cd.APIVersion == "v1" && strings.HasPrefix(cd.FieldPath, "data") {
 			fv, err = base64.StdEncoding.DecodeString(s)
 			if err != nil {
 				return mcd, errors.Wrap(err, errDecodeSecretData)
