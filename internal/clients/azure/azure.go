@@ -23,7 +23,26 @@ const (
 	CredentialsKeyFederatedTokenFile = "federatedTokenFile"
 	CredentialsKeyAuthorityHost      = "authorityHost"
 	CredentialsKeyServerID           = "serverId"
+
+	kubeloginCLIFlagServerID = "server-id"
 )
+
+func kubeloginTokenOptionsFromRESTConfig(rc *rest.Config) (*token.Options, error) {
+	opts := &token.Options{}
+
+	// opts are filled according to the provided args in the execProvider section of the kubeconfig
+	// we are parsing serverID from here
+	// add other flags if new login methods are introduced
+	fs := pflag.NewFlagSet("kubelogin", pflag.ContinueOnError)
+	fs.ParseErrorsWhitelist = pflag.ParseErrorsWhitelist{UnknownFlags: true}
+	fs.StringVar(&opts.ServerID, kubeloginCLIFlagServerID, "", "Microsoft Entra (AAD) server application id")
+	err := fs.Parse(rc.ExecProvider.Args)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not parse execProvider arguments in kubeconfig")
+	}
+
+	return opts, nil
+}
 
 // WrapRESTConfig configures the supplied REST config to use OAuth2 bearer
 // tokens fetched using the supplied Azure Credentials.
@@ -37,16 +56,9 @@ func WrapRESTConfig(_ context.Context, rc *rest.Config, credentials []byte, iden
 		return errors.New("an identity configuration was specified but the provided kubeconfig does not have execProvider section")
 	}
 
-	fs := pflag.NewFlagSet("kubelogin", pflag.ContinueOnError)
-	opts := token.NewOptions()
-	opts.AddFlags(fs)
-	// opts are filled according to the provided args in the execProvider section of the kubeconfig
-	// we are parsing serverID from here
-	// this will also parse other flags, that will help future integrations with other auth types
-	// see token.Options struct for options reference
-	err := fs.Parse(rc.ExecProvider.Args)
+	opts, err := kubeloginTokenOptionsFromRESTConfig(rc)
 	if err != nil {
-		return errors.Wrap(err, "could not parse execProvider arguments in kubeconfig")
+		return err
 	}
 	rc.ExecProvider = nil
 	switch identityType {
@@ -70,7 +82,7 @@ func WrapRESTConfig(_ context.Context, rc *rest.Config, credentials []byte, iden
 		opts.AuthorityHost = m[CredentialsKeyAuthorityHost]
 	}
 
-	p, err := token.NewTokenProvider(&opts)
+	p, err := token.GetTokenProvider(opts)
 	if err != nil {
 		return errors.Wrap(err, "cannot build azure token provider")
 	}
