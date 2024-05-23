@@ -10,6 +10,8 @@ spec:
     webhook:
       clientConfig:
         service:
+          name: provider-kubernetes
+          namespace: crossplane-system
           path: /convert
       conversionReviewVersions:
       - v1

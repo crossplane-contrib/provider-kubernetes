@@ -10,4 +10,6 @@ spec:
         - v1
       clientConfig:
         service:
+          name: provider-kubernetes
+          namespace: crossplane-system
           path: /convert
