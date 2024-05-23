@@ -15,6 +15,7 @@ package kube
 
 import (
 	"context"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/token"
 
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -46,8 +47,8 @@ const (
 
 // ClientForProvider returns the client and *rest.config for the given provider
 // config.
-func ClientForProvider(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, *rest.Config, error) { //nolint:gocyclo
-	rc, err := configForProvider(ctx, inclusterClient, providerConfigName)
+func ClientForProvider(ctx context.Context, inclusterClient client.Client, store *token.ReuseSourceStore, providerConfigName string) (client.Client, *rest.Config, error) { //nolint:gocyclo
+	rc, err := configForProvider(ctx, inclusterClient, store, providerConfigName)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "cannot get REST config for provider %q", providerConfigName)
 	}
@@ -59,7 +60,7 @@ func ClientForProvider(ctx context.Context, inclusterClient client.Client, provi
 }
 
 // ConfigForProvider returns the *rest.config for the given provider config.
-func configForProvider(ctx context.Context, local client.Client, providerConfigName string) (*rest.Config, error) { // nolint:gocyclo
+func configForProvider(ctx context.Context, local client.Client, store *token.ReuseSourceStore, providerConfigName string) (*rest.Config, error) { // nolint:gocyclo
 	pc := &v1alpha1.ProviderConfig{}
 	if err := local.Get(ctx, types.NamespacedName{Name: providerConfigName}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetPC)
@@ -129,12 +130,12 @@ func configForProvider(ctx context.Context, local client.Client, providerConfigN
 				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
 					xpv1.CredentialsSourceInjectedIdentity, v1alpha1.IdentityTypeUpboundToken)
 			default:
-				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, local, id.CommonCredentialSelectors)
+				tkn, err := resource.CommonCredentialExtractor(ctx, id.Source, local, id.CommonCredentialSelectors)
 				if err != nil {
 					return nil, errors.Wrap(err, errExtractUpboundCredentials)
 				}
 
-				if err := upbound.WrapRESTConfig(ctx, rc, creds); err != nil {
+				if err := upbound.WrapRESTConfig(ctx, rc, string(tkn), store); err != nil {
 					return nil, errors.Wrap(err, errInjectUpboundCredentials)
 				}
 			}

@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/token"
 	"math/rand"
 	"time"
 
@@ -68,13 +69,16 @@ type Reconciler struct {
 func Setup(mgr ctrl.Manager, o controller.Options, pollJitter time.Duration) error {
 	name := managed.ControllerName(v1alpha1.ObservedObjectCollectionGroupKind)
 
+	s := token.NewReuseSourceStore()
 	r := &Reconciler{
 		client: mgr.GetClient(),
 		log:    o.Logger,
 		pollInterval: func() time.Duration {
 			return o.PollInterval + +time.Duration((rand.Float64()-0.5)*2*float64(pollJitter)) //nolint
 		},
-		clientForProvider:  kube.ClientForProvider,
+		clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, *rest.Config, error) {
+			return kube.ClientForProvider(ctx, inclusterClient, s, providerConfigName)
+		},
 		observedObjectName: observedObjectName,
 	}
 

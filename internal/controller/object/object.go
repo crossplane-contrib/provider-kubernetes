@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/token"
 	"math/rand"
 	"strings"
 	"time"
@@ -130,12 +131,15 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		managed.WithMetricRecorder(o.MetricOptions.MRMetrics),
 	}
 
+	s := token.NewReuseSourceStore()
 	conn := &connector{
-		logger:              o.Logger,
-		sanitizeSecrets:     sanitizeSecrets,
-		kube:                mgr.GetClient(),
-		usage:               resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
-		clientForProviderFn: kube.ClientForProvider,
+		logger:          o.Logger,
+		sanitizeSecrets: sanitizeSecrets,
+		kube:            mgr.GetClient(),
+		usage:           resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
+		clientForProviderFn: func(ctx context.Context, local client.Client, providerConfigName string) (client.Client, *rest.Config, error) {
+			return kube.ClientForProvider(ctx, local, s, providerConfigName)
+		},
 	}
 
 	cb := ctrl.NewControllerManagedBy(mgr).

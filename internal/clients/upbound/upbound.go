@@ -2,6 +2,7 @@ package upbound
 
 import (
 	"context"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/token"
 	"net/http"
 	"time"
 
@@ -12,9 +13,14 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+const (
+	// TODO: We may want to make is configurable.
+	authHost = "auth.upbound.io"
+)
+
 // WrapRESTConfig configures the supplied REST config to use OAuth2 access
 // tokens fetched using the supplied Upbound session/robot token.
-func WrapRESTConfig(_ context.Context, rc *rest.Config, token []byte, _ ...string) error { // nolint:gocyclo // mostly error handling
+func WrapRESTConfig(_ context.Context, rc *rest.Config, token string, store *token.ReuseSourceStore) error { // nolint:gocyclo // mostly error handling
 	ex := rc.ExecProvider
 	if ex == nil {
 		return errors.New("an identity configuration was specified but the provided kubeconfig does not have execProvider section")
@@ -44,21 +50,19 @@ func WrapRESTConfig(_ context.Context, rc *rest.Config, token []byte, _ ...strin
 
 	rc.ExecProvider = nil
 
-	var t *oauth2.Token
 	// DefaultTokenSource retrieves a token source from an injected identity.
 	us := &upboundTokenSource{
 		client: auth.NewClient(&up.Config{
 			Client: up.NewClient(func(client *up.HTTPClient) {
-				// TODO: This should probably be configurable.
-				client.BaseURL.Host = "auth.upbound.io"
+				client.BaseURL.Host = authHost
 			}),
 		}),
 		org:          org,
-		refreshToken: string(token),
+		refreshToken: token,
 	}
-	ts := oauth2.ReuseTokenSource(t, us)
+
 	rc.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-		return &oauth2.Transport{Source: ts, Base: rt}
+		return &oauth2.Transport{Source: store.SourceForRefreshToken(token, us), Base: rt}
 	})
 
 	return nil
@@ -80,7 +84,8 @@ func (s *upboundTokenSource) Token() (*oauth2.Token, error) {
 		return nil, errors.Wrap(err, "cannot get upbound org scoped token")
 	}
 	return &oauth2.Token{
-		AccessToken: resp.AccessToken,
-		Expiry:      time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second),
+		RefreshToken: s.refreshToken,
+		AccessToken:  resp.AccessToken,
+		Expiry:       time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second),
 	}, nil
 }
