@@ -17,11 +17,13 @@ import (
 const (
 	// TODO: We may want to make is configurable.
 	authHost = "auth.upbound.io"
+
+	envVarOrganization = "ORGANIZATION"
 )
 
 // WrapRESTConfig configures the supplied REST config to use OAuth2 access
 // tokens fetched using the supplied Upbound session/robot token.
-func WrapRESTConfig(_ context.Context, rc *rest.Config, token string, store *token.ReuseSourceStore) error { // nolint:gocyclo // mostly error handling
+func WrapRESTConfig(ctx context.Context, rc *rest.Config, token string, store *token.ReuseSourceStore) error { // nolint:gocyclo // mostly error handling
 	ex := rc.ExecProvider
 	if ex == nil {
 		return errors.New("an identity configuration was specified but the provided kubeconfig does not have execProvider section")
@@ -29,17 +31,17 @@ func WrapRESTConfig(_ context.Context, rc *rest.Config, token string, store *tok
 	if ex.APIVersion != "client.authentication.k8s.io/v1" {
 		return errors.New("execProvider APIVersion is not client.authentication.k8s.io/v1")
 	}
-	if ex.Command != "up" || len(ex.Args) < 2 || ex.Args[0] != "organization" || ex.Args[1] != "token" {
-		return errors.New("execProvider command is not up organization token")
+	if ex.Command != "up" || len(ex.Args) < 2 || (ex.Args[0] != "org" && ex.Args[0] != "organization") || ex.Args[1] != "token" {
+		return errors.New("execProvider command is not up organization (org) token")
 	}
 
-	// Read the org name, it could either be the 3rd argument and provided with `ORGANIZATION` env var.
+	// Read the org name, it could either be the 3rd argument or provided with `ORGANIZATION` env var.
 	org := ""
 	if len(ex.Args) > 2 {
 		org = ex.Args[2]
 	}
 	for _, env := range ex.Env {
-		if env.Name == "ORGANIZATION" {
+		if env.Name == envVarOrganization {
 			// Env var takes precedence over the 3rd argument if both are provided.
 			org = env.Value
 			break
@@ -53,15 +55,18 @@ func WrapRESTConfig(_ context.Context, rc *rest.Config, token string, store *tok
 
 	// DefaultTokenSource retrieves a token source from an injected identity.
 	us := &upboundTokenSource{
+		ctx: ctx,
 		client: auth.NewClient(&up.Config{
 			Client: up.NewClient(func(client *up.HTTPClient) {
 				client.BaseURL.Host = authHost
 			}),
 		}),
-		org:          org,
-		refreshToken: token,
+		org:         org,
+		staticToken: token,
 	}
 
+	// Mutate the received REST config, rc, to use the Upbound token source at
+	// the transport layer.
 	rc.Wrap(func(rt http.RoundTripper) http.RoundTripper {
 		return &oauth2.Transport{Source: store.SourceForRefreshToken(token, us), Base: rt}
 	})
@@ -71,22 +76,19 @@ func WrapRESTConfig(_ context.Context, rc *rest.Config, token string, store *tok
 
 // upboundTokenSource is an oauth2.TokenSource that fetches tokens from Upbound.
 type upboundTokenSource struct {
-	client       *auth.Client
-	org          string
-	refreshToken string
-	// Base is the base RoundTripper used to make HTTP requests.
-	// If nil, http.DefaultTransport is used.
-	Base http.RoundTripper
+	ctx         context.Context
+	client      *auth.Client
+	org         string
+	staticToken string
 }
 
 func (s *upboundTokenSource) Token() (*oauth2.Token, error) {
-	resp, err := s.client.GetOrgScopedToken(context.Background(), s.org, s.refreshToken)
+	resp, err := s.client.GetOrgScopedToken(s.ctx, s.org, s.staticToken)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get upbound org scoped token")
 	}
 	return &oauth2.Token{
-		RefreshToken: s.refreshToken,
-		AccessToken:  resp.AccessToken,
-		Expiry:       time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second),
+		AccessToken: resp.AccessToken,
+		Expiry:      time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second),
 	}, nil
 }
