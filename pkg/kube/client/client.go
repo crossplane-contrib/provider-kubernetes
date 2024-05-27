@@ -15,6 +15,7 @@ package client
 
 import (
 	"context"
+	"strings"
 
 	"github.com/pkg/errors"
 	"k8s.io/client-go/rest"
@@ -143,18 +144,18 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 					return nil, errors.Wrap(err, errInjectAzureCredentials)
 				}
 			}
-		case kconfig.IdentityTypeUpboundToken:
+		case kconfig.IdentityTypeUpboundTokens:
 			switch id.Source { //nolint:exhaustive
 			case xpv1.CredentialsSourceInjectedIdentity:
 				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
-					xpv1.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeUpboundToken)
+					xpv1.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeUpboundTokens)
 			default:
 				tkn, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
 				if err != nil {
 					return nil, errors.Wrap(err, errExtractUpboundCredentials)
 				}
 
-				if err := upbound.WrapRESTConfig(ctx, rc, string(tkn), b.store); err != nil {
+				if err := upbound.WrapRESTConfig(ctx, rc, strings.TrimSpace(string(tkn)), b.store); err != nil {
 					return nil, errors.Wrap(err, errInjectUpboundCredentials)
 				}
 			}

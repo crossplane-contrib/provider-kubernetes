@@ -22,7 +22,7 @@ package config
 import xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 
 // IdentityType used to authenticate to the Kubernetes API.
-// +kubebuilder:validation:Enum=GoogleApplicationCredentials;AzureServicePrincipalCredentials;AzureWorkloadIdentityCredentials;UpboundToken
+// +kubebuilder:validation:Enum=GoogleApplicationCredentials;AzureServicePrincipalCredentials;AzureWorkloadIdentityCredentials;UpboundTokens
 type IdentityType string
 
 // Supported identity types.
@@ -33,7 +33,7 @@ const (
 
 	IdentityTypeAzureWorkloadIdentityCredentials = "AzureWorkloadIdentityCredentials"
 
-	IdentityTypeUpboundToken = "UpboundToken"
+	IdentityTypeUpboundTokens = "UpboundTokens"
 )
 
 // ProviderCredentials required to authenticate.
