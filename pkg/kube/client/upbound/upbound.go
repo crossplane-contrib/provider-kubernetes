@@ -23,7 +23,7 @@ const (
 
 // WrapRESTConfig configures the supplied REST config to use OAuth2 access
 // tokens fetched using the supplied Upbound session/robot token.
-func WrapRESTConfig(ctx context.Context, rc *rest.Config, token string, store *token.ReuseSourceStore) error { // nolint:gocyclo // mostly error handling
+func WrapRESTConfig(_ context.Context, rc *rest.Config, token string, store *token.ReuseSourceStore) error { // nolint:gocyclo // mostly error handling
 	ex := rc.ExecProvider
 	if ex == nil {
 		return errors.New("an identity configuration was specified but the provided kubeconfig does not have execProvider section")
@@ -55,7 +55,6 @@ func WrapRESTConfig(ctx context.Context, rc *rest.Config, token string, store *t
 
 	// DefaultTokenSource retrieves a token source from an injected identity.
 	us := &upboundTokenSource{
-		ctx: ctx,
 		client: auth.NewClient(&up.Config{
 			Client: up.NewClient(func(client *up.HTTPClient) {
 				client.BaseURL.Host = authHost
@@ -76,14 +75,19 @@ func WrapRESTConfig(ctx context.Context, rc *rest.Config, token string, store *t
 
 // upboundTokenSource is an oauth2.TokenSource that fetches tokens from Upbound.
 type upboundTokenSource struct {
-	ctx         context.Context
 	client      *auth.Client
 	org         string
 	staticToken string
 }
 
 func (s *upboundTokenSource) Token() (*oauth2.Token, error) {
-	resp, err := s.client.GetOrgScopedToken(s.ctx, s.org, s.staticToken)
+	// TokenSource interface Token() method does not support context.
+	// https://github.com/golang/oauth2/issues/262
+	// As a workaround, we create a new context with a deadline here.
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(10*time.Second))
+	defer cancel()
+
+	resp, err := s.client.GetOrgScopedToken(ctx, s.org, s.staticToken)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get upbound org scoped token")
 	}
