@@ -56,8 +56,8 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
-	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/kube"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
+	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
 )
 
 type key int
@@ -67,14 +67,15 @@ const (
 )
 
 const (
-	errTrackPCUsage = "cannot track ProviderConfig usage"
-	errGetObject    = "cannot get object"
-	errCreateObject = "cannot create object"
-	errApplyObject  = "cannot apply object"
-	errDeleteObject = "cannot delete object"
+	errGetProviderConfig = "cannot get provider config"
+	errTrackPCUsage      = "cannot track ProviderConfig usage"
+	errGetObject         = "cannot get object"
+	errCreateObject      = "cannot create object"
+	errApplyObject       = "cannot apply object"
+	errDeleteObject      = "cannot delete object"
 
-	errNotKubernetesObject = "managed resource is not an Object custom resource"
-	errNewKubernetesClient = "cannot create new Kubernetes client"
+	errNotKubernetesObject        = "managed resource is not an Object custom resource"
+	errBuildKubeForProviderConfig = "cannot build kube client for provider config"
 
 	errGetLastApplied          = "cannot get last applied"
 	errUnmarshalTemplate       = "cannot unmarshal template"
@@ -131,11 +132,11 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 	}
 
 	conn := &connector{
-		logger:              o.Logger,
-		sanitizeSecrets:     sanitizeSecrets,
-		kube:                mgr.GetClient(),
-		usage:               resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
-		clientForProviderFn: kube.ClientForProvider,
+		logger:          o.Logger,
+		sanitizeSecrets: sanitizeSecrets,
+		kube:            mgr.GetClient(),
+		usage:           resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
+		clientBuilder:   kubeclient.NewIdentityAwareBuilder(mgr.GetClient()),
 	}
 
 	cb := ctrl.NewControllerManagedBy(mgr).
@@ -199,13 +200,12 @@ type connector struct {
 
 	kindObserver KindObserver
 
-	clientForProviderFn func(ctx context.Context, local client.Client, providerConfigName string) (client.Client, *rest.Config, error)
+	clientBuilder kubeclient.Builder
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) { //nolint:gocyclo
 	// This method is currently a little over our complexity goal - be wary
 	// of making it more complex.
-
 	cr, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return nil, errors.New(errNotKubernetesObject)
@@ -215,10 +215,14 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
-	k, rc, err := c.clientForProviderFn(ctx, c.kube, cr.GetProviderConfigReference().Name)
+	pc := &apisv1alpha1.ProviderConfig{}
+	if err := c.kube.Get(ctx, types.NamespacedName{Name: cr.GetProviderConfigReference().Name}, pc); err != nil {
+		return nil, errors.Wrap(err, errGetProviderConfig)
+	}
 
+	k, rc, err := c.clientBuilder.KubeForProviderConfig(ctx, pc.Spec)
 	if err != nil {
-		return nil, errors.Wrap(err, errNewKubernetesClient)
+		return nil, errors.Wrap(err, errBuildKubeForProviderConfig)
 	}
 
 	return &external{

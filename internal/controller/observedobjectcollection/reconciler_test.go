@@ -43,6 +43,9 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	"github.com/crossplane-contrib/provider-kubernetes/apis/observedobjectcollection/v1alpha1"
+	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
+	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
+	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )
 
 func TestReconciler(t *testing.T) {
@@ -91,6 +94,10 @@ func TestReconciler(t *testing.T) {
 			args: args{
 				client: &test.MockClient{
 					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if _, ok := obj.(*apisv1alpha1.ProviderConfig); ok {
+							return nil
+						}
+
 						if key != collectionName {
 							return fmt.Errorf("Expected %v, but got %v", collectionName, key)
 						}
@@ -185,6 +192,10 @@ func TestReconciler(t *testing.T) {
 			args: args{
 				client: &test.MockClient{
 					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if _, ok := obj.(*apisv1alpha1.ProviderConfig); ok {
+							return nil
+						}
+
 						if key != collectionName {
 							return fmt.Errorf("Expected %v, but got %v", collectionName, key)
 						}
@@ -282,6 +293,10 @@ func TestReconciler(t *testing.T) {
 			args: args{
 				client: &test.MockClient{
 					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if _, ok := obj.(*apisv1alpha1.ProviderConfig); ok {
+							return nil
+						}
+
 						if key != collectionName {
 							return fmt.Errorf("Expected %v, but got %v", collectionName, key)
 						}
@@ -322,6 +337,10 @@ func TestReconciler(t *testing.T) {
 			args: args{
 				client: &test.MockClient{
 					MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+						if _, ok := obj.(*apisv1alpha1.ProviderConfig); ok {
+							return nil
+						}
+
 						if key != collectionName {
 							return fmt.Errorf("Expected %v, but got %v", collectionName, key)
 						}
@@ -381,9 +400,9 @@ func TestReconciler(t *testing.T) {
 			r := &Reconciler{
 				client: tc.args.client,
 				log:    logging.NewNopLogger(),
-				clientForProvider: func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, *rest.Config, error) {
+				clientBuilder: kubeclient.BuilderFn(func(ctx context.Context, pc kconfig.ProviderConfigSpec) (client.Client, *rest.Config, error) {
 					return tc.args.client, nil, nil
-				},
+				}),
 				observedObjectName: func(collection client.Object, matchedObject client.Object) (string, error) {
 					return fmt.Sprintf("%s-%s", collection.GetName(), matchedObject.GetName()), nil
 				},

@@ -34,6 +34,8 @@ var DefaultScopes []string = []string{
 // WrapRESTConfig configures the supplied REST config to use OAuth2 bearer
 // tokens fetched using the supplied Google Application Credentials.
 func WrapRESTConfig(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+	// TODO(turkenh): Use token.ReuseSourceStore to cache token sources and
+	// avoid token regeneration on every reconciliation loop.
 	var ts oauth2.TokenSource
 	if credentials != nil {
 		if isJSON(credentials) {

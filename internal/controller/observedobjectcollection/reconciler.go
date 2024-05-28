@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -44,14 +43,16 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	"github.com/crossplane-contrib/provider-kubernetes/apis/observedobjectcollection/v1alpha1"
-	"github.com/crossplane-contrib/provider-kubernetes/internal/clients/kube"
+	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
+	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
 )
 
 const (
-	errNewKubernetesClient = "cannot create new Kubernetes client"
-	errStatusUpdate        = "cannot update status"
-	fieldOwner             = client.FieldOwner("kubernetes.crossplane.io/observed-object-collection-controller")
-	membershipLabelKey     = "kubernetes.crossplane.io/owned-by-collection"
+	errGetProviderConfig          = "cannot get provider config"
+	errBuildKubeForProviderConfig = "cannot build kube client for provider config"
+	errStatusUpdate               = "cannot update status"
+	fieldOwner                    = client.FieldOwner("kubernetes.crossplane.io/observed-object-collection-controller")
+	membershipLabelKey            = "kubernetes.crossplane.io/owned-by-collection"
 )
 
 // Reconciler watches for ObservedObjectCollection resources
@@ -60,7 +61,7 @@ type Reconciler struct {
 	client             client.Client
 	log                logging.Logger
 	pollInterval       func() time.Duration
-	clientForProvider  func(ctx context.Context, inclusterClient client.Client, providerConfigName string) (client.Client, *rest.Config, error)
+	clientBuilder      kubeclient.Builder
 	observedObjectName func(collection client.Object, matchedObject client.Object) (string, error)
 }
 
@@ -74,7 +75,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, pollJitter time.Duration) err
 		pollInterval: func() time.Duration {
 			return o.PollInterval + +time.Duration((rand.Float64()-0.5)*2*float64(pollJitter)) //nolint
 		},
-		clientForProvider:  kube.ClientForProvider,
+		clientBuilder:      kubeclient.NewIdentityAwareBuilder(mgr.GetClient()),
 		observedObjectName: observedObjectName,
 	}
 
@@ -124,10 +125,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 
 	log.Info("Reconciling")
 
+	pc := &apisv1alpha1.ProviderConfig{}
+	if err = r.client.Get(ctx, client.ObjectKey{Name: c.Spec.ProviderConfigReference.Name}, pc); err != nil {
+		return ctrl.Result{}, errors.Wrap(err, errGetProviderConfig)
+	}
 	// Get client for the referenced provider config.
-	clusterClient, _, err := r.clientForProvider(ctx, r.client, c.Spec.ProviderConfigReference.Name)
+	clusterClient, _, err := r.clientBuilder.KubeForProviderConfig(ctx, pc.Spec)
 	if err != nil {
-		werr := errors.Wrap(err, errNewKubernetesClient)
+		werr := errors.Wrap(err, errBuildKubeForProviderConfig)
 		c.Status.SetConditions(xpv1.ReconcileError(werr))
 		_ = r.client.Status().Update(ctx, c)
 		return ctrl.Result{}, werr

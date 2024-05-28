@@ -44,6 +44,8 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	kubernetesv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
+	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
+	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )
 
 const (
@@ -202,13 +204,13 @@ func referenceObjectWithFinalizer(val interface{}) *unstructured.Unstructured {
 	return res
 }
 
-func Test_connector_Connect(t *testing.T) {
+func TestConnect(t *testing.T) {
 	providerConfig := kubernetesv1alpha1.ProviderConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: providerName},
-		Spec: kubernetesv1alpha1.ProviderConfigSpec{
-			Credentials: kubernetesv1alpha1.ProviderCredentials{},
-			Identity: &kubernetesv1alpha1.Identity{
-				Type: kubernetesv1alpha1.IdentityTypeGoogleApplicationCredentials,
+		Spec: kconfig.ProviderConfigSpec{
+			Credentials: kconfig.ProviderCredentials{},
+			Identity: &kconfig.Identity{
+				Type: kconfig.IdentityTypeGoogleApplicationCredentials,
 			},
 		},
 	}
@@ -218,13 +220,13 @@ func Test_connector_Connect(t *testing.T) {
 
 	providerConfigAzure := &kubernetesv1alpha1.ProviderConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: providerName},
-		Spec: kubernetesv1alpha1.ProviderConfigSpec{
-			Credentials: kubernetesv1alpha1.ProviderCredentials{
+		Spec: kconfig.ProviderConfigSpec{
+			Credentials: kconfig.ProviderCredentials{
 				Source: xpv1.CredentialsSourceNone,
 			},
-			Identity: &kubernetesv1alpha1.Identity{
-				Type: kubernetesv1alpha1.IdentityTypeAzureServicePrincipalCredentials,
-				ProviderCredentials: kubernetesv1alpha1.ProviderCredentials{
+			Identity: &kconfig.Identity{
+				Type: kconfig.IdentityTypeAzureServicePrincipalCredentials,
+				ProviderCredentials: kconfig.ProviderCredentials{
 					Source: xpv1.CredentialsSourceNone,
 				},
 			},
@@ -269,9 +271,14 @@ func Test_connector_Connect(t *testing.T) {
 		},
 		"Success": {
 			args: args{
-				clientForProvider: &test.MockClient{},
-				usage:             resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
-				mg:                kubernetesObject(),
+				client: &test.MockClient{
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+						*obj.(*kubernetesv1alpha1.ProviderConfig) = providerConfig
+						return nil
+					}),
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				mg:    kubernetesObject(),
 			},
 			want: want{
 				err: nil,
@@ -283,9 +290,9 @@ func Test_connector_Connect(t *testing.T) {
 			c := &connector{
 				logger: logging.NewNopLogger(),
 				kube:   tc.args.client,
-				clientForProviderFn: func(ctx context.Context, local client.Client, providerConfigName string) (client.Client, *rest.Config, error) {
+				clientBuilder: kubeclient.BuilderFn(func(ctx context.Context, pc kconfig.ProviderConfigSpec) (client.Client, *rest.Config, error) {
 					return tc.args.clientForProvider, nil, nil
-				},
+				}),
 				usage: tc.usage,
 			}
 			_, gotErr := c.Connect(context.Background(), tc.args.mg)
@@ -296,7 +303,7 @@ func Test_connector_Connect(t *testing.T) {
 	}
 }
 
-func Test_helmExternal_Observe(t *testing.T) {
+func TestObserve(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -673,7 +680,7 @@ func Test_helmExternal_Observe(t *testing.T) {
 	}
 }
 
-func Test_helmExternal_Create(t *testing.T) {
+func TestCreate(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -781,7 +788,7 @@ func Test_helmExternal_Create(t *testing.T) {
 	}
 }
 
-func Test_helmExternal_Update(t *testing.T) {
+func TestUpdate(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -877,7 +884,7 @@ func Test_helmExternal_Update(t *testing.T) {
 	}
 }
 
-func Test_helmExternal_Delete(t *testing.T) {
+func TestDelete(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -970,7 +977,7 @@ func Test_helmExternal_Delete(t *testing.T) {
 	}
 }
 
-func Test_objFinalizer_AddFinalizer(t *testing.T) {
+func TestAddFinalizer(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -1103,7 +1110,7 @@ func Test_objFinalizer_AddFinalizer(t *testing.T) {
 	}
 }
 
-func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
+func TestRemoveFinalizer(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
 		mg     resource.Managed
@@ -1264,7 +1271,7 @@ func Test_objFinalizer_RemoveFinalizer(t *testing.T) {
 	}
 }
 
-func Test_connectionDetails(t *testing.T) {
+func TestConnectionDetails(t *testing.T) {
 	mockClient := func(secretData map[string]interface{}, err error) *test.MockClient {
 		return &test.MockClient{
 			MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
@@ -1376,7 +1383,7 @@ func Test_connectionDetails(t *testing.T) {
 	}
 }
 
-func Test_updateConditionFromObserved(t *testing.T) {
+func TestUpdateConditionFromObserved(t *testing.T) {
 	type args struct {
 		obj      *v1alpha2.Object
 		observed *unstructured.Unstructured

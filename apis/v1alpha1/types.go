@@ -20,49 +20,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+
+	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )
-
-// A ProviderConfigSpec defines the desired state of a ProviderConfig.
-type ProviderConfigSpec struct {
-	// Credentials used to connect to the Kubernetes API. Typically a
-	// kubeconfig file. Use InjectedIdentity for in-cluster config.
-	Credentials ProviderCredentials `json:"credentials"`
-	// Identity used to authenticate to the Kubernetes API. The identity
-	// credentials can be used to supplement kubeconfig 'credentials', for
-	// example by configuring a bearer token source such as OAuth.
-	// +optional
-	Identity *Identity `json:"identity,omitempty"`
-}
-
-// ProviderCredentials required to authenticate.
-type ProviderCredentials struct {
-	// Source of the provider credentials.
-	// +kubebuilder:validation:Enum=None;Secret;InjectedIdentity;Environment;Filesystem
-	Source xpv1.CredentialsSource `json:"source"`
-
-	xpv1.CommonCredentialSelectors `json:",inline"`
-}
-
-// IdentityType used to authenticate to the Kubernetes API.
-type IdentityType string
-
-// Supported identity types.
-const (
-	IdentityTypeGoogleApplicationCredentials = "GoogleApplicationCredentials"
-
-	IdentityTypeAzureServicePrincipalCredentials = "AzureServicePrincipalCredentials"
-
-	IdentityTypeAzureWorkloadIdentityCredentials = "AzureWorkloadIdentityCredentials"
-)
-
-// Identity used to authenticate.
-type Identity struct {
-	// Type of identity.
-	// +kubebuilder:validation:Enum=GoogleApplicationCredentials;AzureServicePrincipalCredentials;AzureWorkloadIdentityCredentials
-	Type IdentityType `json:"type"`
-
-	ProviderCredentials `json:",inline"`
-}
 
 // A ProviderConfigStatus reflects the observed state of a ProviderConfig.
 type ProviderConfigStatus struct {
@@ -80,8 +40,8 @@ type ProviderConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ProviderConfigSpec   `json:"spec"`
-	Status ProviderConfigStatus `json:"status,omitempty"`
+	Spec   kconfig.ProviderConfigSpec `json:"spec"`
+	Status ProviderConfigStatus       `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
