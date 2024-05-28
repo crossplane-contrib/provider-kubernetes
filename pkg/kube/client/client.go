@@ -150,12 +150,15 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
 					xpv1.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeUpboundTokens)
 			default:
-				tkn, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
+				staticToken, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
 				if err != nil {
 					return nil, errors.Wrap(err, errExtractUpboundCredentials)
 				}
 
-				if err := upbound.WrapRESTConfig(ctx, rc, strings.TrimSpace(string(tkn)), b.store); err != nil {
+				// We trim the token to remove any leading/trailing whitespace
+				// which may have been added especially when stringData field
+				// is used while creating the secret.
+				if err := upbound.WrapRESTConfig(ctx, rc, strings.TrimSpace(string(staticToken)), b.store); err != nil {
 					return nil, errors.Wrap(err, errInjectUpboundCredentials)
 				}
 			}
