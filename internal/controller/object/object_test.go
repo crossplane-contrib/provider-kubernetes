@@ -1670,6 +1670,172 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 			},
 		},
+		"AvailableIfCelAllMacroTrue": {
+			args: args{
+				obj: &v1alpha2.Object{
+					Spec: v1alpha2.ObjectSpec{
+						Readiness: v1alpha2.Readiness{
+							Policy:   v1alpha2.ReadinessPolicyDeriveFromCelQuery,
+							CelQuery: `object.status.conditions.all(x, x.status == "True")`,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": xpv1.ConditionedStatus{
+							Conditions: []xpv1.Condition{
+								{
+									Type:   "condition1",
+									Status: corev1.ConditionTrue,
+								},
+								{
+									Type:   xpv1.TypeReady,
+									Status: corev1.ConditionTrue,
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				conditions: []xpv1.Condition{
+					{
+						Type:   xpv1.TypeReady,
+						Status: corev1.ConditionTrue,
+						Reason: xpv1.ReasonAvailable,
+					},
+				},
+			},
+		},
+		"UnavailableIfCelAllMacroFalse": {
+			args: args{
+				obj: &v1alpha2.Object{
+					Spec: v1alpha2.ObjectSpec{
+						Readiness: v1alpha2.Readiness{
+							Policy:   v1alpha2.ReadinessPolicyDeriveFromCelQuery,
+							CelQuery: `object.status.conditions.all(x, x.status == "True")`,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": xpv1.ConditionedStatus{
+							Conditions: []xpv1.Condition{
+								{
+									Type:   "condition1",
+									Status: corev1.ConditionTrue,
+								},
+								{
+									Type:   xpv1.TypeReady,
+									Status: corev1.ConditionFalse,
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				conditions: []xpv1.Condition{
+					{
+						Type:   xpv1.TypeReady,
+						Status: corev1.ConditionFalse,
+						Reason: xpv1.ReasonUnavailable,
+					},
+				},
+			},
+		},
+		"AvailableIfCelCustomField": {
+			args: args{
+				obj: &v1alpha2.Object{
+					Spec: v1alpha2.ObjectSpec{
+						Readiness: v1alpha2.Readiness{
+							Policy:   v1alpha2.ReadinessPolicyDeriveFromCelQuery,
+							CelQuery: `object.status.isReady == true`,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": map[string]any{
+							"isReady": true,
+						},
+					},
+				},
+			},
+			want: want{
+				conditions: []xpv1.Condition{
+					{
+						Type:   xpv1.TypeReady,
+						Status: corev1.ConditionTrue,
+						Reason: xpv1.ReasonAvailable,
+					},
+				},
+			},
+		},
+		"UnavailableIfCelCustomFieldNotThere": {
+			args: args{
+				obj: &v1alpha2.Object{
+					Spec: v1alpha2.ObjectSpec{
+						Readiness: v1alpha2.Readiness{
+							Policy:   v1alpha2.ReadinessPolicyDeriveFromCelQuery,
+							CelQuery: `object.status.isReady == true`,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": map[string]any{},
+					},
+				},
+			},
+			want: want{
+				conditions: []xpv1.Condition{
+					{
+						Type:    xpv1.TypeReady,
+						Status:  corev1.ConditionFalse,
+						Reason:  xpv1.ReasonUnavailable,
+						Message: fmt.Sprintf("%s: %s", errCelQueryFailedToEvalProgram, "no such key: isReady"),
+					},
+				},
+			},
+		},
+		"AvailableIfCelQueryUsesExistsToAPath": {
+			args: args{
+				obj: &v1alpha2.Object{
+					Spec: v1alpha2.ObjectSpec{
+						Readiness: v1alpha2.Readiness{
+							Policy:   v1alpha2.ReadinessPolicyDeriveFromCelQuery,
+							CelQuery: `object.status.conditions.exists(c, c.type == "condition1" && c.status == "True" )`,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": xpv1.ConditionedStatus{
+							Conditions: []xpv1.Condition{
+								{
+									Type:   "condition1",
+									Status: corev1.ConditionTrue,
+								},
+								{
+									Type:   xpv1.TypeReady,
+									Status: corev1.ConditionFalse,
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				conditions: []xpv1.Condition{
+					{
+						Type:   xpv1.TypeReady,
+						Reason: xpv1.ReasonAvailable,
+						Status: corev1.ConditionTrue,
+					},
+				},
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
