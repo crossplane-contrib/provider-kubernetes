@@ -128,10 +128,20 @@ type ResourceSyncer interface {
 	// GetObservedState extracts the observed state of the current object that
 	// should be compared with the desired state of the object manifest to
 	// decide whether the object is up-to-date or not.
+	// Without server-side apply, the observed state is extracted from the last
+	// applied annotation, otherwise it is extracted from the current object
+	// using the server-side apply extractor.
 	GetObservedState(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error)
 	// GetDesiredState calculates the desired state of the object manifest that
 	// we would like to see at the Kube API so that we can compare it with the
 	// observed state to decide whether the object is up-to-date or not.
+	// Without server-side apply, the desired state is the object manifest
+	// itself, however, with server-side apply, the desired state is extracted
+	// with a dry-run apply of the object manifest. This is mostly a workaround
+	// for a limitation/bug in the server-side apply implementation due to poor
+	// handling of defaulting in certain cases.
+	// https://github.com/kubernetes/kubernetes/issues/115563
+	// https://github.com/kubernetes/kubernetes/issues/124605
 	GetDesiredState(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error)
 	// SyncResource syncs the desired state of the object manifest to the Kube API.
 	SyncResource(ctx context.Context, obj *v1alpha2.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error)
@@ -309,30 +319,30 @@ type external struct {
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) { // nolint:gocyclo, mostly branches due to feature flags, hopefully will be refactored once they are promoted
-	cr, ok := mg.(*v1alpha2.Object)
+	obj, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return managed.ExternalObservation{}, errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Observing", "resource", cr)
+	c.logger.Debug("Observing", "resource", obj)
 
-	if !meta.WasDeleted(cr) {
+	if !meta.WasDeleted(obj) {
 		// If the object is not being deleted, we need to resolve references
-		if err := c.resolveReferencies(ctx, cr); err != nil {
+		if err := c.resolveReferencies(ctx, obj); err != nil {
 			return managed.ExternalObservation{}, errors.Wrap(err, errResolveResourceReferences)
 		}
 	}
 
-	res, err := parseManifest(cr)
+	manifest, err := parseManifest(obj)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
-	if c.shouldWatch(cr) {
-		c.kindObserver.WatchResources(c.rest, cr.Spec.ProviderConfigReference.Name, res.GroupVersionKind())
+	if c.shouldWatch(obj) {
+		c.kindObserver.WatchResources(c.rest, obj.Spec.ProviderConfigReference.Name, manifest.GroupVersionKind())
 	}
 
-	current := res.DeepCopy()
+	current := manifest.DeepCopy()
 	err = c.client.Get(ctx, types.NamespacedName{
 		Namespace: current.GetNamespace(),
 		Name:      current.GetName(),
@@ -346,27 +356,27 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObject)
 	}
 
-	if err = c.setAtProvider(cr, current); err != nil {
+	if err = c.setAtProvider(obj, current); err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
 	// observedState contains the extracted state of the current object that
-	// should be compared with the res state of the object manifest to
-	// decide whether the object is up-to-date or not.
+	// should be compared with the desired state of the object to decide whether
+	// the object is up-to-date or not.
 	// If serverSideApply is enabled, we will extract the state from the
 	// current object, otherwise we will extract the state from the last
 	// applied annotation.
 	var observedState *unstructured.Unstructured
-	if observedState, err = c.syncer.GetObservedState(ctx, cr, current); err != nil {
+	if observedState, err = c.syncer.GetObservedState(ctx, obj, current); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObservedState)
 	}
 
 	var desiredState *unstructured.Unstructured
-	if desiredState, err = c.syncer.GetDesiredState(ctx, cr, res); err != nil {
+	if desiredState, err = c.syncer.GetDesiredState(ctx, obj, manifest); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetDesiredState)
 	}
 
-	return c.handleObservation(ctx, cr, observedState, desiredState)
+	return c.handleObservation(ctx, obj, observedState, desiredState)
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
