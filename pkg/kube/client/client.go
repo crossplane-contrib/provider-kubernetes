@@ -17,7 +17,11 @@ import (
 	"context"
 	"strings"
 
+	authenticationv1alpha1 "github.com/gardener/gardener/pkg/apis/authentication/v1alpha1"
+	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/pkg/errors"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
@@ -27,6 +31,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/azure"
+	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/gardener"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/gke"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/token"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/upbound"
@@ -34,14 +39,16 @@ import (
 )
 
 const (
-	errGetCreds                  = "cannot get credentials"
-	errCreateRestConfig          = "cannot create new REST config using provider secret"
-	errExtractGoogleCredentials  = "cannot extract Google Application Credentials"
-	errInjectGoogleCredentials   = "cannot wrap REST client with Google Application Credentials"
-	errExtractAzureCredentials   = "failed to extract Azure Application Credentials"
-	errInjectAzureCredentials    = "failed to wrap REST client with Azure Application Credentials"
-	errExtractUpboundCredentials = "failed to extract Upbound token"
-	errInjectUpboundCredentials  = "failed to wrap REST client with Upbound token"
+	errGetCreds                   = "cannot get credentials"
+	errCreateRestConfig           = "cannot create new REST config using provider secret"
+	errExtractGoogleCredentials   = "cannot extract Google Application Credentials"
+	errInjectGoogleCredentials    = "cannot wrap REST client with Google Application Credentials"
+	errExtractAzureCredentials    = "failed to extract Azure Application Credentials"
+	errInjectAzureCredentials     = "failed to wrap REST client with Azure Application Credentials"
+	errExtractUpboundCredentials  = "failed to extract Upbound token"
+	errInjectUpboundCredentials   = "failed to wrap REST client with Upbound token"
+	errExtractGardenerCredentials = "failed to extract Gardener Credentials"
+	errInjectGardenerCredentials  = "failed to get REST client with Gardener Credentials"
 )
 
 // A Builder creates Kubernetes clients and REST configs for a given provider
@@ -162,6 +169,48 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 					return nil, errors.Wrap(err, errInjectUpboundCredentials)
 				}
 			}
+		case kconfig.IdentityTypeGardenerShootAdminCredentials:
+			var gardenerClient client.Client
+			scheme := runtime.NewScheme()
+			if err := authenticationv1alpha1.AddToScheme(scheme); err != nil {
+				return nil, errors.Wrap(err, "unable to add authentication scheme")
+			}
+			if err := gardencorev1beta1.AddToScheme(scheme); err != nil {
+				return nil, errors.Wrap(err, "unable to add gardencore scheme")
+			}
+
+			switch id.Source { //nolint:exhaustive
+			case xpv1.CredentialsSourceInjectedIdentity:
+				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
+					xpv1.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeGardenerShootAdminCredentials)
+			default:
+				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
+				if err != nil {
+					return nil, errors.Wrap(err, errExtractGardenerCredentials)
+				}
+
+				gardenerClient, err = client.New(rc, client.Options{
+					Scheme: scheme,
+				})
+				if err != nil {
+					return nil, errors.Wrap(err, errExtractGardenerCredentials)
+				}
+
+				shootNamespace, shootName, ok := strings.Cut(string(creds), "/")
+				if !ok {
+					return nil, errors.New("exptected \"shootnamespace/shootname\" in identity secret")
+				}
+
+				grc, err := gardener.GetShootAuthFromCache(ctx, gardenerClient, &types.NamespacedName{
+					Name:      shootName,
+					Namespace: shootNamespace,
+				})
+				if err != nil {
+					return nil, errors.Wrap(err, errInjectGardenerCredentials)
+				}
+				return grc, nil
+			}
+
 		default:
 			return nil, errors.Errorf("unknown identity type: %s", id.Type)
 		}
