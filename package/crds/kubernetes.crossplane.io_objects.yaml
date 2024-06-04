@@ -784,6 +784,17 @@ spec:
                   if not specified it will be considered ready as soon as the underlying external
                   resource is considered up-to-date.
                 properties:
+                  celQuery:
+                    description: |-
+                      CelQuery defines a cel query to evaluate the readiness. The
+                      observed object is passed to the cel query with the word `object`.
+                      Cel macros are available to be used, see https://github.com/google/cel-spec/blob/master/doc/langdef.md#macros
+                      for more information.
+                      Examples:
+                       `object.status.isReady == true`: checks for a boolean field called isReady on status.
+                       `object.status.conditions.all(x, x.status == "True")` mimics the behavior of the AllTrue readiness policy
+                       `object.status.conditions.exists(c, c.type == "condition1" && c.status == "True" )` checks just one condition
+                    type: string
                   policy:
                     default: SuccessfulCreate
                     description: Policy defines how the Object's readiness condition
@@ -792,8 +803,13 @@ spec:
                     - SuccessfulCreate
                     - DeriveFromObject
                     - AllTrue
+                    - DeriveFromCelQuery
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: celQuery must be set if policy is DeriveFromCelQuery
+                  rule: self.policy != 'DeriveFromCelQuery' || (self.policy == 'DeriveFromCelQuery'
+                    && size(self.celQuery) > 0)
               references:
                 items:
                   description: |-

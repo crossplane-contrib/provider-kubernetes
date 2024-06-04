@@ -21,9 +21,12 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math/rand"
+	"reflect"
 	"strings"
 	"time"
 
+	"github.com/google/cel-go/cel"
+	celtypes "github.com/google/cel-go/common/types"
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -96,6 +99,14 @@ const (
 	errGetValueAtFieldPath  = "cannot get value at fieldPath"
 	errDecodeSecretData     = "cannot decode secret data"
 	errSanitizeSecretData   = "cannot sanitize secret data"
+
+	errCelQueryFailedToCompile           = "failed to compile query"
+	errCelQueryReturnTypeNotBool         = "celQuery does not return a bool type"
+	errCelQueryFailedToCreateProgram     = "failed to create program from the cel query"
+	errCelQueryFailedToEvalProgram       = "failed to eval the program"
+	errCelQueryCannotBeEmpty             = "cel query cannot be empty"
+	errCelQueryFailedToCreateEnvironment = "cel query failed to create environment"
+	errCelQueryJSON                      = "failed to marshal or unmarshal the obj for cel query"
 )
 
 // KindObserver tracks kinds of referenced composed resources in order to start
@@ -418,48 +429,36 @@ func (c *external) setObserved(obj *v1alpha2.Object, observed *unstructured.Unst
 }
 
 func (c *external) updateConditionFromObserved(obj *v1alpha2.Object, observed *unstructured.Unstructured) error {
+	var ready bool
+	var err error
+
 	switch obj.Spec.Readiness.Policy {
 	case v1alpha2.ReadinessPolicyDeriveFromObject:
-		conditioned := xpv1.ConditionedStatus{}
-		err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
-		if err != nil {
-			c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
-			obj.SetConditions(xpv1.Unavailable())
-			return nil
-		}
-		if status := conditioned.GetCondition(xpv1.TypeReady).Status; status != v1.ConditionTrue {
-			c.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", observed)
-			obj.SetConditions(xpv1.Unavailable())
-			return nil
-		}
-		obj.SetConditions(xpv1.Available())
+		ready = c.checkDeriveFromObject(observed)
 	case v1alpha2.ReadinessPolicyAllTrue:
-		conditioned := xpv1.ConditionedStatus{}
-		err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
-		if err != nil {
-			c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
-			obj.SetConditions(xpv1.Unavailable())
-			return nil
-		}
-		allTrue := len(conditioned.Conditions) > 0
-		for _, condition := range conditioned.Conditions {
-			if condition.Status != v1.ConditionTrue {
-				allTrue = false
-				break
-			}
-		}
-		if allTrue {
-			obj.SetConditions(xpv1.Available())
-		} else {
-			obj.SetConditions(xpv1.Unavailable())
-		}
+		ready = c.checkAllConditions(observed)
+	case v1alpha2.ReadinessPolicyDeriveFromCelQuery:
+		ready, err = c.checkDeriveFromCelQuery(obj, observed)
 	case v1alpha2.ReadinessPolicySuccessfulCreate, "":
 		// do nothing, will be handled by c.handleLastApplied method
 		// "" should never happen, but just in case we will treat it as SuccessfulCreate for backward compatibility
+		return nil
 	default:
 		// should never happen
 		return errors.Errorf("unknown readiness policy %q", obj.Spec.Readiness.Policy)
 	}
+
+	if err != nil {
+		obj.SetConditions(xpv1.Unavailable().WithMessage(err.Error()))
+		return nil
+	}
+
+	if !ready {
+		obj.SetConditions(xpv1.Unavailable())
+		return nil
+	}
+
+	obj.SetConditions(xpv1.Available())
 	return nil
 }
 
@@ -481,6 +480,103 @@ func getReferenceInfo(ref v1alpha2.Reference) (string, string, string, string) {
 	}
 
 	return apiVersion, kind, namespace, name
+}
+
+func (c *external) checkDeriveFromObject(observed *unstructured.Unstructured) bool {
+	conditioned := xpv1.ConditionedStatus{}
+	if err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned); err != nil {
+		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
+		return false
+	}
+	if status := conditioned.GetCondition(xpv1.TypeReady).Status; status != v1.ConditionTrue {
+		c.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", observed)
+		return false
+	}
+	return true
+}
+
+func (c *external) checkAllConditions(observed *unstructured.Unstructured) (allTrue bool) {
+	conditioned := xpv1.ConditionedStatus{}
+	err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
+	if err != nil {
+		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
+		return false
+	}
+	allTrue = len(conditioned.Conditions) > 0
+	for _, condition := range conditioned.Conditions {
+		if condition.Status != v1.ConditionTrue {
+			allTrue = false
+			return allTrue
+		}
+	}
+	return allTrue
+}
+
+// checkDeriveFromCelQuery will look at the celQuery field and run it as a program, using the observed object as input to
+// evaluate if the object is ready or not
+func (c *external) checkDeriveFromCelQuery(obj *v1alpha2.Object, observed *unstructured.Unstructured) (ready bool, err error) {
+	// There is a validation on it but this can still happen before 1.29
+	if obj.Spec.Readiness.CelQuery == "" {
+		c.logger.Debug("cel query is empty")
+		err = errors.New(errCelQueryCannotBeEmpty)
+		return ready, err
+	}
+
+	env, err := cel.NewEnv(
+		cel.Variable("object", cel.AnyType),
+	)
+	if err != nil {
+		c.logger.Debug("failed to create cel env", "err", err)
+		err = errors.Wrap(err, errCelQueryFailedToCreateEnvironment)
+		return ready, err
+	}
+
+	ast, iss := env.Compile(obj.Spec.Readiness.CelQuery)
+	if iss.Err() != nil {
+		c.logger.Debug("failed to compile query", "err", iss.Err())
+		err = errors.Wrap(err, errCelQueryFailedToCompile)
+		return ready, err
+	}
+	if !reflect.DeepEqual(ast.OutputType(), cel.BoolType) {
+		c.logger.Debug(errCelQueryReturnTypeNotBool, "err", iss.Err())
+		err = errors.Wrap(err, errCelQueryReturnTypeNotBool)
+		return ready, err
+	}
+
+	program, err := env.Program(ast)
+	if err != nil {
+		c.logger.Debug("failed to create program from the cel query", "err", err)
+		err = errors.Wrap(err, errCelQueryFailedToCreateProgram)
+		return ready, err
+	}
+
+	data, err := json.Marshal(observed.Object)
+	if err != nil {
+		// this should not happen, but just in case
+		c.logger.Debug("failed to marshal the object", "err", err)
+		err = errors.Wrap(err, errCelQueryJSON)
+		return ready, err
+	}
+	objMap := map[string]any{}
+	err = json.Unmarshal(data, &objMap)
+	if err != nil {
+		// this should not happen, but just in case
+		c.logger.Debug("failed to unmarshal the object", "err", err)
+		err = errors.Wrap(err, errCelQueryJSON)
+		return ready, err
+	}
+
+	val, _, err := program.Eval(map[string]any{
+		"object": objMap,
+	})
+	if err != nil {
+		c.logger.Debug("failed to eval the program", "err", err)
+		err = errors.Wrap(err, errCelQueryFailedToEvalProgram)
+		return ready, err
+	}
+
+	ready = (val == celtypes.True)
+	return ready, err
 }
 
 // resolveReferencies resolves references for the current Object. If it fails to

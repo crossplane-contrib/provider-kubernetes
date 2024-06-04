@@ -120,17 +120,31 @@ const (
 	// ReadinessPolicyAllTrue means that all conditions have status true on the object.
 	// There must be at least one condition.
 	ReadinessPolicyAllTrue ReadinessPolicy = "AllTrue"
+	// ReadinessPolicyDeriveFromCelQuery means that a cel expression will be used to calculate the overall status.
+	// The cel expression must be provided on the readiness struct.
+	ReadinessPolicyDeriveFromCelQuery ReadinessPolicy = "DeriveFromCelQuery"
 )
 
 // Readiness defines how the object's readiness condition should be computed,
 // if not specified it will be considered ready as soon as the underlying external
 // resource is considered up-to-date.
+// +kubebuilder:validation:XValidation:rule="self.policy != 'DeriveFromCelQuery' || (self.policy == 'DeriveFromCelQuery' && size(self.celQuery) > 0)",message="celQuery must be set if policy is DeriveFromCelQuery"
 type Readiness struct {
 	// Policy defines how the Object's readiness condition should be computed.
 	// +optional
-	// +kubebuilder:validation:Enum=SuccessfulCreate;DeriveFromObject;AllTrue
+	// +kubebuilder:validation:Enum=SuccessfulCreate;DeriveFromObject;AllTrue;DeriveFromCelQuery
 	// +kubebuilder:default=SuccessfulCreate
 	Policy ReadinessPolicy `json:"policy,omitempty"`
+
+	// CelQuery defines a cel query to evaluate the readiness. The
+	// observed object is passed to the cel query with the word `object`.
+	// Cel macros are available to be used, see https://github.com/google/cel-spec/blob/master/doc/langdef.md#macros
+	// for more information.
+	// Examples:
+	//  `object.status.isReady == true`: checks for a boolean field called isReady on status.
+	//  `object.status.conditions.all(x, x.status == "True")` mimics the behavior of the AllTrue readiness policy
+	//  `object.status.conditions.exists(c, c.type == "condition1" && c.status == "True" )` checks just one condition
+	CelQuery string `json:"celQuery,omitempty"`
 }
 
 // ConnectionDetail represents an entry in the connection secret for an Object
