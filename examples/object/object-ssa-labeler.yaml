@@ -4,10 +4,6 @@ apiVersion: kubernetes.crossplane.io/v1alpha2
 kind: Object
 metadata:
   name: sample-service-labeler
-  annotations:
-    # Note(turkenh): Import restarts Crossplane pod losing the cached provider package
-    # hence preventing changes being redeployed with modified deployment runtime config.
-    uptest.upbound.io/disable-import: "true"
 spec:
   # Note: This resource will only patch/update the manifest below.
   # It will not delete or create the resource.

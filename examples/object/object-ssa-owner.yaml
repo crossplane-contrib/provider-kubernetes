@@ -8,9 +8,6 @@ metadata:
     uptest.upbound.io/pre-assert-hook: testhooks/enable-ssa.sh
     uptest.upbound.io/post-assert-hook: testhooks/validate-ssa.sh
     uptest.upbound.io/timeout: "60"
-    # Note(turkenh): Import restarts Crossplane pod losing the cached provider package
-    # hence preventing changes being redeployed with modified deployment runtime config.
-    uptest.upbound.io/disable-import: "true"
 spec:
   forProvider:
     manifest:

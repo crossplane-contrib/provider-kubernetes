@@ -7,7 +7,7 @@ toolchain go1.22.3
 require (
 	github.com/Azure/kubelogin v0.1.1
 	github.com/alecthomas/kingpin/v2 v2.4.0
-	github.com/crossplane/crossplane-runtime v1.17.0-rc.0.0.20240509182037-b31be7747c60
+	github.com/crossplane/crossplane-runtime v1.17.0-rc.0.0.20240513123822-e50f51abfed2
 	github.com/crossplane/crossplane-tools v0.0.0-20240522174801-1ad3d4c87f21
 	github.com/google/cel-go v0.17.7
 	github.com/google/go-cmp v0.6.0
