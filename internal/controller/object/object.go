@@ -37,6 +37,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	applymetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -77,10 +79,13 @@ const (
 	errApplyObject       = "cannot apply object"
 	errDeleteObject      = "cannot delete object"
 
+	errCreateDiscoveryClient      = "cannot create discovery client"
+	errCreateSSAExtractor         = "cannot create new unstructured server side apply extractor"
 	errNotKubernetesObject        = "managed resource is not an Object custom resource"
 	errBuildKubeForProviderConfig = "cannot build kube client for provider config"
 
-	errGetLastApplied          = "cannot get last applied"
+	errGetObservedState        = "cannot get observed state"
+	errGetDesiredState         = "cannot get desired state"
 	errUnmarshalTemplate       = "cannot unmarshal template"
 	errFailedToMarshalExisting = "cannot marshal existing resource"
 
@@ -117,8 +122,33 @@ type KindObserver interface {
 	WatchResources(rc *rest.Config, providerConfig string, gvks ...schema.GroupVersionKind)
 }
 
+// ResourceSyncer contains the methods required to decide whether an object is
+// up-to-date or not, and to sync the object to the Kube API.
+type ResourceSyncer interface {
+	// GetObservedState extracts the observed state of the current object that
+	// should be compared with the desired state of the object manifest to
+	// decide whether the object is up-to-date or not.
+	// Without server-side apply, the observed state is extracted from the last
+	// applied annotation, otherwise it is extracted from the current object
+	// using the server-side apply extractor.
+	GetObservedState(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error)
+	// GetDesiredState calculates the desired state of the object manifest that
+	// we would like to see at the Kube API so that we can compare it with the
+	// observed state to decide whether the object is up-to-date or not.
+	// Without server-side apply, the desired state is the object manifest
+	// itself, however, with server-side apply, the desired state is extracted
+	// with a dry-run apply of the object manifest. This is mostly a workaround
+	// for a limitation/bug in the server-side apply implementation due to poor
+	// handling of defaulting in certain cases.
+	// https://github.com/kubernetes/kubernetes/issues/115563
+	// https://github.com/kubernetes/kubernetes/issues/124605
+	GetDesiredState(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error)
+	// SyncResource syncs the desired state of the object manifest to the Kube API.
+	SyncResource(ctx context.Context, obj *v1alpha2.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error)
+}
+
 // Setup adds a controller that reconciles Object managed resources.
-func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitter time.Duration) error {
+func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitter time.Duration) error { // nolint:gocyclo // Too many branches due to alpha features, hopefully we can clean them up after we graduate them.
 	name := managed.ControllerName(v1alpha2.ObjectGroupKind)
 	l := o.Logger.WithValues("controller", name)
 
@@ -148,6 +178,10 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		kube:            mgr.GetClient(),
 		usage:           resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
 		clientBuilder:   kubeclient.NewIdentityAwareBuilder(mgr.GetClient()),
+	}
+
+	if o.Features.Enabled(features.EnableAlphaServerSideApply) {
+		conn.ssaEnabled = true
 	}
 
 	cb := ctrl.NewControllerManagedBy(mgr).
@@ -208,16 +242,14 @@ type connector struct {
 	usage           resource.Tracker
 	logger          logging.Logger
 	sanitizeSecrets bool
-
-	kindObserver KindObserver
+	kindObserver    KindObserver
+	ssaEnabled      bool
 
 	clientBuilder kubeclient.Builder
 }
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) { //nolint:gocyclo
-	// This method is currently a little over our complexity goal - be wary
-	// of making it more complex.
-	cr, ok := mg.(*v1alpha2.Object)
+func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
+	obj, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return nil, errors.New(errNotKubernetesObject)
 	}
@@ -227,7 +259,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	pc := &apisv1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: cr.GetProviderConfigReference().Name}, pc); err != nil {
+	if err := c.kube.Get(ctx, types.NamespacedName{Name: obj.GetProviderConfigReference().Name}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetProviderConfig)
 	}
 
@@ -236,7 +268,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errBuildKubeForProviderConfig)
 	}
 
-	return &external{
+	e := &external{
 		logger: c.logger,
 		client: resource.ClientApplicator{
 			Client:     k,
@@ -247,7 +279,30 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		sanitizeSecrets: c.sanitizeSecrets,
 
 		kindObserver: c.kindObserver,
-	}, nil
+		syncer: &PatchingResourceSyncer{
+			client: resource.ClientApplicator{
+				Client:     k,
+				Applicator: resource.NewAPIPatchingApplicator(k),
+			},
+		},
+	}
+
+	if c.ssaEnabled {
+		dc, err := discovery.NewDiscoveryClientForConfig(rc)
+		if err != nil {
+			return nil, errors.Wrap(err, errCreateDiscoveryClient)
+		}
+		applyExtractor, err := applymetav1.NewUnstructuredExtractor(dc)
+		if err != nil {
+			return nil, errors.Wrap(err, errCreateSSAExtractor)
+		}
+		e.syncer = &SSAResourceSyncer{
+			client:    k,
+			extractor: applyExtractor,
+		}
+	}
+
+	return e, nil
 }
 
 type external struct {
@@ -255,42 +310,42 @@ type external struct {
 	client resource.ClientApplicator
 	rest   *rest.Config
 	// localClient is specifically used to connect to local cluster, a.k.a control plane.
-	localClient     client.Client
-	sanitizeSecrets bool
-
+	localClient  client.Client
+	syncer       ResourceSyncer
 	kindObserver KindObserver
+
+	sanitizeSecrets bool
 }
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*v1alpha2.Object)
+func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) { // nolint:gocyclo, mostly branches due to feature flags, hopefully will be refactored once they are promoted
+	obj, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return managed.ExternalObservation{}, errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Observing", "resource", cr)
+	c.logger.Debug("Observing", "resource", obj)
 
-	if !meta.WasDeleted(cr) {
+	if !meta.WasDeleted(obj) {
 		// If the object is not being deleted, we need to resolve references
-		if err := c.resolveReferencies(ctx, cr); err != nil {
+		if err := c.resolveReferencies(ctx, obj); err != nil {
 			return managed.ExternalObservation{}, errors.Wrap(err, errResolveResourceReferences)
 		}
 	}
 
-	desired, err := getDesired(cr)
+	manifest, err := parseManifest(obj)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
-	if c.shouldWatch(cr) {
-		c.kindObserver.WatchResources(c.rest, cr.Spec.ProviderConfigReference.Name, desired.GroupVersionKind())
+	if c.shouldWatch(obj) {
+		c.kindObserver.WatchResources(c.rest, obj.Spec.ProviderConfigReference.Name, manifest.GroupVersionKind())
 	}
 
-	observed := desired.DeepCopy()
-
+	current := manifest.DeepCopy()
 	err = c.client.Get(ctx, types.NamespacedName{
-		Namespace: observed.GetNamespace(),
-		Name:      observed.GetName(),
-	}, observed)
+		Namespace: current.GetNamespace(),
+		Name:      current.GetName(),
+	}, current)
 
 	if kerrors.IsNotFound(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
@@ -300,113 +355,103 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObject)
 	}
 
-	if err = c.setObserved(cr, observed); err != nil {
+	if err = c.setAtProvider(obj, current); err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
-	var last *unstructured.Unstructured
-	if last, err = getLastApplied(cr, observed); err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errGetLastApplied)
+	// observedState contains the extracted state of the current object that
+	// should be compared with the desired state of the object to decide whether
+	// the object is up-to-date or not.
+	// If serverSideApply is enabled, we will extract the state from the
+	// current object, otherwise we will extract the state from the last
+	// applied annotation.
+	var observedState *unstructured.Unstructured
+	if observedState, err = c.syncer.GetObservedState(ctx, obj, current); err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(err, errGetObservedState)
 	}
-	return c.handleLastApplied(ctx, cr, last, desired)
+
+	var desiredState *unstructured.Unstructured
+	if desiredState, err = c.syncer.GetDesiredState(ctx, obj, manifest); err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(err, errGetDesiredState)
+	}
+
+	return c.handleObservation(ctx, obj, observedState, desiredState)
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*v1alpha2.Object)
+	obj, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Creating", "resource", cr)
+	c.logger.Debug("Creating", "resource", obj)
 
-	obj, err := getDesired(cr)
+	res, err := parseManifest(obj)
 	if err != nil {
 		return managed.ExternalCreation{}, err
 	}
 
-	meta.AddAnnotations(obj, map[string]string{
-		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
-	})
-
-	if err := c.client.Create(ctx, obj); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateObject)
+	current, err := c.syncer.SyncResource(ctx, obj, res)
+	if err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(CleanErr(err), errCreateObject)
 	}
-
-	return managed.ExternalCreation{}, c.setObserved(cr, obj)
+	return managed.ExternalCreation{}, c.setAtProvider(obj, current)
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
-	cr, ok := mg.(*v1alpha2.Object)
+	obj, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return managed.ExternalUpdate{}, errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Updating", "resource", cr)
+	c.logger.Debug("Updating", "resource", obj)
 
-	obj, err := getDesired(cr)
+	res, err := parseManifest(obj)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
 
-	meta.AddAnnotations(obj, map[string]string{
-		v1.LastAppliedConfigAnnotation: string(cr.Spec.ForProvider.Manifest.Raw),
-	})
-
-	if err := c.client.Apply(ctx, obj); err != nil {
+	current, err := c.syncer.SyncResource(ctx, obj, res)
+	if err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(CleanErr(err), errApplyObject)
 	}
-
-	return managed.ExternalUpdate{}, c.setObserved(cr, obj)
+	return managed.ExternalUpdate{}, c.setAtProvider(obj, current)
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
-	cr, ok := mg.(*v1alpha2.Object)
+	obj, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Deleting", "resource", cr)
+	c.logger.Debug("Deleting", "resource", obj)
 
-	obj, err := getDesired(cr)
+	res, err := parseManifest(obj)
 	if err != nil {
 		return err
 	}
 
-	return errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, obj)), errDeleteObject)
+	return errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, res)), errDeleteObject)
 }
 
-func getDesired(obj *v1alpha2.Object) (*unstructured.Unstructured, error) {
-	desired := &unstructured.Unstructured{}
-	if err := json.Unmarshal(obj.Spec.ForProvider.Manifest.Raw, desired); err != nil {
+func ssaFieldOwner(name string) string {
+	return fmt.Sprintf("provider-kubernetes/%s", name)
+}
+
+func parseManifest(obj *v1alpha2.Object) (*unstructured.Unstructured, error) {
+	r := &unstructured.Unstructured{}
+	if err := json.Unmarshal(obj.Spec.ForProvider.Manifest.Raw, r); err != nil {
 		return nil, errors.Wrap(err, errUnmarshalTemplate)
 	}
 
-	if desired.GetName() == "" {
-		desired.SetName(obj.Name)
+	if r.GetName() == "" {
+		r.SetName(obj.Name)
 	}
 
-	return desired, nil
+	return r, nil
 }
 
-func getLastApplied(obj *v1alpha2.Object, observed *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-	lastApplied, ok := observed.GetAnnotations()[v1.LastAppliedConfigAnnotation]
-	if !ok {
-		return nil, nil
-	}
-
-	last := &unstructured.Unstructured{}
-	if err := json.Unmarshal([]byte(lastApplied), last); err != nil {
-		return nil, errors.Wrap(err, errUnmarshalTemplate)
-	}
-
-	if last.GetName() == "" {
-		last.SetName(obj.Name)
-	}
-
-	return last, nil
-}
-
-func (c *external) setObserved(obj *v1alpha2.Object, observed *unstructured.Unstructured) error {
+func (c *external) setAtProvider(obj *v1alpha2.Object, observed *unstructured.Unstructured) error {
 	var err error
 
 	if c.sanitizeSecrets {
@@ -440,7 +485,7 @@ func (c *external) updateConditionFromObserved(obj *v1alpha2.Object, observed *u
 	case v1alpha2.ReadinessPolicyDeriveFromCelQuery:
 		ready, err = c.checkDeriveFromCelQuery(obj, observed)
 	case v1alpha2.ReadinessPolicySuccessfulCreate, "":
-		// do nothing, will be handled by c.handleLastApplied method
+		// do nothing, will be handled by c.handleObservation method
 		// "" should never happen, but just in case we will treat it as SuccessfulCreate for backward compatibility
 		return nil
 	default:
@@ -631,7 +676,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 	return nil
 }
 
-func (c *external) handleLastApplied(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
+func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	isUpToDate := false
 
 	if !sets.New[xpv1.ManagementAction](obj.GetManagementPolicies()...).

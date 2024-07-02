@@ -1,4 +1,5 @@
----
+# Note: This example is for the alpha feature of watching resources.
+# It requires the provider to be started with the --enable-watches flag.
 apiVersion: kubernetes.crossplane.io/v1alpha2
 kind: Object
 metadata:

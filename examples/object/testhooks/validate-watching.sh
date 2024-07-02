@@ -14,7 +14,7 @@ fi
 echo "Enabling watch feature for the provider"
 ${KUBECTL} patch deploymentruntimeconfig runtimeconfig-provider-kubernetes --type='json' -p='[{"op":"replace","path":"/spec/deploymentTemplate/spec/template/spec/containers/0/args", "value":["--debug", "--enable-watches"]}]'
 
-sleep 3
+sleep 30
 
 echo "Patching referenced secret"
 ${KUBECTL} patch secret bar --type='merge' -p='{"stringData":{"key":"new-value"}}'
