@@ -118,7 +118,7 @@ type KindObserver interface {
 }
 
 // Setup adds a controller that reconciles Object managed resources.
-func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitter time.Duration) error {
+func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitterPercentage uint) error {
 	name := managed.ControllerName(v1alpha2.ObjectGroupKind)
 	l := o.Logger.WithValues("controller", name)
 
@@ -132,6 +132,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 				// If the resource is not ready, we should poll more frequently not to delay time to readiness.
 				pollInterval = 30 * time.Second
 			}
+			pollJitter := time.Duration(float64(pollInterval) * (float64(pollJitterPercentage) / 100.0))
 			// This is the same as runtime default poll interval with jitter, see:
 			// https://github.com/crossplane/crossplane-runtime/blob/7fcb8c5cad6fc4abb6649813b92ab92e1832d368/pkg/reconciler/managed/reconciler.go#L573
 			return pollInterval + time.Duration((rand.Float64()-0.5)*2*float64(pollJitter)) //nolint G404 // No need for secure randomness
