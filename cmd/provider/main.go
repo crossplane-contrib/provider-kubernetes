@@ -166,7 +166,7 @@ func main() {
 	// notice and remove when we drop support for v1alpha1.
 	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&v1alpha1.Object{}).Complete(), "Cannot create Object webhook")
 
-	kingpin.FatalIfError(object.Setup(mgr, o, *sanitizeSecrets, pollJitter), "Cannot setup controller")
+	kingpin.FatalIfError(object.Setup(mgr, o, *sanitizeSecrets, pollJitter, *pollJitterPercentage), "Cannot setup controller")
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")
 }
 

@@ -30,11 +30,11 @@ import (
 
 // Setup creates all Template controllers with the supplied logger and adds them to
 // the supplied manager.
-func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitter time.Duration) error {
+func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitter time.Duration, pollJitterPercentage uint) error {
 	if err := config.Setup(mgr, o); err != nil {
 		return err
 	}
-	if err := object.Setup(mgr, o, sanitizeSecrets, pollJitter); err != nil {
+	if err := object.Setup(mgr, o, sanitizeSecrets, pollJitterPercentage); err != nil {
 		return err
 	}
 	if err := observedobjectcollection.Setup(mgr, o, pollJitter); err != nil {
