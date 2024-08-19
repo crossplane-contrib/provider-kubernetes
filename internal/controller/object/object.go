@@ -37,7 +37,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
-	applymetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
@@ -82,6 +81,7 @@ const (
 
 	errCreateDiscoveryClient      = "cannot create discovery client"
 	errCreateSSAExtractor         = "cannot create new unstructured server side apply extractor"
+	errLoadSSAParserCacheTemplate = "cannot load parser cache for ProviderConfig %s"
 	errNotKubernetesObject        = "managed resource is not an Object custom resource"
 	errBuildKubeForProviderConfig = "cannot build kube client for provider config"
 
@@ -185,6 +185,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 	if o.Features.Enabled(features.EnableAlphaServerSideApply) {
 		conn.ssaEnabled = true
 		conn.stateCacheManager = ssa.NewDesiredStateCacheManager()
+		conn.parserCacheManager = ssa.NewGVKParserCacheManager()
 	}
 
 	cb := ctrl.NewControllerManagedBy(mgr).
@@ -251,6 +252,8 @@ type connector struct {
 	clientBuilder kubeclient.Builder
 
 	stateCacheManager ssa.StateCacheManager
+
+	parserCacheManager *ssa.GVKParserCacheManager
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -297,7 +300,11 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		if err != nil {
 			return nil, errors.Wrap(err, errCreateDiscoveryClient)
 		}
-		applyExtractor, err := applymetav1.NewUnstructuredExtractor(dc)
+		parserCache, err := c.parserCacheManager.LoadOrNewCacheForProviderConfig(pc)
+		if err != nil {
+			return nil, errors.Wrapf(err, errLoadSSAParserCacheTemplate, pc.GetName())
+		}
+		applyExtractor, err := ssa.NewCachingUnstructuredExtractor(ctx, dc, parserCache)
 		if err != nil {
 			return nil, errors.Wrap(err, errCreateSSAExtractor)
 		}
