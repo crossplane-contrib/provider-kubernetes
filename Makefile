@@ -37,7 +37,6 @@ GOLANGCILINT_VERSION = 1.55.2
 # Setup Kubernetes tools
 KIND_VERSION = v0.22.0
 UP_VERSION = v0.28.0
-UPTEST_VERSION = v0.9.0
 UP_CHANNEL = stable
 USE_HELM3 = true
 -include build/makelib/k8s_tools.mk
@@ -85,6 +84,7 @@ cobertura:
 
 # ====================================================================================
 # End to End Testing
+CROSSPLANE_VERSION = 1.16.0
 CROSSPLANE_NAMESPACE = crossplane-system
 -include build/makelib/local.xpkg.mk
 -include build/makelib/controlplane.mk
