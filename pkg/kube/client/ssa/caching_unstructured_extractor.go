@@ -18,11 +18,8 @@ import (
 	applymetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/client-go/discovery"
 	"k8s.io/kube-openapi/pkg/handler3"
-	"k8s.io/kube-openapi/pkg/schemaconv"
 	"k8s.io/kube-openapi/pkg/spec3"
 	"k8s.io/kube-openapi/pkg/validation/spec"
-	smdschema "sigs.k8s.io/structured-merge-diff/v4/schema"
-	"sigs.k8s.io/structured-merge-diff/v4/typed"
 )
 
 // cachingUnstructuredExtractor is a caching implementation of v1.UnstructuredExtractor
@@ -103,21 +100,22 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 
 	// check the cache after invalidating stale data
 	parserTuple, ok := e.cache.store[gv]
-	// generate new parser on cache miss, etag mismatch
+	// cache hit
+	if ok && parserTuple.etag == oapiGV.ETag() && oapiGV.ETag() != "" {
+		return parserTuple.parser, nil
+	}
+	// generate new parser on cache miss or etag mismatch
 	// defensively cover the case where discovery does not return any ETag
 	// for GV, which normally should not happen
-	if !ok || parserTuple.etag != oapiGV.ETag() || oapiGV.ETag() == "" {
-		freshParser, err := newParserFromOpenAPIGroupVersion(ctx, oapiGV)
-		if err != nil {
-			return nil, err
-		}
-		e.cache.store[gv] = &GvkParserCacheEntry{
-			parser: freshParser,
-			etag:   oapiGV.ETag(),
-		}
-		return freshParser, nil
+	freshParser, err := newParserFromOpenAPIGroupVersion(ctx, oapiGV)
+	if err != nil {
+		return nil, err
 	}
-	return parserTuple.parser, nil
+	e.cache.store[gv] = &GvkParserCacheEntry{
+		parser: freshParser,
+		etag:   oapiGV.ETag(),
+	}
+	return freshParser, nil
 }
 
 // gvRelativeAPIPath constructs the OpenAPI path for the given GVK
@@ -129,6 +127,10 @@ func gvRelativeAPIPath(gv schema.GroupVersion) string {
 }
 
 func newParserFromOpenAPIGroupVersion(ctx context.Context, oapiGV OpenAPIGroupVersion) (*GvkParser, error) {
+	// note: although proto schema is more performant, we are
+	// using the JSON schema here, as there is an issue with
+	// proto.NewOpenAPIV3Data during makeUnions() at
+	// https://github.com/kubernetes/kube-openapi/blob/f7e401e7b4c2199f15e2cf9e37a2faa2209f286a/pkg/schemaconv/smd.go#L128
 	s, err := oapiGV.Schema(ctx, "application/json")
 	if err != nil {
 		return nil, err
@@ -142,6 +144,9 @@ func newParserFromOpenAPIGroupVersion(ctx context.Context, oapiGV OpenAPIGroupVe
 	for k, v := range oapi.Components.Schemas {
 		specs[k] = v
 	}
+	// use the forked version of the new GVK parser
+	// accepting a map of components to OpenAPI schemas
+	// instead of proto.Models
 	return NewGVKParser(specs, false)
 }
 
@@ -164,98 +169,4 @@ func (e *cachingUnstructuredExtractor) extractUnstructured(object *unstructured.
 	result.SetKind(object.GetKind())
 	result.SetAPIVersion(object.GetAPIVersion())
 	return result, nil
-}
-
-// groupVersionKindExtensionKey is the key used to lookup the
-// GroupVersionKind value for an object definition from the
-// definition's "extensions" map.
-const groupVersionKindExtensionKey = "x-kubernetes-group-version-kind"
-
-// GvkParser contains a Parser that allows introspecting the schema.
-type GvkParser struct {
-	gvks   map[schema.GroupVersionKind]string
-	parser typed.Parser
-}
-
-// Type returns a helper which can produce objects of the given type. Any
-// errors are deferred until a further function is called.
-func (p *GvkParser) Type(gvk schema.GroupVersionKind) *typed.ParseableType {
-	typeName, ok := p.gvks[gvk]
-	if !ok {
-		return nil
-	}
-	t := p.parser.Type(typeName)
-	return &t
-}
-
-// NewGVKParser builds a GVKParser from a proto.Models. This
-// will automatically find the proper version of the object, and the
-// corresponding schema information.
-func NewGVKParser(componentNameToSchema map[string]*spec.Schema, preserveUnknownFields bool) (*GvkParser, error) {
-	typeSchema, err := schemaconv.ToSchemaFromOpenAPI(componentNameToSchema, preserveUnknownFields)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to convert models to schema")
-	}
-	parser := GvkParser{
-		gvks: map[schema.GroupVersionKind]string{},
-	}
-	parser.parser = typed.Parser{Schema: smdschema.Schema{Types: typeSchema.Types}}
-	for modelName, ss := range componentNameToSchema {
-		gvkList := parseGroupVersionKind(ss.Extensions)
-		for _, gvk := range gvkList {
-			if len(gvk.Kind) > 0 {
-				_, ok := parser.gvks[gvk]
-				if ok {
-					return nil, fmt.Errorf("duplicate entry for %v", gvk)
-				}
-				parser.gvks[gvk] = modelName
-			}
-		}
-	}
-	return &parser, nil
-}
-
-// Get and parse GroupVersionKind from the extension. Returns empty if it doesn't have one.
-func parseGroupVersionKind(extensions spec.Extensions) []schema.GroupVersionKind {
-	// Get the extensions
-	gvkExtension, ok := extensions[groupVersionKindExtensionKey]
-	if !ok {
-		return []schema.GroupVersionKind{}
-	}
-
-	// gvk extension must be a list of at least 1 element.
-	gvkList, ok := gvkExtension.([]interface{})
-	if !ok {
-		return []schema.GroupVersionKind{}
-	}
-
-	gvkListResult := make([]schema.GroupVersionKind, 0, len(gvkList))
-	for _, gvk := range gvkList {
-		// gvk extension list must be a map with group, version, and
-		// kind fields
-		gvkMap, ok := gvk.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		group, ok := gvkMap["group"].(string)
-		if !ok {
-			continue
-		}
-		version, ok := gvkMap["version"].(string)
-		if !ok {
-			continue
-		}
-		kind, ok := gvkMap["kind"].(string)
-		if !ok {
-			continue
-		}
-
-		gvkListResult = append(gvkListResult, schema.GroupVersionKind{
-			Group:   group,
-			Version: version,
-			Kind:    kind,
-		})
-	}
-
-	return gvkListResult
 }
