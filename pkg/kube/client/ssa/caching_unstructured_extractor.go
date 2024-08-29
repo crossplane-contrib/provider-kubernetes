@@ -18,6 +18,7 @@ import (
 	applymetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/client-go/discovery"
 	"k8s.io/kube-openapi/pkg/handler3"
+	"k8s.io/kube-openapi/pkg/schemamutation"
 	"k8s.io/kube-openapi/pkg/spec3"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 )
@@ -140,9 +141,25 @@ func newParserFromOpenAPIGroupVersion(ctx context.Context, oapiGV OpenAPIGroupVe
 		return nil, err
 	}
 
+	var refErrors []string
+	// validate that every reference in each schema in the OpenAPI document
+	// is in the document, i.e. OpenAPI document is self-contained
+	// with no unresolvable or external reference.
+	// errors are expected to be accumulated into refErrors,
+	// by the RefCallback function,
+	// as the schema walker has no means of stopping early
+	walker := schemamutation.Walker{
+		SchemaCallback: schemamutation.SchemaCallBackNoop,
+		// note: this should not mutate any ref, only validate
+		RefCallback: validateRefSelfContainedFn(refErrors, oapi.Components.Schemas),
+	}
 	specs := map[string]*spec.Schema{}
 	for k, v := range oapi.Components.Schemas {
+		walker.WalkSchema(v)
 		specs[k] = v
+	}
+	if len(refErrors) > 0 {
+		return nil, errors.New(strings.Join(refErrors, "\n"))
 	}
 	// use the forked version of the new GVK parser
 	// accepting a map of components to OpenAPI schemas
@@ -169,4 +186,39 @@ func (e *cachingUnstructuredExtractor) extractUnstructured(object *unstructured.
 	result.SetKind(object.GetKind())
 	result.SetAPIVersion(object.GetAPIVersion())
 	return result, nil
+}
+
+// validateRefSelfContainedFn returns a RefCallback function for
+// schemamutation.Walker that defensively checks whether the ref is
+// contained in the given schema collection,
+// i.e. the ref does not point any remote/outside location.
+//
+// for each non-conformant ref, errors are accumulated to the provided string slice
+// as this function is intended to be used with the schemamutation.Walker
+func validateRefSelfContainedFn(errs []string, oapiComponentsToSchema map[string]*spec.Schema) func(ref *spec.Ref) *spec.Ref {
+	return func(ref *spec.Ref) *spec.Ref {
+		switch {
+		case ref == nil, ref.String() == "":
+		// skip with no error
+		case ref.IsCanonical():
+			errs = append(errs, fmt.Sprintf("only local references are supported, got canonical path: %s", ref.String()))
+		case ref.RemoteURI() != "":
+			errs = append(errs, fmt.Sprintf("only local references are supported, got remote URI: %s", ref.String()))
+		case ref.GetPointer() != nil && ref.GetURL() != nil && ref.HasFragmentOnly:
+			// we only expect local references in the form of URL fragment "#/component/schemas/{componentName}"
+			tokens := ref.GetPointer().DecodedTokens()
+			if len(tokens) != 3 || tokens[0] != "components" || tokens[1] != "schemas" {
+				errs = append(errs, fmt.Sprintf("expected local ref with #/components/schemas/{componentName}, got: %s", ref.String()))
+				break
+			}
+			if _, ok := oapiComponentsToSchema[tokens[2]]; !ok {
+				errs = append(errs, fmt.Sprintf("local reference %s cannot be found in OpenAPI schemas", ref.String()))
+				break
+			}
+			// passed validation
+		default:
+			errs = append(errs, fmt.Sprintf("only local references are supported, got: %s", ref.String()))
+		}
+		return ref
+	}
 }
