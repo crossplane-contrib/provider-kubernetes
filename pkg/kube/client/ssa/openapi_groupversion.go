@@ -80,7 +80,7 @@ func (g *customOAPIGroupVersion) Schema(ctx context.Context, contentType string)
 		}
 	}
 
-	return path.Do(context.TODO()).Raw()
+	return path.Do(ctx).Raw()
 }
 
 // ETag returns the associated ETag for the schema document

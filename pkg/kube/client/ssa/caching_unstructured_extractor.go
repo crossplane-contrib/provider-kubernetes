@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	applymetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/rest"
 	"k8s.io/kube-openapi/pkg/handler3"
 	"k8s.io/kube-openapi/pkg/schemamutation"
 	"k8s.io/kube-openapi/pkg/spec3"
@@ -55,9 +56,8 @@ func (e *cachingUnstructuredExtractor) ExtractStatus(object *unstructured.Unstru
 	return e.extractUnstructured(object, fieldManager, "status")
 }
 
-// getParserForGV fetches the *GVKParser for the given GVK.
-func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv schema.GroupVersion) (*GvkParser, error) {
-	data, err := e.dc.RESTClient().Get().
+func discoveryPaths(ctx context.Context, rc rest.Interface) (map[string]OpenAPIGroupVersion, error) {
+	data, err := rc.Get().
 		AbsPath("/openapi/v3").
 		Do(ctx).
 		Raw()
@@ -71,7 +71,7 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 	if err != nil {
 		return nil, err
 	}
-	// parse discovery information
+
 	oapiPathsToGV := map[string]OpenAPIGroupVersion{}
 	for path, oapiGV := range discoMap.Paths {
 		parse, err := url.Parse(oapiGV.ServerRelativeURL)
@@ -80,7 +80,17 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 		}
 		useClientPrefix := strings.HasPrefix(oapiGV.ServerRelativeURL, "/openapi/v3")
 		etag := parse.Query().Get("hash")
-		oapiPathsToGV[path] = newCustomOAPIGroupVersion(e.dc.RESTClient(), oapiGV, useClientPrefix, etag)
+		oapiPathsToGV[path] = newCustomOAPIGroupVersion(rc, oapiGV, useClientPrefix, etag)
+	}
+	return oapiPathsToGV, nil
+}
+
+// getParserForGV fetches the *GVKParser for the given GroupVersion.
+func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv schema.GroupVersion) (*GvkParser, error) {
+	// parse discovery information
+	oapiPathsToGV, err := discoveryPaths(ctx, e.dc.RESTClient())
+	if err != nil {
+		return nil, err
 	}
 
 	e.cache.mu.Lock()
@@ -112,9 +122,12 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 	if err != nil {
 		return nil, err
 	}
-	e.cache.store[gv] = &GvkParserCacheEntry{
-		parser: freshParser,
-		etag:   oapiGV.ETag(),
+	// cache parser only if non-empty etag
+	if oapiGV.ETag() != "" {
+		e.cache.store[gv] = &GvkParserCacheEntry{
+			parser: freshParser,
+			etag:   oapiGV.ETag(),
+		}
 	}
 	return freshParser, nil
 }
@@ -134,11 +147,11 @@ func newParserFromOpenAPIGroupVersion(ctx context.Context, oapiGV OpenAPIGroupVe
 	// https://github.com/kubernetes/kube-openapi/blob/f7e401e7b4c2199f15e2cf9e37a2faa2209f286a/pkg/schemaconv/smd.go#L128
 	s, err := oapiGV.Schema(ctx, "application/json")
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "cannot get OpenAPI schema")
 	}
 	var oapi spec3.OpenAPI
 	if err := json.Unmarshal(s, &oapi); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "cannot unmarshal OpenAPI schema")
 	}
 
 	var refErrors []string
@@ -151,7 +164,7 @@ func newParserFromOpenAPIGroupVersion(ctx context.Context, oapiGV OpenAPIGroupVe
 	walker := schemamutation.Walker{
 		SchemaCallback: schemamutation.SchemaCallBackNoop,
 		// note: this should not mutate any ref, only validate
-		RefCallback: validateRefSelfContainedFn(refErrors, oapi.Components.Schemas),
+		RefCallback: validateRefSelfContainedFn(&refErrors, oapi.Components.Schemas),
 	}
 	specs := map[string]*spec.Schema{}
 	for k, v := range oapi.Components.Schemas {
@@ -159,7 +172,7 @@ func newParserFromOpenAPIGroupVersion(ctx context.Context, oapiGV OpenAPIGroupVe
 		specs[k] = v
 	}
 	if len(refErrors) > 0 {
-		return nil, errors.New(strings.Join(refErrors, "\n"))
+		return nil, errors.Errorf("cannot validate references in OpenAPI schemas: %s", strings.Join(refErrors, ",\n"))
 	}
 	// use the forked version of the new GVK parser
 	// accepting a map of components to OpenAPI schemas
@@ -195,29 +208,29 @@ func (e *cachingUnstructuredExtractor) extractUnstructured(object *unstructured.
 //
 // for each non-conformant ref, errors are accumulated to the provided string slice
 // as this function is intended to be used with the schemamutation.Walker
-func validateRefSelfContainedFn(errs []string, oapiComponentsToSchema map[string]*spec.Schema) func(ref *spec.Ref) *spec.Ref {
+func validateRefSelfContainedFn(errs *[]string, oapiComponentsToSchema map[string]*spec.Schema) func(ref *spec.Ref) *spec.Ref {
 	return func(ref *spec.Ref) *spec.Ref {
 		switch {
 		case ref == nil, ref.String() == "":
-		// skip with no error
-		case ref.IsCanonical():
-			errs = append(errs, fmt.Sprintf("only local references are supported, got canonical path: %s", ref.String()))
+			// do nothing
 		case ref.RemoteURI() != "":
-			errs = append(errs, fmt.Sprintf("only local references are supported, got remote URI: %s", ref.String()))
+			*errs = append(*errs, fmt.Sprintf("only local references are supported, got remote URI: %s", ref.String()))
+		case ref.IsCanonical():
+			*errs = append(*errs, fmt.Sprintf("only local references are supported, got canonical path: %s", ref.String()))
 		case ref.GetPointer() != nil && ref.GetURL() != nil && ref.HasFragmentOnly:
 			// we only expect local references in the form of URL fragment "#/component/schemas/{componentName}"
 			tokens := ref.GetPointer().DecodedTokens()
 			if len(tokens) != 3 || tokens[0] != "components" || tokens[1] != "schemas" {
-				errs = append(errs, fmt.Sprintf("expected local ref with #/components/schemas/{componentName}, got: %s", ref.String()))
+				*errs = append(*errs, fmt.Sprintf("expected local ref with #/components/schemas/{componentName}, got: %s", ref.String()))
 				break
 			}
 			if _, ok := oapiComponentsToSchema[tokens[2]]; !ok {
-				errs = append(errs, fmt.Sprintf("local reference %s cannot be found in OpenAPI schemas", ref.String()))
+				*errs = append(*errs, fmt.Sprintf("local reference %s cannot be found in OpenAPI schemas", ref.String()))
 				break
 			}
 			// passed validation
 		default:
-			errs = append(errs, fmt.Sprintf("only local references are supported, got: %s", ref.String()))
+			*errs = append(*errs, fmt.Sprintf("only local references are supported, got: %s", ref.String()))
 		}
 		return ref
 	}

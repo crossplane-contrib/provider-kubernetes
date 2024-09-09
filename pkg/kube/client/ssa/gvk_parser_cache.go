@@ -10,8 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/crossplane/crossplane-runtime/pkg/logging"
-
 	"github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 )
 
@@ -22,33 +20,16 @@ type GVKParserCacheManager struct {
 	cacheStore map[types.UID]*GvkParserCache
 	// mu is used to make sure the cacheStore map is concurrency-safe.
 	mu *sync.RWMutex
-	// logger is the logger for cacheStore operations.
-	logger logging.Logger
 }
 
 // GVKParserCacheManagerOption lets you configure a *GVKParserCacheManager.
 type GVKParserCacheManagerOption func(cache *GVKParserCacheManager)
-
-// WithCacheStore lets you bootstrap GVKParserCacheManager with your own cacheStore.
-func WithCacheStore(cache map[types.UID]*GvkParserCache) GVKParserCacheManagerOption {
-	return func(c *GVKParserCacheManager) {
-		c.cacheStore = cache
-	}
-}
-
-// WithCacheLogger lets you configure the logger for the cacheStore.
-func WithCacheLogger(l logging.Logger) GVKParserCacheManagerOption {
-	return func(c *GVKParserCacheManager) {
-		c.logger = l
-	}
-}
 
 // NewGVKParserCacheManager returns a new empty *GVKParserCacheManager.
 func NewGVKParserCacheManager(opts ...GVKParserCacheManagerOption) *GVKParserCacheManager {
 	c := &GVKParserCacheManager{
 		cacheStore: map[types.UID]*GvkParserCache{},
 		mu:         &sync.RWMutex{},
-		logger:     logging.NewNopLogger(),
 	}
 	for _, f := range opts {
 		f(c)
