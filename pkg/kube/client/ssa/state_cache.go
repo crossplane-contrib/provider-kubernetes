@@ -8,7 +8,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	xpresource "github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	objectv1alpha2 "github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
@@ -33,33 +32,9 @@ type StateCache interface {
 // manifest.
 // Hash key can be used to determine the validity of the cache entry
 type DesiredStateCache struct {
-	logger logging.Logger
-	// mu protects the whole cache entry
-	mu        *sync.RWMutex
+	mu        sync.RWMutex
 	extracted *unstructured.Unstructured
 	hash      string
-}
-
-// DesiredStateCacheOption lets you configure the DesiredStateCache parameters
-type DesiredStateCacheOption func(dsc *DesiredStateCache)
-
-// WithLogger sets the logger of DesiredStateCache.
-func WithLogger(l logging.Logger) DesiredStateCacheOption {
-	return func(w *DesiredStateCache) {
-		w.logger = l
-	}
-}
-
-// NewDesiredStateCache initializes a DesiredStateCache with given options
-func NewDesiredStateCache(opts ...DesiredStateCacheOption) *DesiredStateCache {
-	w := &DesiredStateCache{
-		logger: logging.NewNopLogger(),
-		mu:     &sync.RWMutex{},
-	}
-	for _, f := range opts {
-		f(w)
-	}
-	return w
 }
 
 // GetStateFor returns the stored desired state if exists and valid, for the given *v1alpha2.Object
@@ -89,32 +64,13 @@ func (dc *DesiredStateCache) SetStateFor(obj *objectv1alpha2.Object, state *unst
 type DesiredStateCacheStore struct {
 	mu    sync.RWMutex
 	store map[types.UID]*DesiredStateCache
-
-	logger logging.Logger
-}
-
-// DesiredStateCacheStoreOption lets you configure the DesiredStateCacheStore parameters
-type DesiredStateCacheStoreOption func(dcs *DesiredStateCacheStore)
-
-// WithCacheStoreLogger sets the logger of DesiredStateCacheStore.
-func WithCacheStoreLogger(l logging.Logger) DesiredStateCacheStoreOption {
-	return func(d *DesiredStateCacheStore) {
-		d.logger = l
-	}
 }
 
 // NewDesiredStateCacheStore returns a new DesiredStateCacheStore instance
-func NewDesiredStateCacheStore(opts ...DesiredStateCacheStoreOption) *DesiredStateCacheStore {
-	dcs := &DesiredStateCacheStore{
-		store:  map[types.UID]*DesiredStateCache{},
-		logger: logging.NewNopLogger(),
+func NewDesiredStateCacheStore() *DesiredStateCacheStore {
+	return &DesiredStateCacheStore{
+		store: map[types.UID]*DesiredStateCache{},
 	}
-
-	for _, f := range opts {
-		f(dcs)
-	}
-
-	return dcs
 }
 
 // LoadOrNewForManaged returns the associated *DesiredStateCache stored in this
@@ -136,8 +92,7 @@ func (dcs *DesiredStateCacheStore) LoadOrNewForManaged(mg xpresource.Managed) St
 	// need to recheck cache as might have been populated already
 	stateCache, ok = dcs.store[mg.GetUID()]
 	if !ok {
-		l := dcs.logger.WithValues("cached-for", mg.GetName(), "id", mg.GetUID())
-		dcs.store[mg.GetUID()] = NewDesiredStateCache(WithLogger(l))
+		dcs.store[mg.GetUID()] = &DesiredStateCache{}
 		stateCache = dcs.store[mg.GetUID()]
 	}
 	return stateCache

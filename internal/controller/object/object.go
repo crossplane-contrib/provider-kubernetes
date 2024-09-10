@@ -181,7 +181,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		usage:           resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
 		clientBuilder:   kubeclient.NewIdentityAwareBuilder(mgr.GetClient()),
 
-		stateCacheManager: ssa.NewDesiredStateCacheStore(ssa.WithCacheStoreLogger(l)),
+		stateCacheManager: ssa.NewDesiredStateCacheStore(),
 	}
 
 	if o.Features.Enabled(features.EnableAlphaServerSideApply) {
