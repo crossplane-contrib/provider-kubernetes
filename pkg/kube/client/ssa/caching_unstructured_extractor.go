@@ -86,7 +86,7 @@ func discoveryPaths(ctx context.Context, rc rest.Interface) (map[string]OpenAPIG
 }
 
 // getParserForGV fetches the *GVKParser for the given GroupVersion.
-func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv schema.GroupVersion) (*GvkParser, error) {
+func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv schema.GroupVersion) (*GvkParser, error) { //nolint:gocyclo // for atomic cache operations
 	// parse discovery information
 	oapiPathsToGV, err := discoveryPaths(ctx, e.dc.RESTClient())
 	if err != nil {
@@ -208,7 +208,7 @@ func (e *cachingUnstructuredExtractor) extractUnstructured(object *unstructured.
 //
 // for each non-conformant ref, errors are accumulated to the provided string slice
 // as this function is intended to be used with the schemamutation.Walker
-func validateRefSelfContainedFn(errs *[]string, oapiComponentsToSchema map[string]*spec.Schema) func(ref *spec.Ref) *spec.Ref {
+func validateRefSelfContainedFn(errs *[]string, oapiComponentsToSchema map[string]*spec.Schema) func(ref *spec.Ref) *spec.Ref { //nolint:gocyclo
 	return func(ref *spec.Ref) *spec.Ref {
 		switch {
 		case ref == nil, ref.String() == "":

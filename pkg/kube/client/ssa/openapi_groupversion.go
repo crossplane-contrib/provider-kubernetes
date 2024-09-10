@@ -29,6 +29,8 @@ import (
 	"k8s.io/kube-openapi/pkg/handler3"
 )
 
+// OpenAPIGroupVersion is the context-aware variant of openapi.GroupVersion
+// It also stores the ETag for the underlying discovery GV path
 type OpenAPIGroupVersion interface {
 	// Schema is the context-accepting variant of the upstream client-go implementation
 	Schema(ctx context.Context, contentType string) ([]byte, error)
