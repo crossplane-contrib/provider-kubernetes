@@ -59,27 +59,27 @@ func (dc *DesiredStateCache) SetStateFor(obj *objectv1alpha2.Object, state *unst
 	dc.hash = manifestHash
 }
 
-// DesiredStateCacheStore stores the DesiredStateCache instances associated with the
+// DesiredStateCacheManager stores the DesiredStateCache instances associated with the
 // managed resource instance.
-type DesiredStateCacheStore struct {
+type DesiredStateCacheManager struct {
 	mu    sync.RWMutex
 	store map[types.UID]*DesiredStateCache
 }
 
-// NewDesiredStateCacheStore returns a new DesiredStateCacheStore instance
-func NewDesiredStateCacheStore() *DesiredStateCacheStore {
-	return &DesiredStateCacheStore{
+// NewDesiredStateCacheManager returns a new DesiredStateCacheManager instance
+func NewDesiredStateCacheManager() *DesiredStateCacheManager {
+	return &DesiredStateCacheManager{
 		store: map[types.UID]*DesiredStateCache{},
 	}
 }
 
 // LoadOrNewForManaged returns the associated *DesiredStateCache stored in this
-// DesiredStateCacheStore for the given managed resource.
+// DesiredStateCacheManager for the given managed resource.
 // If there is no DesiredStateCache stored previously, a new DesiredStateCache is created and
 // stored for the specified managed resource. Subsequent calls with the same managed
 // resource will return the previously instantiated and stored DesiredStateCache
 // for that managed resource
-func (dcs *DesiredStateCacheStore) LoadOrNewForManaged(mg xpresource.Managed) StateCache {
+func (dcs *DesiredStateCacheManager) LoadOrNewForManaged(mg xpresource.Managed) StateCache {
 	dcs.mu.RLock()
 	stateCache, ok := dcs.store[mg.GetUID()]
 	dcs.mu.RUnlock()
@@ -99,8 +99,8 @@ func (dcs *DesiredStateCacheStore) LoadOrNewForManaged(mg xpresource.Managed) St
 }
 
 // Remove will remove the stored DesiredStateCache of the given managed
-// resource from this DesiredStateCacheStore.
-func (dcs *DesiredStateCacheStore) Remove(mg xpresource.Managed) {
+// resource from this DesiredStateCacheManager.
+func (dcs *DesiredStateCacheManager) Remove(mg xpresource.Managed) {
 	dcs.mu.Lock()
 	defer dcs.mu.Unlock()
 	delete(dcs.store, mg.GetUID())
