@@ -87,8 +87,8 @@ func (dc *DesiredStateCache) SetStateFor(obj *objectv1alpha2.Object, state *unst
 // DesiredStateCacheStore stores the DesiredStateCache instances associated with the
 // managed resource instance.
 type DesiredStateCacheStore struct {
+	mu    sync.RWMutex
 	store map[types.UID]*DesiredStateCache
-	mu    *sync.Mutex
 
 	logger logging.Logger
 }
@@ -108,7 +108,6 @@ func NewDesiredStateCacheStore(opts ...DesiredStateCacheStoreOption) *DesiredSta
 	dcs := &DesiredStateCacheStore{
 		store:  map[types.UID]*DesiredStateCache{},
 		logger: logging.NewNopLogger(),
-		mu:     &sync.Mutex{},
 	}
 
 	for _, f := range opts {
@@ -125,9 +124,17 @@ func NewDesiredStateCacheStore(opts ...DesiredStateCacheStoreOption) *DesiredSta
 // resource will return the previously instantiated and stored DesiredStateCache
 // for that managed resource
 func (dcs *DesiredStateCacheStore) LoadOrNewForManaged(mg xpresource.Managed) StateCache {
+	dcs.mu.RLock()
+	stateCache, ok := dcs.store[mg.GetUID()]
+	dcs.mu.RUnlock()
+	if ok {
+		return stateCache
+	}
+
 	dcs.mu.Lock()
 	defer dcs.mu.Unlock()
-	stateCache, ok := dcs.store[mg.GetUID()]
+	// need to recheck cache as might have been populated already
+	stateCache, ok = dcs.store[mg.GetUID()]
 	if !ok {
 		l := dcs.logger.WithValues("cached-for", mg.GetName(), "id", mg.GetUID())
 		dcs.store[mg.GetUID()] = NewDesiredStateCache(WithLogger(l))
