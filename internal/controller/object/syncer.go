@@ -2,8 +2,6 @@ package object
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -81,15 +79,12 @@ func (s *SSAResourceSyncer) GetObservedState(_ context.Context, obj *v1alpha2.Ob
 // server-side apply on the object's manifest to see what the object would look
 // like if it were applied and extracting the managed fields from that.
 func (s *SSAResourceSyncer) GetDesiredState(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-	cachedDesired, cachedHash := s.desiredStateCache.GetState()
 	// Note(erhancagirici): cache assumes the raw manifest is the sole factor
 	// affecting the desired state of the upstream k8s object.
 	// Any further development in the v1alpha2.Object semantics
 	// affecting the desired state, should include it in the hash.
-	manifestSum := sha256.Sum256(obj.Spec.ForProvider.Manifest.Raw)
-	manifestHash := hex.EncodeToString(manifestSum[:])
-	if cachedDesired != nil && cachedHash == manifestHash {
-		return cachedDesired.DeepCopy(), nil
+	if cachedDesired, ok := s.desiredStateCache.GetStateFor(obj); ok {
+		return cachedDesired, nil
 	}
 	// Note(turkenh): This dry run call is mostly a workaround for the
 	// following issue: https://github.com/kubernetes/kubernetes/issues/115563
@@ -108,7 +103,7 @@ func (s *SSAResourceSyncer) GetDesiredState(ctx context.Context, obj *v1alpha2.O
 	}
 	desired, err := s.extractor.Extract(desiredObj, ssaFieldOwner(obj.Name))
 	// in error case, is set to nil, effectively invalidating the entry
-	s.desiredStateCache.SetState(desired, manifestHash)
+	s.desiredStateCache.SetStateFor(obj, desired)
 	return desired, errors.Wrap(err, "cannot extract SSA")
 }
 

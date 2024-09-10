@@ -1,6 +1,8 @@
 package ssa
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -8,6 +10,8 @@ import (
 
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	xpresource "github.com/crossplane/crossplane-runtime/pkg/resource"
+
+	objectv1alpha2 "github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 )
 
 // StateCacheManager lets you manage StateCache entries for XP managed
@@ -18,20 +22,20 @@ type StateCacheManager interface {
 }
 
 // StateCache is the interface for the caching a k8s
-// *unstructed.Unstructured object
+// *unstructured.Unstructured object
 type StateCache interface {
-	SetState(state *unstructured.Unstructured, hash string)
-	GetState() (*unstructured.Unstructured, string)
-	HasState() bool
+	SetStateFor(obj *objectv1alpha2.Object, state *unstructured.Unstructured)
+	GetStateFor(obj *objectv1alpha2.Object) (*unstructured.Unstructured, bool)
 }
 
 // DesiredStateCache is a concurrency-safe implementation of StateCache
 // that holds a cached k8s object state with a hash key of the associated
 // manifest.
-// Hash key can be used to determine the
+// Hash key can be used to determine the validity of the cache entry
 type DesiredStateCache struct {
-	logger    logging.Logger
-	mu        *sync.Mutex
+	logger logging.Logger
+	// mu protects the whole cache entry
+	mu        *sync.RWMutex
 	extracted *unstructured.Unstructured
 	hash      string
 }
@@ -50,7 +54,7 @@ func WithLogger(l logging.Logger) DesiredStateCacheOption {
 func NewDesiredStateCache(opts ...DesiredStateCacheOption) *DesiredStateCache {
 	w := &DesiredStateCache{
 		logger: logging.NewNopLogger(),
-		mu:     &sync.Mutex{},
+		mu:     &sync.RWMutex{},
 	}
 	for _, f := range opts {
 		f(w)
@@ -58,36 +62,35 @@ func NewDesiredStateCache(opts ...DesiredStateCacheOption) *DesiredStateCache {
 	return w
 }
 
-// GetState returns the stored desired state and the hash of associated
-// manifest
-func (dc *DesiredStateCache) GetState() (*unstructured.Unstructured, string) {
-	dc.mu.Lock()
-	defer dc.mu.Unlock()
-	return dc.extracted, dc.hash
+// GetStateFor returns the stored desired state if exists and valid, for the given *v1alpha2.Object
+func (dc *DesiredStateCache) GetStateFor(obj *objectv1alpha2.Object) (*unstructured.Unstructured, bool) {
+	manifestSum := sha256.Sum256(obj.Spec.ForProvider.Manifest.Raw)
+	manifestHash := hex.EncodeToString(manifestSum[:])
+	dc.mu.RLock()
+	defer dc.mu.RUnlock()
+	if dc.extracted != nil && dc.hash == manifestHash {
+		return dc.extracted, true
+	}
+	return nil, false
 }
 
-// HasState returns whether the DesiredStateCache has a stored state
-func (dc *DesiredStateCache) HasState() bool {
-	dc.mu.Lock()
-	defer dc.mu.Unlock()
-	return dc.extracted != nil
-}
-
-// SetState stores the given desired k8s object state into
-// the DesiredStateCache
-func (dc *DesiredStateCache) SetState(state *unstructured.Unstructured, hash string) {
+// SetStateFor stores the desired k8s object state for the given *v1alpha2.Object
+func (dc *DesiredStateCache) SetStateFor(obj *objectv1alpha2.Object, state *unstructured.Unstructured) {
+	manifestSum := sha256.Sum256(obj.Spec.ForProvider.Manifest.Raw)
+	manifestHash := hex.EncodeToString(manifestSum[:])
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 	dc.extracted = state
-	dc.hash = hash
+	dc.hash = manifestHash
 }
 
 // DesiredStateCacheStore stores the DesiredStateCache instances associated with the
 // managed resource instance.
 type DesiredStateCacheStore struct {
-	store  map[types.UID]*DesiredStateCache
+	store map[types.UID]*DesiredStateCache
+	mu    *sync.Mutex
+
 	logger logging.Logger
-	mu     *sync.Mutex
 }
 
 // DesiredStateCacheStoreOption lets you configure the DesiredStateCacheStore parameters
@@ -126,7 +129,7 @@ func (dcs *DesiredStateCacheStore) LoadOrNewForManaged(mg xpresource.Managed) St
 	defer dcs.mu.Unlock()
 	stateCache, ok := dcs.store[mg.GetUID()]
 	if !ok {
-		l := dcs.logger.WithValues("cached-for", mg.GetUID(), "cached-for", mg.GetName())
+		l := dcs.logger.WithValues("cached-for", mg.GetName(), "id", mg.GetUID())
 		dcs.store[mg.GetUID()] = NewDesiredStateCache(WithLogger(l))
 		stateCache = dcs.store[mg.GetUID()]
 	}
