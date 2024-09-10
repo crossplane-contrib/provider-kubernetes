@@ -5,7 +5,6 @@
 package ssa
 
 import (
-	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -24,7 +23,6 @@ type testClusterTarget struct {
 func buildTestCacheWithGVs(gvs []schema.GroupVersion) *GvkParserCache {
 	cache := &GvkParserCache{
 		store: map[schema.GroupVersion]*GvkParserCacheEntry{},
-		mu:    &sync.RWMutex{},
 	}
 	for _, gv := range gvs {
 		cache.store[gv] = &GvkParserCacheEntry{}

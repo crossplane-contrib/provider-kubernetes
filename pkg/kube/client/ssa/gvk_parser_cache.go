@@ -15,11 +15,11 @@ import (
 
 // GVKParserCacheManager maintains GVK parser cache stores for each provider config.
 type GVKParserCacheManager struct {
+	// mu is used to make sure the cacheStore map is concurrency-safe.
+	mu sync.RWMutex
 	// cacheStore holds the *GvkParserCache per provider configuration.
 	// The cacheStore key is the UID of the provider config object.
 	cacheStore map[types.UID]*GvkParserCache
-	// mu is used to make sure the cacheStore map is concurrency-safe.
-	mu *sync.RWMutex
 }
 
 // GVKParserCacheManagerOption lets you configure a *GVKParserCacheManager.
@@ -29,7 +29,6 @@ type GVKParserCacheManagerOption func(cache *GVKParserCacheManager)
 func NewGVKParserCacheManager(opts ...GVKParserCacheManagerOption) *GVKParserCacheManager {
 	c := &GVKParserCacheManager{
 		cacheStore: map[types.UID]*GvkParserCache{},
-		mu:         &sync.RWMutex{},
 	}
 	for _, f := range opts {
 		f(c)
@@ -47,7 +46,6 @@ func (cm *GVKParserCacheManager) LoadOrNewCacheForProviderConfig(pc *v1alpha1.Pr
 	if !ok {
 		sc = &GvkParserCache{
 			store: map[schema.GroupVersion]*GvkParserCacheEntry{},
-			mu:    &sync.RWMutex{},
 		}
 		cm.cacheStore[pc.GetUID()] = sc
 	}
@@ -65,9 +63,9 @@ func (cm *GVKParserCacheManager) RemoveCache(pc *v1alpha1.ProviderConfig) {
 // of the associated provider config.
 // Parsers are generated and cached per GroupVersion
 type GvkParserCache struct {
+	mu sync.RWMutex
 	// Parsers per GroupVersion
 	store map[schema.GroupVersion]*GvkParserCacheEntry
-	mu    *sync.RWMutex
 }
 
 // GvkParserCacheEntry wraps the *GvkParser with an ETag for

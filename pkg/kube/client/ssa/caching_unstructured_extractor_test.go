@@ -296,7 +296,6 @@ func TestExtract(t *testing.T) {
 
 			cache := &GvkParserCache{
 				store: map[schema.GroupVersion]*GvkParserCacheEntry{},
-				mu:    &sync.RWMutex{},
 			}
 			ext, err := NewCachingUnstructuredExtractor(context.TODO(), dc, cache)
 			if err != nil {
@@ -732,7 +731,6 @@ func TestParserCaching(t *testing.T) {
 
 	cache := &GvkParserCache{
 		store: map[schema.GroupVersion]*GvkParserCacheEntry{},
-		mu:    &sync.RWMutex{},
 	}
 	ext, err := NewCachingUnstructuredExtractor(context.TODO(), dc, cache)
 	if err != nil {
@@ -847,7 +845,6 @@ func TestCachingMultipleExtractors(t *testing.T) {
 
 	cache := &GvkParserCache{
 		store: map[schema.GroupVersion]*GvkParserCacheEntry{},
-		mu:    &sync.RWMutex{},
 	}
 	ext, err := NewCachingUnstructuredExtractor(context.TODO(), dc, cache)
 	if err != nil {
@@ -908,7 +905,6 @@ func TestParserCachingEmptyEtag(t *testing.T) {
 
 	cache := &GvkParserCache{
 		store: map[schema.GroupVersion]*GvkParserCacheEntry{},
-		mu:    &sync.RWMutex{},
 	}
 	ext, err := NewCachingUnstructuredExtractor(context.TODO(), dc, cache)
 	if err != nil {
