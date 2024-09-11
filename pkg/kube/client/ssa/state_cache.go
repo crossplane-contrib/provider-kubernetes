@@ -63,13 +63,13 @@ func (dc *DesiredStateCache) SetStateFor(obj *objectv1alpha2.Object, state *unst
 // managed resource instance.
 type DesiredStateCacheManager struct {
 	mu    sync.RWMutex
-	store map[types.UID]*DesiredStateCache
+	store map[types.UID]StateCache
 }
 
 // NewDesiredStateCacheManager returns a new DesiredStateCacheManager instance
 func NewDesiredStateCacheManager() *DesiredStateCacheManager {
 	return &DesiredStateCacheManager{
-		store: map[types.UID]*DesiredStateCache{},
+		store: map[types.UID]StateCache{},
 	}
 }
 
