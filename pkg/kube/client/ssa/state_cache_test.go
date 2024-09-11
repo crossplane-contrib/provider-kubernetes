@@ -62,7 +62,7 @@ func (m *mockStateCache) GetStateFor(obj *v1alpha2.Object) (*unstructured.Unstru
 	return nil, false
 }
 
-func buildCacheManagerStore(existingObjectUIDs []types.UID) map[types.UID]StateCache {
+func buildStateCacheManagerStore(existingObjectUIDs []types.UID) map[types.UID]StateCache {
 	store := make(map[types.UID]StateCache)
 	for _, uid := range existingObjectUIDs {
 
@@ -139,7 +139,7 @@ func TestStateCacheManager(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			manager := NewDesiredStateCacheManager()
-			manager.store = buildCacheManagerStore(tt.existingObjectUIDs)
+			manager.store = buildStateCacheManagerStore(tt.existingObjectUIDs)
 			// assert fresh caches for uncached objects
 			for _, mg := range tt.wantUncachedObjects {
 				cache := manager.LoadOrNewForManaged(mg)

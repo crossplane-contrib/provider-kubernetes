@@ -30,7 +30,7 @@ func buildTestCacheWithGVs(gvs []schema.GroupVersion) *GVKParserCache {
 	return cache
 }
 
-func buildCacheManagerStore(targets map[types.UID]testClusterTarget) map[types.UID]*GVKParserCache {
+func buildParserCacheManagerStore(targets map[types.UID]testClusterTarget) map[types.UID]*GVKParserCache {
 	store := make(map[types.UID]*GVKParserCache)
 	for uid, target := range targets {
 		cache := buildTestCacheWithGVs(target.gvs)
@@ -87,7 +87,7 @@ func TestParserCacheManager(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			manager := NewGVKParserCacheManager()
-			manager.cacheStore = buildCacheManagerStore(test.testClusterTargets)
+			manager.cacheStore = buildParserCacheManagerStore(test.testClusterTargets)
 			for _, pc := range test.wantUncachedPCs {
 				cache, err := manager.LoadOrNewCacheForProviderConfig(pc)
 				if err != nil {
