@@ -306,8 +306,9 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 			extractor:         applyExtractor,
 			desiredStateCache: c.stateCacheManager.LoadOrNewForManaged(mg),
 		}
-		// for cache entry clean-up at delete
-		e.desiredStateCacheManager = c.stateCacheManager
+		e.desiredStateCacheCleanupFn = func() {
+			c.stateCacheManager.Remove(mg)
+		}
 	}
 
 	return e, nil
@@ -324,8 +325,9 @@ type external struct {
 
 	sanitizeSecrets bool
 
-	// for removing desired state cache for MR at deletion
-	desiredStateCacheManager ssa.StateCacheManager
+	// for cleaning-up the desired state cache of MR from
+	// state cache manager, when MR gets deleted
+	desiredStateCacheCleanupFn func()
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) { // nolint:gocyclo, mostly branches due to feature flags, hopefully will be refactored once they are promoted
@@ -443,8 +445,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	// SSA is enabled
-	if c.desiredStateCacheManager != nil {
-		c.desiredStateCacheManager.Remove(mg)
+	if c.desiredStateCacheCleanupFn != nil {
+		c.desiredStateCacheCleanupFn()
 	}
 	return errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, res)), errDeleteObject)
 }
