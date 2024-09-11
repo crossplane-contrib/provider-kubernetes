@@ -20,18 +20,18 @@ type testClusterTarget struct {
 	gvs []schema.GroupVersion
 }
 
-func buildTestCacheWithGVs(gvs []schema.GroupVersion) *GvkParserCache {
-	cache := &GvkParserCache{
-		store: map[schema.GroupVersion]*GvkParserCacheEntry{},
+func buildTestCacheWithGVs(gvs []schema.GroupVersion) *GVKParserCache {
+	cache := &GVKParserCache{
+		store: map[schema.GroupVersion]*GVKParserCacheEntry{},
 	}
 	for _, gv := range gvs {
-		cache.store[gv] = &GvkParserCacheEntry{}
+		cache.store[gv] = &GVKParserCacheEntry{}
 	}
 	return cache
 }
 
-func buildCacheManagerStore(targets map[types.UID]testClusterTarget) map[types.UID]*GvkParserCache {
-	store := make(map[types.UID]*GvkParserCache)
+func buildCacheManagerStore(targets map[types.UID]testClusterTarget) map[types.UID]*GVKParserCache {
+	store := make(map[types.UID]*GVKParserCache)
 	for uid, target := range targets {
 		cache := buildTestCacheWithGVs(target.gvs)
 		store[uid] = cache

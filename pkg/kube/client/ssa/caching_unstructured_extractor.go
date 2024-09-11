@@ -30,12 +30,12 @@ import (
 type cachingUnstructuredExtractor struct {
 	// added as field to not break the interface for other funcs, instantiated at each reconcile
 	ctx   context.Context
-	cache *GvkParserCache
+	cache *GVKParserCache
 	dc    discovery.DiscoveryInterface
 }
 
 // NewCachingUnstructuredExtractor returns a new cachingUnstructuredExtractor
-func NewCachingUnstructuredExtractor(ctx context.Context, dc discovery.DiscoveryInterface, cache *GvkParserCache) (applymetav1.UnstructuredExtractor, error) {
+func NewCachingUnstructuredExtractor(ctx context.Context, dc discovery.DiscoveryInterface, cache *GVKParserCache) (applymetav1.UnstructuredExtractor, error) {
 	return &cachingUnstructuredExtractor{
 		dc:    dc,
 		cache: cache,
@@ -124,7 +124,7 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 	}
 	// cache parser only if non-empty etag
 	if oapiGV.ETag() != "" {
-		e.cache.store[gv] = &GvkParserCacheEntry{
+		e.cache.store[gv] = &GVKParserCacheEntry{
 			parser: freshParser,
 			etag:   oapiGV.ETag(),
 		}

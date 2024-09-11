@@ -17,9 +17,9 @@ import (
 type GVKParserCacheManager struct {
 	// mu is used to make sure the cacheStore map is concurrency-safe.
 	mu sync.RWMutex
-	// cacheStore holds the *GvkParserCache per provider configuration.
+	// cacheStore holds the *GVKParserCache per provider configuration.
 	// The cacheStore key is the UID of the provider config object.
-	cacheStore map[types.UID]*GvkParserCache
+	cacheStore map[types.UID]*GVKParserCache
 }
 
 // GVKParserCacheManagerOption lets you configure a *GVKParserCacheManager.
@@ -28,7 +28,7 @@ type GVKParserCacheManagerOption func(cache *GVKParserCacheManager)
 // NewGVKParserCacheManager returns a new empty *GVKParserCacheManager.
 func NewGVKParserCacheManager(opts ...GVKParserCacheManagerOption) *GVKParserCacheManager {
 	c := &GVKParserCacheManager{
-		cacheStore: map[types.UID]*GvkParserCache{},
+		cacheStore: map[types.UID]*GVKParserCache{},
 	}
 	for _, f := range opts {
 		f(c)
@@ -36,16 +36,16 @@ func NewGVKParserCacheManager(opts ...GVKParserCacheManagerOption) *GVKParserCac
 	return c
 }
 
-// LoadOrNewCacheForProviderConfig returns the *GvkParserCache for the given provider config,
+// LoadOrNewCacheForProviderConfig returns the *GVKParserCache for the given provider config,
 // initializing an empty cache for the first use.
 // the implementation is concurrency-safe.
-func (cm *GVKParserCacheManager) LoadOrNewCacheForProviderConfig(pc *v1alpha1.ProviderConfig) (*GvkParserCache, error) {
+func (cm *GVKParserCacheManager) LoadOrNewCacheForProviderConfig(pc *v1alpha1.ProviderConfig) (*GVKParserCache, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	sc, ok := cm.cacheStore[pc.GetUID()]
 	if !ok {
-		sc = &GvkParserCache{
-			store: map[schema.GroupVersion]*GvkParserCacheEntry{},
+		sc = &GVKParserCache{
+			store: map[schema.GroupVersion]*GVKParserCacheEntry{},
 		}
 		cm.cacheStore[pc.GetUID()] = sc
 	}
@@ -59,18 +59,18 @@ func (cm *GVKParserCacheManager) RemoveCache(pc *v1alpha1.ProviderConfig) {
 	delete(cm.cacheStore, pc.GetUID())
 }
 
-// GvkParserCache holds the cached parser instances and the ETags
+// GVKParserCache holds the cached parser instances and the ETags
 // of the associated provider config.
 // Parsers are generated and cached per GroupVersion
-type GvkParserCache struct {
+type GVKParserCache struct {
 	mu sync.RWMutex
 	// Parsers per GroupVersion
-	store map[schema.GroupVersion]*GvkParserCacheEntry
+	store map[schema.GroupVersion]*GVKParserCacheEntry
 }
 
-// GvkParserCacheEntry wraps the *GvkParser with an ETag for
+// GVKParserCacheEntry wraps the *GvkParser with an ETag for
 // freshness check against discovery data
-type GvkParserCacheEntry struct {
+type GVKParserCacheEntry struct {
 	parser *GvkParser
 	etag   string
 }
