@@ -64,9 +64,9 @@ func (p *PatchingResourceSyncer) SyncResource(ctx context.Context, obj *v1alpha2
 // SSAResourceSyncer is a ResourceSyncer that syncs objects by using server-side
 // apply to apply the object's manifest to the Kubernetes API server.
 type SSAResourceSyncer struct {
-	client            client.Client
-	extractor         applymetav1.UnstructuredExtractor
-	desiredStateCache ssa.StateCache
+	client              client.Client
+	extractor           applymetav1.UnstructuredExtractor
+	desiredStateCacheFn func() ssa.StateCache
 }
 
 // GetObservedState returns the object's observed state by extracting the
@@ -79,11 +79,12 @@ func (s *SSAResourceSyncer) GetObservedState(_ context.Context, obj *v1alpha2.Ob
 // server-side apply on the object's manifest to see what the object would look
 // like if it were applied and extracting the managed fields from that.
 func (s *SSAResourceSyncer) GetDesiredState(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	desiredStateCache := s.desiredStateCacheFn()
 	// Note(erhancagirici): cache assumes the raw manifest is the sole factor
 	// affecting the desired state of the upstream k8s object.
 	// Any further development in the v1alpha2.Object semantics
 	// affecting the desired state, should include it in the hash.
-	if cachedDesired, ok := s.desiredStateCache.GetStateFor(obj); ok {
+	if cachedDesired, ok := desiredStateCache.GetStateFor(obj); ok {
 		return cachedDesired, nil
 	}
 	// Note(turkenh): This dry run call is mostly a workaround for the
@@ -103,7 +104,7 @@ func (s *SSAResourceSyncer) GetDesiredState(ctx context.Context, obj *v1alpha2.O
 	}
 	desired, err := s.extractor.Extract(desiredObj, ssaFieldOwner(obj.Name))
 	// in error case, is set to nil, effectively invalidating the entry
-	s.desiredStateCache.SetStateFor(obj, desired)
+	desiredStateCache.SetStateFor(obj, desired)
 	return desired, errors.Wrap(err, "cannot extract SSA")
 }
 

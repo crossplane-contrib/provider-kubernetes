@@ -309,9 +309,11 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 			return nil, errors.Wrap(err, errCreateSSAExtractor)
 		}
 		e.syncer = &SSAResourceSyncer{
-			client:            k,
-			extractor:         applyExtractor,
-			desiredStateCache: c.stateCacheManager.LoadOrNewForManaged(mg),
+			client:    k,
+			extractor: applyExtractor,
+			desiredStateCacheFn: func() ssa.StateCache {
+				return c.stateCacheManager.LoadOrNewForManaged(mg)
+			},
 		}
 		e.desiredStateCacheCleanupFn = func() {
 			c.stateCacheManager.Remove(mg)
