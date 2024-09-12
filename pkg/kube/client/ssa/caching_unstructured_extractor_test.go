@@ -2,6 +2,7 @@ package ssa
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,98 +28,23 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/test"
 )
 
-var testObjectForExtraction1 = `
-{
-    "apiVersion": "v1",
-    "kind": "Service",
-    "metadata": {
-        "creationTimestamp": "2024-08-22T08:16:14Z",
-        "labels": {
-            "another-key": "another-value",
-            "some-key": "some-value"
-        },
-        "managedFields": [
-            {
-                "apiVersion": "v1",
-                "fieldsType": "FieldsV1",
-                "fieldsV1": {
-                    "f:metadata": {
-                        "f:labels": {
-                            "f:some-key": {}
-                        }
-                    },
-                    "f:spec": {
-                        "f:ports": {
-                            "k:{\"port\":80,\"protocol\":\"TCP\"}": {
-                                ".": {},
-                                "f:port": {},
-                                "f:protocol": {},
-                                "f:targetPort": {}
-                            }
-                        },
-                        "f:selector": {}
-                    }
-                },
-                "manager": "provider-kubernetes/sample-service-owner",
-                "operation": "Apply",
-                "time": "2024-08-22T08:16:14Z"
-            },
-            {
-                "apiVersion": "v1",
-                "fieldsType": "FieldsV1",
-                "fieldsV1": {
-                    "f:metadata": {
-                        "f:labels": {
-                            "f:another-key": {}
-                        }
-                    }
-                },
-                "manager": "dude",
-                "operation": "Apply",
-                "time": "2024-08-22T08:22:35Z"
-            }
-        ],
-        "name": "sample-service",
-        "namespace": "default",
-        "resourceVersion": "640890",
-        "uid": "b8777050-b61a-40b1-a4d3-89cef6d36977"
-    },
-    "spec": {
-        "clusterIP": "10.96.190.89",
-        "clusterIPs": [
-            "10.96.190.89"
-        ],
-        "internalTrafficPolicy": "Cluster",
-        "ipFamilies": [
-            "IPv4"
-        ],
-        "ipFamilyPolicy": "SingleStack",
-        "ports": [
-            {
-                "port": 80,
-                "protocol": "TCP",
-                "targetPort": 9376
-            }
-        ],
-        "selector": {
-            "app.kubernetes.io/name": "MyApp"
-        },
-        "sessionAffinity": "None",
-        "type": "ClusterIP"
-    },
-    "status": {
-        "loadBalancer": {}
-    }
-}
+//go:embed test/k8s_objects_for_extraction/1_for_extraction.json
+var testObjectForExtraction1 []byte
 
-`
-var want1 = `{"apiVersion":"v1","kind":"Service","metadata":{"labels":{"another-key":"another-value"},"name":"sample-service","namespace":"default"}}`
+//go:embed test/k8s_objects_for_extraction/1_extracted.json
+var wantExtracted1 []byte
 
-var testObjectForExtraction2 = testObjectForExtraction1
-var want2 = `{"apiVersion":"v1","kind":"Service","metadata":{"name":"sample-service","namespace":"default"}}`
+//go:embed test/k8s_objects_for_extraction/2_for_extraction.json
+var testObjectForExtraction2 []byte
 
-var testObjectForExtraction3 = `{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"annotations":{"deployment.kubernetes.io/revision":"3"},"creationTimestamp":"2024-08-21T08:56:25Z","generation":3,"labels":{"app":"nginx"},"managedFields":[{"apiVersion":"apps/v1","fieldsType":"FieldsV1","fieldsV1":{"f:metadata":{"f:labels":{"f:app":{}}},"f:spec":{"f:replicas":{},"f:selector":{},"f:template":{"f:metadata":{"f:labels":{"f:app":{}}},"f:spec":{"f:containers":{"k:{\"name\":\"nginx\"}":{".":{},"f:env":{"k:{\"name\":\"MY_NODE_NAME\"}":{".":{},"f:name":{},"f:valueFrom":{"f:fieldRef":{}}}},"f:image":{},"f:name":{},"f:ports":{"k:{\"containerPort\":80,\"protocol\":\"TCP\"}":{".":{},"f:containerPort":{}}}}}}}}},"manager":"provider-kubernetes/sample-deployment-owner","operation":"Apply","time":"2024-09-03T14:09:23Z"},{"apiVersion":"apps/v1","fieldsType":"FieldsV1","fieldsV1":{"f:metadata":{"f:annotations":{".":{},"f:deployment.kubernetes.io/revision":{}}},"f:status":{"f:availableReplicas":{},"f:conditions":{".":{},"k:{\"type\":\"Available\"}":{".":{},"f:lastTransitionTime":{},"f:lastUpdateTime":{},"f:message":{},"f:reason":{},"f:status":{},"f:type":{}},"k:{\"type\":\"Progressing\"}":{".":{},"f:lastTransitionTime":{},"f:lastUpdateTime":{},"f:message":{},"f:reason":{},"f:status":{},"f:type":{}}},"f:observedGeneration":{},"f:readyReplicas":{},"f:replicas":{},"f:updatedReplicas":{}}},"manager":"kube-controller-manager","operation":"Update","subresource":"status","time":"2024-09-03T14:09:24Z"}],"name":"nginx-deployment","namespace":"default","resourceVersion":"891436","uid":"c8e67d4e-72a8-4555-acd9-9c2c41081f4c"},"spec":{"progressDeadlineSeconds":600,"replicas":1,"revisionHistoryLimit":10,"selector":{"matchLabels":{"app":"nginx"}},"strategy":{"rollingUpdate":{"maxSurge":"25%","maxUnavailable":"25%"},"type":"RollingUpdate"},"template":{"metadata":{"creationTimestamp":null,"labels":{"app":"nginx"}},"spec":{"containers":[{"env":[{"name":"MY_NODE_NAME","valueFrom":{"fieldRef":{"apiVersion":"v1","fieldPath":"spec.nodeName"}}}],"image":"nginx:1.14.2","imagePullPolicy":"IfNotPresent","name":"nginx","ports":[{"containerPort":80,"protocol":"TCP"}],"resources":{},"terminationMessagePath":"/dev/termination-log","terminationMessagePolicy":"File"}],"dnsPolicy":"ClusterFirst","restartPolicy":"Always","schedulerName":"default-scheduler","securityContext":{},"terminationGracePeriodSeconds":30}}},"status":{"availableReplicas":1,"conditions":[{"lastTransitionTime":"2024-08-29T11:03:29Z","lastUpdateTime":"2024-08-29T11:03:29Z","message":"Deployment has minimum availability.","reason":"MinimumReplicasAvailable","status":"True","type":"Available"},{"lastTransitionTime":"2024-08-21T08:56:25Z","lastUpdateTime":"2024-09-03T14:09:24Z","message":"ReplicaSet \"nginx-deployment-694cb85899\" has successfully progressed.","reason":"NewReplicaSetAvailable","status":"True","type":"Progressing"}],"observedGeneration":3,"readyReplicas":1,"replicas":1,"updatedReplicas":1}}`
-var want3 = `{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"nginx-deployment","namespace":"default","labels":{"app":"nginx"}},"spec":{"replicas":1,"selector":{"matchLabels":{"app":"nginx"}},"template":{"metadata":{"labels":{"app":"nginx"}},"spec":{"containers":[{"name":"nginx","image":"nginx:1.14.2","ports":[{"containerPort":80}],"env":[{"name":"MY_NODE_NAME","valueFrom":{"fieldRef":{"apiVersion":"v1","fieldPath":"spec.nodeName"}}}]}]}}}}`
+//go:embed test/k8s_objects_for_extraction/2_extracted.json
+var wantExtracted2 []byte
+
+//go:embed test/k8s_objects_for_extraction/3_for_extraction.json
+var testObjectForExtraction3 []byte
+
+//go:embed test/k8s_objects_for_extraction/3_extracted.json
+var wantExtracted3 []byte
 
 type args struct {
 	objectToExtract []byte
@@ -247,31 +173,31 @@ func TestExtract(t *testing.T) {
 		{
 			name: "SuccessfulExtract",
 			args: args{
-				objectToExtract: []byte(testObjectForExtraction1),
+				objectToExtract: testObjectForExtraction1,
 				fieldManager:    "dude",
 			},
 			want: want{
-				extractedObject: []byte(want1),
+				extractedObject: wantExtracted1,
 			},
 		},
 		{
 			name: "SuccessfulExtractWithFieldManagerOwnsNothing",
 			args: args{
-				objectToExtract: []byte(testObjectForExtraction2),
+				objectToExtract: testObjectForExtraction2,
 				fieldManager:    "another-guy",
 			},
 			want: want{
-				extractedObject: []byte(want2),
+				extractedObject: wantExtracted2,
 			},
 		},
 		{
 			name: "SuccessfulExtractWithDefaulting",
 			args: args{
-				objectToExtract: []byte(testObjectForExtraction3),
+				objectToExtract: testObjectForExtraction3,
 				fieldManager:    "provider-kubernetes/sample-deployment-owner",
 			},
 			want: want{
-				extractedObject: []byte(want3),
+				extractedObject: wantExtracted3,
 			},
 		},
 	}
@@ -327,9 +253,6 @@ func TestExtract(t *testing.T) {
 	}
 }
 
-type discoveryTestArgs struct {
-}
-
 type discoveryTestWant struct {
 	apiPaths []string
 	err      error
@@ -337,13 +260,11 @@ type discoveryTestWant struct {
 
 func TestDiscovery(t *testing.T) {
 	tests := []struct {
-		args discoveryTestArgs
 		want discoveryTestWant
 		name string
 	}{
 		{
 			name: "Discovery",
-			args: discoveryTestArgs{},
 			want: discoveryTestWant{
 				apiPaths: []string{
 					"apis/apps/v1",
@@ -770,7 +691,7 @@ func TestParserCaching(t *testing.T) {
 	}
 
 	if len(cachingExt.cache.store) != 3 {
-		t.Fatalf("expected cache to contain 2 items, got %d", len(cachingExt.cache.store))
+		t.Fatalf("expected cache to contain 3 items, got %d", len(cachingExt.cache.store))
 	}
 
 	// simulate a change in discovery data,
