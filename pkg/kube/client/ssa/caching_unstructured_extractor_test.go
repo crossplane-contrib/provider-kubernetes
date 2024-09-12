@@ -2,7 +2,6 @@ package ssa
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,6 +25,8 @@ import (
 	"k8s.io/kube-openapi/pkg/handler3"
 
 	"github.com/crossplane/crossplane-runtime/pkg/test"
+
+	_ "embed"
 )
 
 //go:embed test/k8s_objects_for_extraction/1_for_extraction.json
