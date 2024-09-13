@@ -17,7 +17,7 @@ import (
 // The implementation is thread-safe.
 type GVKParserCacheManager struct {
 	// mu is used to make sure the cacheStore map is concurrency-safe.
-	mu sync.RWMutex
+	mu sync.Mutex
 	// cacheStore holds the *GVKParserCache per provider configuration.
 	// The cacheStore key is the UID of the provider config object.
 	cacheStore map[types.UID]*GVKParserCache
