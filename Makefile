@@ -89,11 +89,13 @@ CROSSPLANE_NAMESPACE = crossplane-system
 -include build/makelib/local.xpkg.mk
 -include build/makelib/controlplane.mk
 
-UPTEST_VERSION = v1.1.2
-UPTEST_EXAMPLE_LIST ?= "examples/object/object.yaml,examples/object/object-watching.yaml,examples/object/object-ssa-owner.yaml"
-uptest: $(UPTEST) $(KUBECTL) $(CHAINSAW) $(CROSSPLANE_CLI)
+# TODO(turkenh): Add "examples/object/object-ssa-owner.yaml" to the list to test the SSA functionality as part of the e2e tests.
+# The test is disabled for now because uptest clears the package cache when the provider restarted with the SSA flag.
+# Enable after https://github.com/crossplane/uptest/issues/17 is fixed.
+UPTEST_EXAMPLE_LIST ?= "examples/object/object.yaml,examples/object/object-watching.yaml"
+uptest: $(UPTEST) $(KUBECTL) $(KUTTL)
 	@$(INFO) running automated tests
-	@KUBECTL=$(KUBECTL) CHAINSAW=$(CHAINSAW) CROSSPLANE_CLI=$(CROSSPLANE_CLI) CROSSPLANE_NAMESPACE=${CROSSPLANE_NAMESPACE} $(UPTEST) e2e "$(UPTEST_EXAMPLE_LIST)" --setup-script=cluster/test/setup.sh || $(FAIL)
+	@KUBECTL=$(KUBECTL) KUTTL=$(KUTTL) CROSSPLANE_NAMESPACE=${CROSSPLANE_NAMESPACE} $(UPTEST) e2e "$(UPTEST_EXAMPLE_LIST)" --setup-script=cluster/test/setup.sh || $(FAIL)
 	@$(OK) running automated tests
 
 local-dev: controlplane.up
