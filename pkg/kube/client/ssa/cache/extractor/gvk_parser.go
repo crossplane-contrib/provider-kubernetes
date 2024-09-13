@@ -19,7 +19,7 @@ This file is forked from upstream kubernetes/apimachinery
 https://github.com/kubernetes/apimachinery/blob/2465dc5239ab8827a637148a78b380c278b4a5f4/pkg/util/managedfields/gvkparser.go
 */
 
-package ssa
+package extractor
 
 import (
 	"fmt"

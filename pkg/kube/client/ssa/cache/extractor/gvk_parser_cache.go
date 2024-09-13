@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package ssa
+package extractor
 
 import (
 	"sync"
@@ -14,6 +14,7 @@ import (
 )
 
 // GVKParserCacheManager maintains GVK parser cache stores for each provider config.
+// The implementation is thread-safe.
 type GVKParserCacheManager struct {
 	// mu is used to make sure the cacheStore map is concurrency-safe.
 	mu sync.RWMutex
@@ -45,7 +46,7 @@ func (cm *GVKParserCacheManager) LoadOrNewCacheForProviderConfig(pc *v1alpha1.Pr
 	sc, ok := cm.cacheStore[pc.GetUID()]
 	if !ok {
 		sc = &GVKParserCache{
-			store: map[schema.GroupVersion]*GVKParserCacheEntry{},
+			store: map[schema.GroupVersion]*gvkParserCacheEntry{},
 		}
 		cm.cacheStore[pc.GetUID()] = sc
 	}
@@ -63,14 +64,13 @@ func (cm *GVKParserCacheManager) RemoveCache(pc *v1alpha1.ProviderConfig) {
 // of the associated provider config.
 // Parsers are generated and cached per GroupVersion
 type GVKParserCache struct {
-	mu sync.RWMutex
-	// Parsers per GroupVersion
-	store map[schema.GroupVersion]*GVKParserCacheEntry
+	mu    sync.RWMutex
+	store map[schema.GroupVersion]*gvkParserCacheEntry
 }
 
-// GVKParserCacheEntry wraps the *GvkParser with an ETag for
+// gvkParserCacheEntry wraps the *GvkParser with an ETag for
 // freshness check against discovery data
-type GVKParserCacheEntry struct {
+type gvkParserCacheEntry struct {
 	parser *GvkParser
 	etag   string
 }

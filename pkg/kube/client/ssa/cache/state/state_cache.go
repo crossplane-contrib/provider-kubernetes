@@ -1,4 +1,4 @@
-package ssa
+package state
 
 import (
 	"crypto/sha256"

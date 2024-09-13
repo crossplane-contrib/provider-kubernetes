@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package ssa
+package extractor
 
 import (
 	"testing"
@@ -22,10 +22,10 @@ type testClusterTarget struct {
 
 func buildTestCacheWithGVs(gvs []schema.GroupVersion) *GVKParserCache {
 	cache := &GVKParserCache{
-		store: map[schema.GroupVersion]*GVKParserCacheEntry{},
+		store: map[schema.GroupVersion]*gvkParserCacheEntry{},
 	}
 	for _, gv := range gvs {
-		cache.store[gv] = &GVKParserCacheEntry{}
+		cache.store[gv] = &gvkParserCacheEntry{}
 	}
 	return cache
 }

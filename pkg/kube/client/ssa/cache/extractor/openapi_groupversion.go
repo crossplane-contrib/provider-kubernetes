@@ -19,7 +19,7 @@ This file is forked from upstream kubernetes/client-go
 https://github.com/kubernetes/client-go/blob/0b9a7d2f21befcfd98bf2e62ae68ea49d682500d/openapi/groupversion.go
 */
 
-package ssa
+package extractor
 
 import (
 	"context"

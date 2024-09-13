@@ -1,4 +1,4 @@
-package ssa
+package extractor
 
 import (
 	"context"

@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa/cache/extractor"
+	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa/cache/state"
 	"math/rand"
 	"reflect"
 	"strings"
@@ -62,7 +64,6 @@ import (
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
-	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa"
 )
 
 type key int
@@ -184,8 +185,8 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 	if o.Features.Enabled(features.EnableAlphaServerSideApply) {
 		conn.ssaEnabled = true
-		conn.stateCacheManager = ssa.NewDesiredStateCacheManager()
-		conn.parserCacheManager = ssa.NewGVKParserCacheManager()
+		conn.stateCacheManager = state.NewDesiredStateCacheManager()
+		conn.parserCacheManager = extractor.NewGVKParserCacheManager()
 	}
 
 	cb := ctrl.NewControllerManagedBy(mgr).
@@ -251,9 +252,9 @@ type connector struct {
 
 	clientBuilder kubeclient.Builder
 
-	stateCacheManager ssa.StateCacheManager
+	stateCacheManager state.StateCacheManager
 
-	parserCacheManager *ssa.GVKParserCacheManager
+	parserCacheManager *extractor.GVKParserCacheManager
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -304,14 +305,14 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		if err != nil {
 			return nil, errors.Wrapf(err, errLoadSSAParserCacheTemplate, pc.GetName())
 		}
-		applyExtractor, err := ssa.NewCachingUnstructuredExtractor(ctx, dc, parserCache)
+		applyExtractor, err := extractor.NewCachingUnstructuredExtractor(ctx, dc, parserCache)
 		if err != nil {
 			return nil, errors.Wrap(err, errCreateSSAExtractor)
 		}
 		e.syncer = &SSAResourceSyncer{
 			client:    k,
 			extractor: applyExtractor,
-			desiredStateCacheFn: func() ssa.StateCache {
+			desiredStateCacheFn: func() state.StateCache {
 				return c.stateCacheManager.LoadOrNewForManaged(mg)
 			},
 		}

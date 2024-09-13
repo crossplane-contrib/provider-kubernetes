@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package ssa
+package extractor
 
 import (
 	"context"
@@ -24,7 +24,8 @@ import (
 	"k8s.io/kube-openapi/pkg/validation/spec"
 )
 
-// cachingUnstructuredExtractor is a caching implementation of v1.UnstructuredExtractor
+// cachingUnstructuredExtractor is an implementation of
+// v1.UnstructuredExtractor that caches *GvkParser instances per GV
 // using OpenAPI V3 discovery information.
 // TODO(erhan): try to upstream this code in kubernetes
 type cachingUnstructuredExtractor struct {
@@ -57,11 +58,7 @@ func (e *cachingUnstructuredExtractor) ExtractStatus(object *unstructured.Unstru
 }
 
 func discoveryPaths(ctx context.Context, rc rest.Interface) (map[string]OpenAPIGroupVersion, error) {
-	data, err := rc.Get().
-		AbsPath("/openapi/v3").
-		Do(ctx).
-		Raw()
-
+	data, err := rc.Get().AbsPath("/openapi/v3").Do(ctx).Raw()
 	if err != nil {
 		return nil, err
 	}
@@ -111,8 +108,8 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 
 	// check the cache after invalidating stale data
 	parserTuple, ok := e.cache.store[gv]
-	// cache hit
 	if ok && parserTuple.etag == oapiGV.ETag() && oapiGV.ETag() != "" {
+		// cache hit
 		return parserTuple.parser, nil
 	}
 	// generate new parser on cache miss or etag mismatch
@@ -122,9 +119,8 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 	if err != nil {
 		return nil, err
 	}
-	// cache parser only if non-empty etag
 	if oapiGV.ETag() != "" {
-		e.cache.store[gv] = &GVKParserCacheEntry{
+		e.cache.store[gv] = &gvkParserCacheEntry{
 			parser: freshParser,
 			etag:   oapiGV.ETag(),
 		}
