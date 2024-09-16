@@ -17,6 +17,13 @@ limitations under the License.
 /*
 This file is forked from upstream kubernetes/apimachinery
 https://github.com/kubernetes/apimachinery/blob/2465dc5239ab8827a637148a78b380c278b4a5f4/pkg/util/managedfields/gvkparser.go
+
+The reason is to be able to construct GvkParser objects
+from a map of components to spec.Schema (obtained from OpenAPI JSON document),
+instead of proto.Models (obtained from OpenAPI Protobuf document), as
+building a protobuf data has an upstream issue at
+proto.NewOpenAPIV3Data during makeUnions()
+https://github.com/kubernetes/kube-openapi/blob/f7e401e7b4c2199f15e2cf9e37a2faa2209f286a/pkg/schemaconv/smd.go#L128
 */
 
 package extractor
