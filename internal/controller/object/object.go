@@ -20,8 +20,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa/cache/extractor"
-	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa/cache/state"
 	"math/rand"
 	"reflect"
 	"strings"
@@ -64,6 +62,8 @@ import (
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
+	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa/cache/extractor"
+	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa/cache/state"
 )
 
 type key int
@@ -252,7 +252,7 @@ type connector struct {
 
 	clientBuilder kubeclient.Builder
 
-	stateCacheManager state.StateCacheManager
+	stateCacheManager state.CacheManager
 
 	parserCacheManager *extractor.GVKParserCacheManager
 }
@@ -312,7 +312,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		e.syncer = &SSAResourceSyncer{
 			client:    k,
 			extractor: applyExtractor,
-			desiredStateCacheFn: func() state.StateCache {
+			desiredStateCacheFn: func() state.Cache {
 				return c.stateCacheManager.LoadOrNewForManaged(mg)
 			},
 		}

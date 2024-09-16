@@ -62,8 +62,8 @@ func (m *mockStateCache) GetStateFor(obj *v1alpha2.Object) (*unstructured.Unstru
 	return nil, false
 }
 
-func buildStateCacheManagerStore(existingObjectUIDs []types.UID) map[types.UID]StateCache {
-	store := make(map[types.UID]StateCache)
+func buildStateCacheManagerStore(existingObjectUIDs []types.UID) map[types.UID]Cache {
+	store := make(map[types.UID]Cache)
 	for _, uid := range existingObjectUIDs {
 
 		store[uid] = &mockStateCache{
@@ -191,7 +191,7 @@ func TestStateCacheManager(t *testing.T) {
 func TestDesiredStateCache_GetStateFor(t *testing.T) {
 	tests := []struct {
 		name          string
-		argStateCache StateCache
+		argStateCache Cache
 		argObject     *v1alpha2.Object
 		wantFound     bool
 		wantExtracted *unstructured.Unstructured

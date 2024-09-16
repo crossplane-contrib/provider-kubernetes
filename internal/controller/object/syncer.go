@@ -2,7 +2,6 @@ package object
 
 import (
 	"context"
-	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa/cache/state"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -15,6 +14,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
+	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa/cache/state"
 )
 
 // PatchingResourceSyncer is a ResourceSyncer that syncs objects by patching
@@ -66,7 +66,7 @@ func (p *PatchingResourceSyncer) SyncResource(ctx context.Context, obj *v1alpha2
 type SSAResourceSyncer struct {
 	client              client.Client
 	extractor           applymetav1.UnstructuredExtractor
-	desiredStateCacheFn func() state.StateCache
+	desiredStateCacheFn func() state.Cache
 }
 
 // GetObservedState returns the object's observed state by extracting the

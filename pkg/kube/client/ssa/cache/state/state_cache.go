@@ -13,21 +13,21 @@ import (
 	objectv1alpha2 "github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 )
 
-// StateCacheManager lets you manage StateCache entries for XP managed
+// CacheManager lets you manage Cache entries for XP managed
 // resources
-type StateCacheManager interface {
-	LoadOrNewForManaged(mg xpresource.Managed) StateCache
+type CacheManager interface {
+	LoadOrNewForManaged(mg xpresource.Managed) Cache
 	Remove(mg xpresource.Managed)
 }
 
-// StateCache is the interface for the caching a k8s
+// Cache is the interface for the caching a k8s
 // *unstructured.Unstructured object
-type StateCache interface {
+type Cache interface {
 	SetStateFor(obj *objectv1alpha2.Object, state *unstructured.Unstructured)
 	GetStateFor(obj *objectv1alpha2.Object) (*unstructured.Unstructured, bool)
 }
 
-// DesiredStateCache is a concurrency-safe implementation of StateCache
+// DesiredStateCache is a concurrency-safe implementation of Cache
 // that holds a cached k8s object state with a hash key of the associated
 // manifest.
 // Hash key can be used to determine the validity of the cache entry
@@ -63,13 +63,13 @@ func (dc *DesiredStateCache) SetStateFor(obj *objectv1alpha2.Object, state *unst
 // managed resource instance.
 type DesiredStateCacheManager struct {
 	mu    sync.RWMutex
-	store map[types.UID]StateCache
+	store map[types.UID]Cache
 }
 
 // NewDesiredStateCacheManager returns a new DesiredStateCacheManager instance
 func NewDesiredStateCacheManager() *DesiredStateCacheManager {
 	return &DesiredStateCacheManager{
-		store: map[types.UID]StateCache{},
+		store: map[types.UID]Cache{},
 	}
 }
 
@@ -79,7 +79,7 @@ func NewDesiredStateCacheManager() *DesiredStateCacheManager {
 // stored for the specified managed resource. Subsequent calls with the same managed
 // resource will return the previously instantiated and stored DesiredStateCache
 // for that managed resource
-func (dcs *DesiredStateCacheManager) LoadOrNewForManaged(mg xpresource.Managed) StateCache {
+func (dcs *DesiredStateCacheManager) LoadOrNewForManaged(mg xpresource.Managed) Cache {
 	dcs.mu.RLock()
 	stateCache, ok := dcs.store[mg.GetUID()]
 	dcs.mu.RUnlock()
