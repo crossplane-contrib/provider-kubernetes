@@ -98,7 +98,6 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 	}
 
 	e.cache.mu.Lock()
-	defer e.cache.mu.Unlock()
 	// invalidate stale entries in cache with the fresh discovery data
 	for gvCached, cacheEntry := range e.cache.store {
 		path := gvRelativeAPIPath(gvCached)
@@ -107,6 +106,7 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 			delete(e.cache.store, gvCached)
 		}
 	}
+	e.cache.mu.Unlock()
 
 	gvPath := gvRelativeAPIPath(gv)
 	oapiGV, ok := oapiPathsToGV[gvPath]
@@ -119,7 +119,9 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 	}
 
 	// check the cache after invalidating stale data
+	e.cache.mu.RLock()
 	parserTuple, ok := e.cache.store[gv]
+	e.cache.mu.RUnlock()
 	if ok && parserTuple.etag == schemaETag && schemaETag != "" {
 		// cache hit
 		return parserTuple.parser, nil
@@ -127,15 +129,30 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 	// generate new parser on cache miss or etag mismatch
 	// defensively cover the case where discovery does not return any ETag
 	// for GV, which normally should not happen
-	freshParser, err := newParserFromOpenAPIGroupVersion(ctx, oapiGV)
+	//
+	// concurrent schema fetches and cache updates for the same GV
+	// (of the particular k8s cluster) are deduplicated with singleflight.
+	freshParserObj, err, _ := e.cache.sf.Do(gv.String(), func() (interface{}, error) {
+		freshParser, err := newParserFromOpenAPIGroupVersion(ctx, oapiGV)
+		if err != nil {
+			return nil, err
+		}
+		if schemaETag != "" {
+			e.cache.mu.Lock()
+			defer e.cache.mu.Unlock()
+			e.cache.store[gv] = &gvkParserCacheEntry{
+				parser: freshParser,
+				etag:   schemaETag,
+			}
+		}
+		return freshParser, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if schemaETag != "" {
-		e.cache.store[gv] = &gvkParserCacheEntry{
-			parser: freshParser,
-			etag:   schemaETag,
-		}
+	freshParser, ok := freshParserObj.(*GvkParser)
+	if !ok {
+		return nil, fmt.Errorf("type assertion error: expected GvkParser, got %T", freshParserObj)
 	}
 	return freshParser, nil
 }

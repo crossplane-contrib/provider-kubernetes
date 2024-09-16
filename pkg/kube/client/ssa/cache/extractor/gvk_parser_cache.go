@@ -7,6 +7,7 @@ package extractor
 import (
 	"sync"
 
+	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -66,6 +67,10 @@ func (cm *GVKParserCacheManager) RemoveCache(pc *v1alpha1.ProviderConfig) {
 type GVKParserCache struct {
 	mu    sync.RWMutex
 	store map[schema.GroupVersion]*gvkParserCacheEntry
+
+	// sf is for ensuring a single in-flight OpenAPI
+	// schema requests for a GV
+	sf singleflight.Group
 }
 
 // gvkParserCacheEntry wraps the *GvkParser with an ETag for
