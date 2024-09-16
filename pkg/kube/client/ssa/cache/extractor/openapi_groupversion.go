@@ -30,26 +30,24 @@ import (
 )
 
 // OpenAPIGroupVersion is the context-aware variant of openapi.GroupVersion
-// It also stores the ETag for the underlying discovery GV path
 type OpenAPIGroupVersion interface {
 	// Schema is the context-accepting variant of the upstream client-go implementation
 	Schema(ctx context.Context, contentType string) ([]byte, error)
-	ETag() string
 }
 
-// customOAPIGroupVersion is the customized variant of the unexported
-// openapi.groupversion with ETag extracted.
+// customOAPIGroupVersion is the context-aware customized variant
+// of the unexported openapi.groupversion
+//
 // see https://github.com/kubernetes/client-go/blob/78c1586020d8bef4d031a556f867544ca34845a1/openapi/groupversion.go#L32
 type customOAPIGroupVersion struct {
 	restClient      rest.Interface
 	item            handler3.OpenAPIV3DiscoveryGroupVersion
 	useClientPrefix bool
-	etag            string
 }
 
 // newCustomOAPIGroupVersion returns a new customOAPIGroupVersion instance
-func newCustomOAPIGroupVersion(client rest.Interface, item handler3.OpenAPIV3DiscoveryGroupVersion, useClientPrefix bool, etag string) *customOAPIGroupVersion {
-	return &customOAPIGroupVersion{restClient: client, item: item, useClientPrefix: useClientPrefix, etag: etag}
+func newCustomOAPIGroupVersion(client rest.Interface, item handler3.OpenAPIV3DiscoveryGroupVersion, useClientPrefix bool) *customOAPIGroupVersion {
+	return &customOAPIGroupVersion{restClient: client, item: item, useClientPrefix: useClientPrefix}
 }
 
 // Schema returns the OpenAPI schema for the OpenAPI GroupVersion with the given context
@@ -83,9 +81,4 @@ func (g *customOAPIGroupVersion) Schema(ctx context.Context, contentType string)
 	}
 
 	return path.Do(ctx).Raw()
-}
-
-// ETag returns the associated ETag for the schema document
-func (g *customOAPIGroupVersion) ETag() string {
-	return g.etag
 }

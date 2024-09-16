@@ -295,13 +295,16 @@ func TestDiscovery(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			paths, err := discoveryPaths(context.TODO(), dc.RESTClient())
+			paths, etags, err := discoveryPaths(context.TODO(), dc.RESTClient())
 			if diff := cmp.Diff(tt.want.err, err, test.EquateErrors()); diff != "" {
 				t.Fatalf("discovery error (-want +got):\n%s", diff)
 			}
 
 			for _, wp := range tt.want.apiPaths {
 				if _, ok := paths[wp]; !ok {
+					t.Fatalf("wanted path %s not found in discovery", wp)
+				}
+				if _, ok := etags[wp]; !ok {
 					t.Fatalf("wanted path %s not found in discovery", wp)
 				}
 			}
@@ -407,7 +410,7 @@ func TestNewParser(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			paths, err := discoveryPaths(context.TODO(), dc.RESTClient())
+			paths, _, err := discoveryPaths(context.TODO(), dc.RESTClient())
 			if err != nil {
 				t.Fatalf("cannot get discovery paths: %v", err)
 			}
@@ -594,7 +597,7 @@ func TestOpenApiSchemaValidation(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			paths, err := discoveryPaths(context.TODO(), dc.RESTClient())
+			paths, _, err := discoveryPaths(context.TODO(), dc.RESTClient())
 			if err != nil {
 				t.Fatal(err)
 			}

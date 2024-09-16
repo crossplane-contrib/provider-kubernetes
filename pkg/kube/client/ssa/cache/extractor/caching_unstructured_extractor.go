@@ -58,35 +58,41 @@ func (e *cachingUnstructuredExtractor) ExtractStatus(object *unstructured.Unstru
 	return e.extractUnstructured(object, fieldManager, "status")
 }
 
-func discoveryPaths(ctx context.Context, rc rest.Interface) (map[string]OpenAPIGroupVersion, error) {
+func discoveryPaths(ctx context.Context, rc rest.Interface) (map[string]OpenAPIGroupVersion, map[string]string, error) {
 	data, err := rc.Get().AbsPath("/openapi/v3").Do(ctx).Raw()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	discoMap := &handler3.OpenAPIV3Discovery{}
 	err = json.Unmarshal(data, discoMap)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	oapiPathsToGV := map[string]OpenAPIGroupVersion{}
+	oapiPathsToETags := map[string]string{}
 	for path, oapiGV := range discoMap.Paths {
 		parse, err := url.Parse(oapiGV.ServerRelativeURL)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		useClientPrefix := strings.HasPrefix(oapiGV.ServerRelativeURL, "/openapi/v3")
 		etag := parse.Query().Get("hash")
-		oapiPathsToGV[path] = newCustomOAPIGroupVersion(rc, oapiGV, useClientPrefix, etag)
+		oapiPathsToGV[path] = newCustomOAPIGroupVersion(rc, oapiGV, useClientPrefix)
+		oapiPathsToETags[path] = etag
+
 	}
-	return oapiPathsToGV, nil
+	return oapiPathsToGV, oapiPathsToETags, nil
 }
 
 // getParserForGV fetches the *GVKParser for the given GroupVersion.
+// Results are cached by utilizing the hashes returned by the OpenAPI v3
+// discovery endpoint
 func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv schema.GroupVersion) (*GvkParser, error) { //nolint:gocyclo // for atomic cache operations
-	// parse discovery information
-	oapiPathsToGV, err := discoveryPaths(ctx, e.dc.RESTClient())
+	// obtain GroupVersion API paths and hashes of associated schemas
+	// from discovery endpoint
+	oapiPathsToGV, oapiPathsToETags, err := discoveryPaths(ctx, e.dc.RESTClient())
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +102,8 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 	// invalidate stale entries in cache with the fresh discovery data
 	for gvCached, cacheEntry := range e.cache.store {
 		path := gvRelativeAPIPath(gvCached)
-		if discoGV, ok := oapiPathsToGV[path]; !ok || discoGV.ETag() != cacheEntry.etag {
+		schemaEtag, discovered := oapiPathsToETags[path]
+		if !discovered || schemaEtag != cacheEntry.etag {
 			delete(e.cache.store, gvCached)
 		}
 	}
@@ -106,10 +113,14 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 	if !ok {
 		return nil, fmt.Errorf("cannot find GroupVersion %q in discovery", gvPath)
 	}
+	schemaETag, ok := oapiPathsToETags[gvPath]
+	if !ok {
+		return nil, fmt.Errorf("cannot find ETag for GroupVersion %q in discovery", gvPath)
+	}
 
 	// check the cache after invalidating stale data
 	parserTuple, ok := e.cache.store[gv]
-	if ok && parserTuple.etag == oapiGV.ETag() && oapiGV.ETag() != "" {
+	if ok && parserTuple.etag == schemaETag && schemaETag != "" {
 		// cache hit
 		return parserTuple.parser, nil
 	}
@@ -120,10 +131,10 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 	if err != nil {
 		return nil, err
 	}
-	if oapiGV.ETag() != "" {
+	if schemaETag != "" {
 		e.cache.store[gv] = &gvkParserCacheEntry{
 			parser: freshParser,
-			etag:   oapiGV.ETag(),
+			etag:   schemaETag,
 		}
 	}
 	return freshParser, nil

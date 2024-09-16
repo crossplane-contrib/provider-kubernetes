@@ -75,11 +75,15 @@ func TestGroupVersion(t *testing.T) {
 				t.Fatalf("unexpected error occurred: %v", err)
 			}
 
-			paths, err := discoveryPaths(context.TODO(), dc.RESTClient())
+			paths, etags, err := discoveryPaths(context.TODO(), dc.RESTClient())
 			if err != nil {
 				t.Fatalf("unexpected error occurred: %v", err)
 			}
 			oapigv, ok := paths["apis/apps/v1"]
+			if !ok {
+				t.Fatalf("unexpected error occurred: missing api group version")
+			}
+			etag, ok := etags["apis/apps/v1"]
 			if !ok {
 				t.Fatalf("unexpected error occurred: missing api group version")
 			}
@@ -93,8 +97,8 @@ func TestGroupVersion(t *testing.T) {
 				t.Fatalf("unexpected result actual: %s expected: %s", string(oapiSchema), expectedResult)
 			}
 			expectedEtag := "014fbff9a07c"
-			if oapigv.ETag() != expectedEtag {
-				t.Fatalf("unexpected ETag actual: %s expected: %s", oapigv.ETag(), expectedEtag)
+			if etag != expectedEtag {
+				t.Fatalf("unexpected ETag actual: %s expected: %s", etag, expectedEtag)
 			}
 
 		})
