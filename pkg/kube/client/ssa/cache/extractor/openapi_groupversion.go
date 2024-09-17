@@ -17,6 +17,11 @@ limitations under the License.
 /*
 This file is forked from upstream kubernetes/client-go
 https://github.com/kubernetes/client-go/blob/0b9a7d2f21befcfd98bf2e62ae68ea49d682500d/openapi/groupversion.go
+
+The OpenAPI schema retrieval function Schema() at the upstream interface
+openapi.GroupVersion does not accept any context, yet the
+implementors do HTTP calls, without propagating the context.
+This fork includes a context-accepting variant of the interface
 */
 
 package extractor
