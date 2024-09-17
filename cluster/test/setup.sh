@@ -16,3 +16,14 @@ spec:
   credentials:
     source: InjectedIdentity
 EOF
+
+if [ "${E2E_SSA_ENABLED:-false}" == "true" ]; then
+  echo "Enabling ssa feature for the provider"
+  ${KUBECTL} patch deploymentruntimeconfig runtimeconfig-provider-kubernetes --type='json' \
+  -p='[{"op":"replace","path":"/spec/deploymentTemplate/spec/template/spec/containers/0/args", "value":["--debug", "--enable-server-side-apply"]}]'
+  PROVIDER_DEPLOYMENT_NAME="$(${KUBECTL} -n crossplane-system get deployment -o name | grep provider-kubernetes)"
+  ${KUBECTL} -n crossplane-system wait --for=jsonpath='{.spec.template.spec.containers[0].args[?(@=="--enable-server-side-apply")]}' "$PROVIDER_DEPLOYMENT_NAME"
+  ${KUBECTL} -n crossplane-system rollout status "$PROVIDER_DEPLOYMENT_NAME"
+  ${KUBECTL} -n crossplane-system wait --for=jsonpath='{.status.replicas}'="1" "$PROVIDER_DEPLOYMENT_NAME"
+  ${KUBECTL} -n crossplane-system get pods
+fi
