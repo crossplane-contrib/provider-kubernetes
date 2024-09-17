@@ -28,7 +28,7 @@ NPROCS ?= 1
 GO_TEST_PARALLEL := $(shell echo $$(( $(NPROCS) / 2 )))
 
 GO_STATIC_PACKAGES = $(GO_PROJECT)/cmd/provider
-GO_SUBDIRS += cmd internal apis
+GO_SUBDIRS += cmd internal apis pkg
 GO111MODULE = on
 GOLANGCILINT_VERSION = 1.55.2
 -include build/makelib/golang.mk
