@@ -1,0 +1,82 @@
+{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {
+    "creationTimestamp": "2024-08-22T08:16:14Z",
+    "labels": {
+      "another-key": "another-value",
+      "some-key": "some-value"
+    },
+    "managedFields": [
+      {
+        "apiVersion": "v1",
+        "fieldsType": "FieldsV1",
+        "fieldsV1": {
+          "f:metadata": {
+            "f:labels": {
+              "f:some-key": {}
+            }
+          },
+          "f:spec": {
+            "f:ports": {
+              "k:{\"port\":80,\"protocol\":\"TCP\"}": {
+                ".": {},
+                "f:port": {},
+                "f:protocol": {},
+                "f:targetPort": {}
+              }
+            },
+            "f:selector": {}
+          }
+        },
+        "manager": "provider-kubernetes/sample-service-owner",
+        "operation": "Apply",
+        "time": "2024-08-22T08:16:14Z"
+      },
+      {
+        "apiVersion": "v1",
+        "fieldsType": "FieldsV1",
+        "fieldsV1": {
+          "f:metadata": {
+            "f:labels": {
+              "f:another-key": {}
+            }
+          }
+        },
+        "manager": "dude",
+        "operation": "Apply",
+        "time": "2024-08-22T08:22:35Z"
+      }
+    ],
+    "name": "sample-service",
+    "namespace": "default",
+    "resourceVersion": "640890",
+    "uid": "b8777050-b61a-40b1-a4d3-89cef6d36977"
+  },
+  "spec": {
+    "clusterIP": "10.96.190.89",
+    "clusterIPs": [
+      "10.96.190.89"
+    ],
+    "internalTrafficPolicy": "Cluster",
+    "ipFamilies": [
+      "IPv4"
+    ],
+    "ipFamilyPolicy": "SingleStack",
+    "ports": [
+      {
+        "port": 80,
+        "protocol": "TCP",
+        "targetPort": 9376
+      }
+    ],
+    "selector": {
+      "app.kubernetes.io/name": "MyApp"
+    },
+    "sessionAffinity": "None",
+    "type": "ClusterIP"
+  },
+  "status": {
+    "loadBalancer": {}
+  }
+}

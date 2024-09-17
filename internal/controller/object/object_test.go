@@ -44,6 +44,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 	kubernetesv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/object/fake"
 	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
 	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )
@@ -127,20 +128,6 @@ func externalResource(rm ...externalResourceModifier) *unstructured.Unstructured
 	}
 
 	return res
-}
-
-func externalResourceWithLastAppliedConfigAnnotation(val interface{}) *unstructured.Unstructured {
-	res := externalResource(func(res *unstructured.Unstructured) {
-		metadata := res.Object["metadata"].(map[string]interface{})
-		metadata["annotations"] = map[string]interface{}{
-			corev1.LastAppliedConfigAnnotation: val,
-		}
-	})
-	return res
-}
-
-func upToDateExternalResource() *unstructured.Unstructured {
-	return externalResourceWithLastAppliedConfigAnnotation(string(externalResourceRaw))
 }
 
 func objectReferences() []v1alpha2.Reference {
@@ -306,6 +293,7 @@ func TestConnect(t *testing.T) {
 func TestObserve(t *testing.T) {
 	type args struct {
 		client resource.ClientApplicator
+		syncer ResourceSyncer
 		mg     resource.Managed
 	}
 	type want struct {
@@ -361,7 +349,34 @@ func TestObserve(t *testing.T) {
 				err: errors.Wrap(errBoom, errGetObject),
 			},
 		},
-		"NoLastAppliedAnnotation": {
+		"NotUpToDate": {
+			args: args{
+				mg: kubernetesObject(),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource(func(res *unstructured.Unstructured) {
+								res.SetLabels(map[string]string{"a-new-label": "foo"})
+							})
+							return nil
+						}),
+					},
+				},
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return current, nil
+					},
+					GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return manifest, nil
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
+				err: nil,
+			},
+		},
+		"UpToDate": {
 			args: args{
 				mg: kubernetesObject(),
 				client: resource.ClientApplicator{
@@ -372,69 +387,12 @@ func TestObserve(t *testing.T) {
 						}),
 					},
 				},
-			},
-			want: want{
-				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
-				err: nil,
-			},
-		},
-		"NotUpToDate": {
-			args: args{
-				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) =
-								*externalResourceWithLastAppliedConfigAnnotation(
-									`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"crossplane-system", "labels": {"old-label":"gone"}}}`,
-								)
-							return nil
-						}),
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return current, nil
 					},
-				},
-			},
-			want: want{
-				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
-				err: nil,
-			},
-		},
-		"UpToDateNameDefaultsToObjectName": {
-			args: args{
-				mg: kubernetesObject(func(obj *v1alpha2.Object) {
-					obj.Spec.ForProvider.Manifest.Raw = []byte(`{
-				    "apiVersion": "v1",
-				    "kind": "Namespace" }`)
-				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) =
-								*externalResourceWithLastAppliedConfigAnnotation(
-									`{"apiVersion":"v1","kind":"Namespace"}`,
-								)
-							return nil
-						}),
-					},
-				},
-			},
-			want: want{
-				out: managed.ExternalObservation{
-					ResourceExists:    true,
-					ResourceUpToDate:  true,
-					ConnectionDetails: managed.ConnectionDetails{},
-				},
-				err: nil,
-			},
-		},
-		"UpToDate": {
-			args: args{
-				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
-							return nil
-						}),
+					GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return manifest, nil
 					},
 				},
 			},
@@ -476,6 +434,14 @@ func TestObserve(t *testing.T) {
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
 						MockGet: test.NewMockGetFn(errBoom),
+					},
+				},
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return current, nil
+					},
+					GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return manifest, nil
 					},
 				},
 			},
@@ -523,12 +489,20 @@ func TestObserve(t *testing.T) {
 								*obj.(*unstructured.Unstructured) = *referenceObject()
 								return nil
 							} else if key.Name == externalResourceName {
-								*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
+								*obj.(*unstructured.Unstructured) = *externalResource()
 								return nil
 							}
 							return errBoom
 						},
 						MockUpdate: test.NewMockUpdateFn(nil),
+					},
+				},
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return current, nil
+					},
+					GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return manifest, nil
 					},
 				},
 			},
@@ -538,22 +512,6 @@ func TestObserve(t *testing.T) {
 					ResourceUpToDate:  true,
 					ConnectionDetails: managed.ConnectionDetails{},
 				},
-				err: nil,
-			},
-		},
-		"EmptyReference": {
-			args: args{
-				mg: kubernetesObject(func(obj *v1alpha2.Object) {
-					obj.Spec.References = []v1alpha2.Reference{{}}
-				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockGet: test.NewMockGetFn(nil),
-					},
-				},
-			},
-			want: want{
-				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
 				err: nil,
 			},
 		},
@@ -579,7 +537,7 @@ func TestObserve(t *testing.T) {
 						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 							switch key.Name {
 							case externalResourceName:
-								*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
+								*obj.(*unstructured.Unstructured) = *externalResource()
 							case testSecretName:
 								*obj.(*unstructured.Unstructured) = unstructured.Unstructured{
 									Object: map[string]interface{}{
@@ -591,6 +549,14 @@ func TestObserve(t *testing.T) {
 							}
 							return nil
 						},
+					},
+				},
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return current, nil
+					},
+					GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return manifest, nil
 					},
 				},
 			},
@@ -625,12 +591,20 @@ func TestObserve(t *testing.T) {
 						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 							switch key.Name {
 							case externalResourceName:
-								*obj.(*unstructured.Unstructured) = *upToDateExternalResource()
+								*obj.(*unstructured.Unstructured) = *externalResource()
 							case testSecretName:
 								return errBoom
 							}
 							return nil
 						},
+					},
+				},
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return current, nil
+					},
+					GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return manifest, nil
 					},
 				},
 			},
@@ -646,12 +620,17 @@ func TestObserve(t *testing.T) {
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
 						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-							*obj.(*unstructured.Unstructured) =
-								*externalResourceWithLastAppliedConfigAnnotation(
-									`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"crossplane-system", "labels": {"old-label":"gone"}}}`,
-								)
+							*obj.(*unstructured.Unstructured) = *externalResource()
 							return nil
 						}),
+					},
+				},
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return current, nil
+					},
+					GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return manifest, nil
 					},
 				},
 			},
@@ -667,6 +646,7 @@ func TestObserve(t *testing.T) {
 				logger:      logging.NewNopLogger(),
 				client:      tc.args.client,
 				localClient: tc.args.client,
+				syncer:      tc.args.syncer,
 			}
 			got, gotErr := e.Observe(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
@@ -682,8 +662,8 @@ func TestObserve(t *testing.T) {
 
 func TestCreate(t *testing.T) {
 	type args struct {
-		client resource.ClientApplicator
 		mg     resource.Managed
+		syncer ResourceSyncer
 	}
 	type want struct {
 		out managed.ExternalCreation
@@ -714,9 +694,9 @@ func TestCreate(t *testing.T) {
 		"FailedToCreate": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockCreate: test.NewMockCreateFn(errBoom),
+				syncer: &fake.ResourceSyncer{
+					SyncResourceFn: func(ctx context.Context, obj *v1alpha2.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return nil, errBoom
 					},
 				},
 			},
@@ -731,18 +711,12 @@ func TestCreate(t *testing.T) {
 				    "apiVersion": "v1",
 				    "kind": "Namespace" }`)
 				}),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockCreate: test.NewMockCreateFn(nil, func(obj client.Object) error {
-							_, ok := obj.GetAnnotations()[corev1.LastAppliedConfigAnnotation]
-							if !ok {
-								t.Errorf("Last applied annotation not set with create")
-							}
-							if obj.GetName() != testObjectName {
-								t.Errorf("Name should default to object name when not provider in manifest")
-							}
-							return nil
-						}),
+				syncer: &fake.ResourceSyncer{
+					SyncResourceFn: func(ctx context.Context, obj *v1alpha2.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						if desired.GetName() != testObjectName {
+							t.Errorf("Name should default to object name when not provider in manifest")
+						}
+						return desired, nil
 					},
 				},
 			},
@@ -753,15 +727,9 @@ func TestCreate(t *testing.T) {
 		"Success": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Client: &test.MockClient{
-						MockCreate: test.NewMockCreateFn(nil, func(obj client.Object) error {
-							_, ok := obj.GetAnnotations()[corev1.LastAppliedConfigAnnotation]
-							if !ok {
-								t.Errorf("Last applied annotation not set with create")
-							}
-							return nil
-						}),
+				syncer: &fake.ResourceSyncer{
+					SyncResourceFn: func(ctx context.Context, obj *v1alpha2.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return desired, nil
 					},
 				},
 			},
@@ -774,7 +742,7 @@ func TestCreate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e := &external{
 				logger: logging.NewNopLogger(),
-				client: tc.args.client,
+				syncer: tc.args.syncer,
 			}
 			got, gotErr := e.Create(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
@@ -790,8 +758,8 @@ func TestCreate(t *testing.T) {
 
 func TestUpdate(t *testing.T) {
 	type args struct {
-		client resource.ClientApplicator
 		mg     resource.Managed
+		syncer ResourceSyncer
 	}
 	type want struct {
 		out managed.ExternalUpdate
@@ -822,10 +790,10 @@ func TestUpdate(t *testing.T) {
 		"FailedToApply": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Applicator: resource.ApplyFn(func(context.Context, client.Object, ...resource.ApplyOption) error {
-						return errBoom
-					}),
+				syncer: &fake.ResourceSyncer{
+					SyncResourceFn: func(ctx context.Context, obj *v1alpha2.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return nil, errBoom
+					},
 				},
 			},
 			want: want{
@@ -839,13 +807,13 @@ func TestUpdate(t *testing.T) {
 				    "apiVersion": "v1",
 				    "kind": "Namespace" }`)
 				}),
-				client: resource.ClientApplicator{
-					Applicator: resource.ApplyFn(func(ctx context.Context, obj client.Object, op ...resource.ApplyOption) error {
-						if obj.GetName() != testObjectName {
+				syncer: &fake.ResourceSyncer{
+					SyncResourceFn: func(ctx context.Context, obj *v1alpha2.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						if desired.GetName() != testObjectName {
 							t.Errorf("Name should default to object name when not provider in manifest")
 						}
-						return nil
-					}),
+						return desired, nil
+					},
 				},
 			},
 			want: want{
@@ -855,10 +823,10 @@ func TestUpdate(t *testing.T) {
 		"Success": {
 			args: args{
 				mg: kubernetesObject(),
-				client: resource.ClientApplicator{
-					Applicator: resource.ApplyFn(func(context.Context, client.Object, ...resource.ApplyOption) error {
-						return nil
-					}),
+				syncer: &fake.ResourceSyncer{
+					SyncResourceFn: func(ctx context.Context, obj *v1alpha2.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return desired, nil
+					},
 				},
 			},
 			want: want{
@@ -870,7 +838,7 @@ func TestUpdate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e := &external{
 				logger: logging.NewNopLogger(),
-				client: tc.args.client,
+				syncer: tc.args.syncer,
 			}
 			got, gotErr := e.Update(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {

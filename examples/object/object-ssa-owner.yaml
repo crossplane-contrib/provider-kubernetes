@@ -1,0 +1,29 @@
+# Note: This example is for the alpha feature of server side apply.
+# It requires the provider to be started with the --enable-server-side-apply flag.
+apiVersion: kubernetes.crossplane.io/v1alpha2
+kind: Object
+metadata:
+  name: sample-service-owner
+  annotations:
+    uptest.upbound.io/pre-assert-hook: testhooks/enable-ssa.sh
+    uptest.upbound.io/post-assert-hook: testhooks/validate-ssa.sh
+    uptest.upbound.io/timeout: "60"
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: sample-service
+        namespace: default
+        labels:
+          some-key: some-value
+      spec:
+        selector:
+          app.kubernetes.io/name: MyApp
+        ports:
+          - protocol: TCP
+            port: 80
+            targetPort: 9376
+  providerConfigRef:
+    name: kubernetes-provider
