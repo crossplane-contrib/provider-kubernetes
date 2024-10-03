@@ -12,7 +12,7 @@ include ../../../build/makelib/imagelight.mk
 
 img.build:
 	@$(INFO) docker build $(IMAGE)
-	@$(MAKE) BUILD_ARGS="--load" img.build.shared
+	@$(MAKE) BUILD_ARGS="--load $(BUILD_ARGS)" img.build.shared
 	@$(OK) docker build $(IMAGE)
 
 img.publish:
