@@ -40,6 +40,7 @@ KUBECTL_VERSION = v1.31.0
 UP_VERSION = v0.33.0
 UP_CHANNEL = stable
 USE_HELM3 = true
+UPTEST_VERSION = v1.1.2
 -include build/makelib/k8s_tools.mk
 
 # ====================================================================================
@@ -94,9 +95,9 @@ CROSSPLANE_NAMESPACE = crossplane-system
 # The test is disabled for now because uptest clears the package cache when the provider restarted with the SSA flag.
 # Enable after https://github.com/crossplane/uptest/issues/17 is fixed.
 UPTEST_EXAMPLE_LIST ?= "examples/object/object.yaml,examples/object/object-watching.yaml"
-uptest: $(UPTEST) $(KUBECTL) $(KUTTL)
+uptest: $(UPTEST) $(KUBECTL) $(CHAINSAW)
 	@$(INFO) running automated tests
-	@KUBECTL=$(KUBECTL) KUTTL=$(KUTTL) CROSSPLANE_NAMESPACE=${CROSSPLANE_NAMESPACE} $(UPTEST) e2e "$(UPTEST_EXAMPLE_LIST)" --setup-script=cluster/test/setup.sh || $(FAIL)
+	@KUBECTL=$(KUBECTL) CHAINSAW=$(CHAINSAW) CROSSPLANE_NAMESPACE=${CROSSPLANE_NAMESPACE} $(UPTEST) e2e "$(UPTEST_EXAMPLE_LIST)" --setup-script=cluster/test/setup.sh || $(FAIL)
 	@$(OK) running automated tests
 
 local-dev: controlplane.up
