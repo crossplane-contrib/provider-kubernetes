@@ -30,13 +30,14 @@ GO_TEST_PARALLEL := $(shell echo $$(( $(NPROCS) / 2 )))
 GO_STATIC_PACKAGES = $(GO_PROJECT)/cmd/provider
 GO_SUBDIRS += cmd internal apis pkg
 GO111MODULE = on
-GOLANGCILINT_VERSION = 1.55.2
+GOLANGCILINT_VERSION = 1.61.0
 -include build/makelib/golang.mk
 
 # ====================================================================================
 # Setup Kubernetes tools
-KIND_VERSION = v0.22.0
-UP_VERSION = v0.28.0
+KIND_VERSION = v0.24.0
+KUBECTL_VERSION = v1.31.0
+UP_VERSION = v0.33.0
 UP_CHANNEL = stable
 USE_HELM3 = true
 -include build/makelib/k8s_tools.mk
@@ -84,7 +85,7 @@ cobertura:
 
 # ====================================================================================
 # End to End Testing
-CROSSPLANE_VERSION = 1.16.0
+CROSSPLANE_VERSION = 1.17.1
 CROSSPLANE_NAMESPACE = crossplane-system
 -include build/makelib/local.xpkg.mk
 -include build/makelib/controlplane.mk
