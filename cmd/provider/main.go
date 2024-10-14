@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
@@ -64,6 +65,7 @@ func main() {
 		maxReconcileRate        = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("100").Int()
 		sanitizeSecrets         = app.Flag("sanitize-secrets", "when enabled, redacts Secret data from Object status").Default("false").Envar("SANITIZE_SECRETS").Bool()
 		webhookPort             = app.Flag("webhook-port", "The port the webhook listens on").Default("9443").Envar("WEBHOOK_PORT").Int()
+		metricsBindAddress      = app.Flag("metrics-bind-address", "The address the metrics server listens on").Default(":8080").Envar("METRICS_BIND_ADDRESS").String()
 
 		enableManagementPolicies = app.Flag("enable-management-policies", "Enable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
 		enableWatches            = app.Flag("enable-watches", "Enable support for watching resources.").Default("false").Envar("ENABLE_WATCHES").Bool()
@@ -110,6 +112,10 @@ func main() {
 	mgr, err := ctrl.NewManager(ratelimiter.LimitRESTConfig(cfg, *maxReconcileRate), ctrl.Options{
 		Cache: cache.Options{
 			SyncPeriod: syncInterval,
+		},
+
+		Metrics: metricsserver.Options{
+			BindAddress: *metricsBindAddress,
 		},
 
 		// controller-runtime uses both ConfigMaps and Leases for leader
