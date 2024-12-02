@@ -1,8 +1,6 @@
 module github.com/crossplane-contrib/provider-kubernetes
 
-go 1.22.1
-
-toolchain go1.22.3
+go 1.22.8
 
 require (
 	github.com/Azure/kubelogin v0.1.4
