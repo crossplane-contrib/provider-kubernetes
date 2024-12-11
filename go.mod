@@ -18,11 +18,11 @@ require (
 	go.uber.org/zap v1.26.0
 	golang.org/x/oauth2 v0.20.0
 	golang.org/x/sync v0.7.0
-	k8s.io/api v0.29.3
-	k8s.io/apimachinery v0.29.3
+	k8s.io/api v0.31.4
+	k8s.io/apimachinery v0.31.4
 	k8s.io/client-go v0.29.3
-	k8s.io/kube-openapi v0.0.0-20240209001042-7a0d5b415232
-	k8s.io/utils v0.0.0-20240102154912-e7106e64919e
+	k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340
+	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8
 	sigs.k8s.io/controller-runtime v0.17.1
 	sigs.k8s.io/controller-tools v0.14.0
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1
@@ -53,7 +53,8 @@ require (
 	github.com/evanphx/json-patch/v5 v5.9.0 // indirect
 	github.com/fatih/color v1.16.0 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
-	github.com/go-logr/logr v1.4.1 // indirect
+	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
+	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v0.20.2 // indirect
 	github.com/go-openapi/jsonreference v0.20.4 // indirect
@@ -85,6 +86,7 @@ require (
 	github.com/spf13/afero v1.11.0 // indirect
 	github.com/spf13/cobra v1.8.1 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.24.0 // indirect
@@ -99,7 +101,7 @@ require (
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20231106174013-bbf56f31fb17 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240213162025-012b6fc9bca9 // indirect
-	google.golang.org/protobuf v1.33.0 // indirect
+	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/retry.v1 v1.0.3 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
