@@ -191,6 +191,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 	cb := ctrl.NewControllerManagedBy(mgr).
 		Named(name).
+		WithEventFilter(resource.DesiredStateChanged()).
 		WithOptions(o.ForControllerRuntime()).
 		For(&v1alpha2.Object{})
 
