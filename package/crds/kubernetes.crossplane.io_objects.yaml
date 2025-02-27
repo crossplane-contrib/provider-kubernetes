@@ -11,6 +11,8 @@ spec:
       clientConfig:
         service:
           path: /convert
+          name: crossplane-webhook
+          namespace: crossplane-system
       conversionReviewVersions:
       - v1
   group: kubernetes.crossplane.io
