@@ -14,3 +14,5 @@ guidelines and responsibilities for the steering committee and maintainers.
 * Mo Ying (William) <morningspace@yahoo.com> ([morningspace](https://github.com/morningspace))
 * Lovro Sviben <lovro.sviben@upbound.io> ([lsviben](https://github.com/lsviben))
 * Philippe Scorsolini <philippe.scorsolini@upbound.io> ([phisco](https://github.com/phisco))
+* Sergen Yalcin <sergen@upbound.com> ([sergenyalcin](https://github.com/sergenyalcin))
+* Fatih Turken <fatih@upbound.io> ([turkenf](https://github.com/turkenf)))
