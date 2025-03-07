@@ -482,16 +482,18 @@ func parseManifest(obj *v1alpha2.Object) (*unstructured.Unstructured, error) {
 func (c *external) setAtProvider(obj *v1alpha2.Object, observed *unstructured.Unstructured) error {
 	var err error
 
+	// sanitize/mutate only the copied object
+	sObserved := observed.DeepCopy()
 	if c.sanitizeSecrets {
 		if observed.GetKind() == "Secret" && observed.GetAPIVersion() == "v1" {
 			data := map[string][]byte{"redacted": []byte(nil)}
-			if err = fieldpath.Pave(observed.Object).SetValue("data", data); err != nil {
+			if err = fieldpath.Pave(sObserved.Object).SetValue("data", data); err != nil {
 				return errors.Wrap(err, errSanitizeSecretData)
 			}
 		}
 	}
 
-	if obj.Status.AtProvider.Manifest.Raw, err = observed.MarshalJSON(); err != nil {
+	if obj.Status.AtProvider.Manifest.Raw, err = sObserved.MarshalJSON(); err != nil {
 		return errors.Wrap(err, errFailedToMarshalExisting)
 	}
 
