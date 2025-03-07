@@ -639,6 +639,123 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"Deleting object with different identity fails": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.ForProvider.Manifest = runtime.RawExtension{Raw: []byte(`{
+						"apiVersion": "v1",
+						"kind": "ConfigMap",
+						"metadata": {
+							"name": "name",
+							"namespace": "namespace"
+						}
+					}`)}
+
+					obj.Status.AtProvider.Manifest = runtime.RawExtension{Raw: []byte(`{
+						"apiVersion": "v1",
+						"kind": "ConfigMap",
+						"metadata": {
+							"name": "old-name",
+							"namespace": "namespace"
+						}
+					}`)}
+
+					obj.Spec.DeletionPolicy = xpv1.DeletionDelete
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockDelete: test.NewMockDeleteFn(nil, func(obj client.Object) error {
+							if obj.GetName() != "old-name" {
+								t.Errorf("expected object to be deleted with name old-name, got %s", obj.GetName())
+							}
+							return errBoom
+						}),
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: false},
+				err: errors.Wrap(errBoom, errDeleteObject),
+			},
+		},
+		"Deleting object with different identity succeeds": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.ForProvider.Manifest = runtime.RawExtension{Raw: []byte(`{
+						"apiVersion": "v1",
+						"kind": "ConfigMap",
+						"metadata": {
+							"name": "name",
+							"namespace": "namespace"
+						}
+					}`)}
+
+					obj.Status.AtProvider.Manifest = runtime.RawExtension{Raw: []byte(`{
+						"apiVersion": "v1",
+						"kind": "ConfigMap",
+						"metadata": {
+							"name": "old-name",
+							"namespace": "namespace"
+						}
+					}`)}
+
+					obj.Spec.DeletionPolicy = xpv1.DeletionDelete
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							return kerrors.NewNotFound(schema.GroupResource{}, "")
+						}),
+						MockDelete: test.NewMockDeleteFn(nil, func(obj client.Object) error {
+							if obj.GetName() != "old-name" {
+								t.Errorf("expected object to be deleted with name old-name, got %s", obj.GetName())
+							}
+							return nil
+						}),
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: false},
+				err: nil,
+			},
+		},
+		"Deletion skipped if deletion policy is orphan": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.ForProvider.Manifest = runtime.RawExtension{Raw: []byte(`{
+						"apiVersion": "v1",
+						"kind": "ConfigMap",
+						"metadata": {
+							"name": "name",
+							"namespace": "namespace"
+						}
+					}`)}
+
+					obj.Status.AtProvider.Manifest = runtime.RawExtension{Raw: []byte(`{
+						"apiVersion": "v1",
+						"kind": "ConfigMap",
+						"metadata": {
+							"name": "old-name",
+							"namespace": "namespace"
+						}
+					}`)}
+
+					obj.Spec.DeletionPolicy = xpv1.DeletionOrphan
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							return kerrors.NewNotFound(schema.GroupResource{}, "")
+						}),
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: false},
+				err: nil,
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
