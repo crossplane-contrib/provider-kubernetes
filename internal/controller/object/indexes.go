@@ -110,8 +110,8 @@ func refKeyProviderNamespacedNameGVK(providerConfig, ns, name, kind, apiVersion 
 	return fmt.Sprintf("%s.%s.%s.%s.%s", providerConfig, name, ns, kind, apiVersion)
 }
 
-func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.RateLimitingInterface) {
-	return func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.RateLimitingInterface) {
+func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	return func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 		pc, _ := ctx.Value(keyProviderConfigName).(string)
 		rGVK := ev.Object.GetObjectKind().GroupVersionKind()
 		key := refKeyProviderNamespacedNameGVK(pc, ev.Object.GetNamespace(), ev.Object.GetName(), rGVK.Kind, rGVK.GroupVersion().String())
