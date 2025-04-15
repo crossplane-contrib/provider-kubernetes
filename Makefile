@@ -30,7 +30,7 @@ GO_TEST_PARALLEL := $(shell echo $$(( $(NPROCS) / 2 )))
 GO_STATIC_PACKAGES = $(GO_PROJECT)/cmd/provider
 GO_SUBDIRS += cmd internal apis pkg
 GO111MODULE = on
-GOLANGCILINT_VERSION = 1.61.0
+GOLANGCILINT_VERSION = 1.62.0
 -include build/makelib/golang.mk
 
 # ====================================================================================
@@ -84,7 +84,7 @@ cobertura:
 
 # ====================================================================================
 # End to End Testing
-CROSSPLANE_VERSION = 1.16.0
+CROSSPLANE_VERSION = 1.19.0
 CROSSPLANE_NAMESPACE = crossplane-system
 -include build/makelib/local.xpkg.mk
 -include build/makelib/controlplane.mk
