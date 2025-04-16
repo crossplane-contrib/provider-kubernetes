@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,6 +25,8 @@ import (
 
 	"github.com/alecthomas/kingpin/v2"
 	"go.uber.org/zap/zapcore"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -31,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	changelogsv1alpha1 "github.com/crossplane/crossplane-runtime/apis/changelogs/proto/v1alpha1"
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
@@ -42,6 +46,7 @@ import (
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
 	object "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/version"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
@@ -63,10 +68,12 @@ func main() {
 		leaderElection          = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
 		maxReconcileRate        = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("100").Int()
 		sanitizeSecrets         = app.Flag("sanitize-secrets", "when enabled, redacts Secret data from Object status").Default("false").Envar("SANITIZE_SECRETS").Bool()
+		changelogsSocketPath    = app.Flag("changelogs-socket-path", "Path for changelogs socket (if enabled)").Default("/var/run/changelogs/changelogs.sock").Envar("CHANGELOGS_SOCKET_PATH").String()
 
 		enableManagementPolicies = app.Flag("enable-management-policies", "Enable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
 		enableWatches            = app.Flag("enable-watches", "Enable support for watching resources.").Default("false").Envar("ENABLE_WATCHES").Bool()
 		enableServerSideApply    = app.Flag("enable-server-side-apply", "Enable server side apply to sync object manifests to k8s API.").Default("false").Envar("ENABLE_SERVER_SIDE_APPLY").Bool()
+		enableChangeLogs         = app.Flag("enable-changelogs", "Enable support for capturing change logs during reconciliation.").Default("false").Envar("ENABLE_CHANGE_LOGS").Bool()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
@@ -164,6 +171,21 @@ func main() {
 	if *enableServerSideApply {
 		o.Features.Enable(features.EnableAlphaServerSideApply)
 		log.Info("Alpha feature enabled", "flag", features.EnableAlphaServerSideApply)
+	}
+
+	if *enableChangeLogs {
+		o.Features.Enable(feature.EnableAlphaChangeLogs)
+		log.Info("Alpha feature enabled", "flag", feature.EnableAlphaChangeLogs)
+
+		conn, err := grpc.NewClient("unix://"+*changelogsSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		kingpin.FatalIfError(err, "failed to create change logs client connection at %s", *changelogsSocketPath)
+
+		clo := controller.ChangeLogOptions{
+			ChangeLogger: managed.NewGRPCChangeLogger(
+				changelogsv1alpha1.NewChangeLogServiceClient(conn),
+				managed.WithProviderVersion(fmt.Sprintf("provider-kubernetes:%s", version.Version))),
+		}
+		o.ChangeLogOptions = &clo
 	}
 
 	// NOTE(lsviben): We are registering the conversion webhook with v1alpha1
