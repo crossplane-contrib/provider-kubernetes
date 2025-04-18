@@ -45,6 +45,7 @@ import (
 	runtimeevent "sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
@@ -207,6 +208,11 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		i := resourceInformers{
 			log:    l,
 			config: mgr.GetConfig(),
+			handler: handler.Funcs{
+				GenericFunc: func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+					enqueueObjectsForReferences(ca, l)(ctx, ev, q)
+				},
+			},
 
 			objectsCache:   ca,
 			resourceCaches: make(map[gvkWithConfig]resourceCache),
@@ -220,11 +226,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 			return errors.Wrap(err, "cannot add cleanup referenced resource informers runnable")
 		}
 
-		cb = cb.WatchesRawSource(&i, handler.Funcs{
-			GenericFunc: func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.RateLimitingInterface) {
-				enqueueObjectsForReferences(ca, l)(ctx, ev, q)
-			},
-		})
+		cb = cb.WatchesRawSource(&i)
 	}
 	reconcilerOptions = append(reconcilerOptions, managed.WithExternalConnecter(conn))
 
@@ -341,7 +343,7 @@ type external struct {
 	desiredStateCacheCleanupFn func()
 }
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) { // nolint:gocyclo, mostly branches due to feature flags, hopefully will be refactored once they are promoted
+func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) { // nolint:gocyclo // mostly branches due to feature flags, hopefully will be refactored once they are promoted
 	obj, ok := mg.(*v1alpha2.Object)
 	if !ok {
 		return managed.ExternalObservation{}, errors.New(errNotKubernetesObject)
@@ -442,24 +444,28 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalUpdate{}, c.setAtProvider(obj, current)
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
+func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
 	obj, ok := mg.(*v1alpha2.Object)
 	if !ok {
-		return errors.New(errNotKubernetesObject)
+		return managed.ExternalDelete{}, errors.New(errNotKubernetesObject)
 	}
 
 	c.logger.Debug("Deleting", "resource", obj)
 
 	res, err := parseManifest(obj)
 	if err != nil {
-		return err
+		return managed.ExternalDelete{}, err
 	}
 
 	// SSA is enabled
 	if c.desiredStateCacheCleanupFn != nil {
 		c.desiredStateCacheCleanupFn()
 	}
-	return errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, res)), errDeleteObject)
+	return managed.ExternalDelete{}, errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, res)), errDeleteObject)
+}
+
+func (c *external) Disconnect(ctx context.Context) error {
+	return nil
 }
 
 func ssaFieldOwner(name string) string {
@@ -676,7 +682,6 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 			Namespace: refNamespace,
 			Name:      refName,
 		}, res)
-
 		if err != nil {
 			return errors.Wrap(err, errGetReferencedResource)
 		}
@@ -709,7 +714,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	isUpToDate := false
 
-	if !sets.New[xpv1.ManagementAction](obj.GetManagementPolicies()...).
+	if !sets.New(obj.GetManagementPolicies()...).
 		HasAny(xpv1.ManagementActionUpdate, xpv1.ManagementActionCreate, xpv1.ManagementActionAll) {
 		// Treated as up-to-date as we don't update or create the resource
 		isUpToDate = true
@@ -767,7 +772,6 @@ func (f *objFinalizer) handleRefFinalizer(ctx context.Context, obj *v1alpha2.Obj
 			Namespace: refNamespace,
 			Name:      refName,
 		}, res)
-
 		if err != nil {
 			if ignoreNotFound && kerrors.IsNotFound(err) {
 				continue
@@ -783,7 +787,6 @@ func (f *objFinalizer) handleRefFinalizer(ctx context.Context, obj *v1alpha2.Obj
 	}
 
 	return nil
-
 }
 
 func (f *objFinalizer) AddFinalizer(ctx context.Context, res resource.Object) error {
@@ -804,7 +807,8 @@ func (f *objFinalizer) AddFinalizer(ctx context.Context, res resource.Object) er
 
 	// Add finalizer to referenced resources if not exists
 	err = f.handleRefFinalizer(ctx, obj, func(
-		ctx context.Context, res *unstructured.Unstructured, finalizer string) error {
+		ctx context.Context, res *unstructured.Unstructured, finalizer string,
+	) error {
 		if !meta.FinalizerExists(res, finalizer) {
 			meta.AddFinalizer(res, finalizer)
 			if err := f.client.Update(ctx, res); err != nil {
@@ -824,7 +828,8 @@ func (f *objFinalizer) RemoveFinalizer(ctx context.Context, res resource.Object)
 
 	// Remove finalizer from referenced resources if exists
 	err := f.handleRefFinalizer(ctx, obj, func(
-		ctx context.Context, res *unstructured.Unstructured, finalizer string) error {
+		ctx context.Context, res *unstructured.Unstructured, finalizer string,
+	) error {
 		if meta.FinalizerExists(res, finalizer) {
 			meta.RemoveFinalizer(res, finalizer)
 			if err := f.client.Update(ctx, res); err != nil {

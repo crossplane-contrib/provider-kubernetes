@@ -11,8 +11,8 @@ on:
 env:
   # Common versions
   GO_VERSION: '1.22.12'
-  GOLANGCI_VERSION: 'v1.55.2'
-  DOCKER_BUILDX_VERSION: 'v0.8.2'
+  GOLANGCI_VERSION: 'v1.62.0'
+  DOCKER_BUILDX_VERSION: 'v0.11.2'
 
 jobs:
   detect-noop:
@@ -54,7 +54,7 @@ jobs:
           version: ${{ env.GOLANGCI_VERSION }}
 
   check-diff:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     needs: detect-noop
     if: needs.detect-noop.outputs.noop != 'true'
 
