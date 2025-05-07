@@ -78,8 +78,10 @@ type notKubernetesObject struct {
 	resource.Managed
 }
 
-type kubernetesObjectModifier func(obj *v1alpha2.Object)
-type externalResourceModifier func(res *unstructured.Unstructured)
+type (
+	kubernetesObjectModifier func(obj *v1alpha2.Object)
+	externalResourceModifier func(res *unstructured.Unstructured)
+)
 
 func kubernetesObject(om ...kubernetesObjectModifier) *v1alpha2.Object {
 	o := &v1alpha2.Object{
@@ -937,7 +939,7 @@ func TestDelete(t *testing.T) {
 				logger: logging.NewNopLogger(),
 				client: tc.args.client,
 			}
-			gotErr := e.Delete(context.Background(), tc.args.mg)
+			_, gotErr := e.Delete(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
 				t.Fatalf("e.Delete(...): -want error, +got error: %s", diff)
 			}

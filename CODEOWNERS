@@ -1,0 +1,22 @@
+
+# SPDX-FileCopyrightText: 2025 The Crossplane Authors <https://crossplane.io>
+#
+# SPDX-License-Identifier: CC0-1.0
+
+# This file controls automatic PR reviewer assignment. See the following docs:
+#
+# * https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# * https://docs.github.com/en/organizations/organizing-members-into-teams/managing-code-review-settings-for-your-team
+#
+# The goal of this file is for most PRs to automatically and fairly have one
+# maintainer set as PR reviewers. All maintainers have permission to approve 
+# and merge PRs. All PRs must be approved by at least one maintainer before being merged.
+# 
+# Where possible, prefer explicitly specifying a maintainer who is a subject
+# matter expert for a particular part of the codebase rather than using fallback
+# owners. Fallback owners are listed at the bottom of this file.
+#
+# See also OWNERS.md for governance details
+
+# Fallback owners
+*			@turkenh @morningspace @lsviben @phisco @sergenyalcin @turkenf

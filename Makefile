@@ -28,9 +28,10 @@ NPROCS ?= 1
 GO_TEST_PARALLEL := $(shell echo $$(( $(NPROCS) / 2 )))
 
 GO_STATIC_PACKAGES = $(GO_PROJECT)/cmd/provider
+GO_LDFLAGS += -X $(GO_PROJECT)/internal/version.Version=$(VERSION)
 GO_SUBDIRS += cmd internal apis pkg
 GO111MODULE = on
-GOLANGCILINT_VERSION = 1.55.2
+GOLANGCILINT_VERSION = 1.62.0
 -include build/makelib/golang.mk
 
 # ====================================================================================
@@ -84,7 +85,7 @@ cobertura:
 
 # ====================================================================================
 # End to End Testing
-CROSSPLANE_VERSION = 1.16.0
+CROSSPLANE_VERSION = 1.19.0
 CROSSPLANE_NAMESPACE = crossplane-system
 -include build/makelib/local.xpkg.mk
 -include build/makelib/controlplane.mk
@@ -127,7 +128,19 @@ run: $(KUBECTL) generate
 manifests:
 	@$(INFO) Deprecated. Run make generate instead.
 
-.PHONY: cobertura submodules fallthrough test-integration run manifests
+# NOTE(hasheddan): the build submodule currently overrides XDG_CACHE_HOME in
+# order to force the Helm 3 to use the .work/helm directory. This causes Go on
+# Linux machines to use that directory as the build cache as well. We should
+# adjust this behavior in the build submodule because it is also causing Linux
+# users to duplicate their build cache, but for now we just make it easier to
+# identify its location in CI so that we cache between builds.
+go.cachedir:
+	@go env GOCACHE
+
+go.mod.cachedir:
+	@go env GOMODCACHE
+
+.PHONY: cobertura submodules fallthrough test-integration run manifests go.mod.cachedir go.cachedir
 
 generate.run: go.generate kustomize.gen
 
