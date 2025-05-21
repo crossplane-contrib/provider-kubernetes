@@ -85,7 +85,7 @@ cobertura:
 
 # ====================================================================================
 # End to End Testing
-CROSSPLANE_VERSION = 1.19.0
+CROSSPLANE_VERSION = 1.20.0
 CROSSPLANE_NAMESPACE = crossplane-system
 -include build/makelib/local.xpkg.mk
 -include build/makelib/controlplane.mk
