@@ -5,6 +5,7 @@ import (
 
 	"github.com/Azure/kubelogin/pkg/token"
 	"github.com/pkg/errors"
+	"slices"
 )
 
 // tokenTransport is an http.RoundTripper that injects a token to requests,
@@ -57,7 +58,7 @@ func cloneRequest(r *http.Request) *http.Request {
 	// deep copy of the Header
 	r2.Header = make(http.Header, len(r.Header))
 	for k, s := range r.Header {
-		r2.Header[k] = append([]string(nil), s...)
+		r2.Header[k] = slices.Clone(s)
 	}
 	return r2
 }

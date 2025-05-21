@@ -63,13 +63,13 @@ const (
 )
 
 var (
-	externalResourceRaw = []byte(fmt.Sprintf(`{
+	externalResourceRaw = fmt.Appendf(nil, `{
 		"apiVersion": "v1",
 		"kind": "Namespace",
 		"metadata": {
 			"name": %q
 		}
-	}`, externalResourceName))
+	}`, externalResourceName)
 
 	errBoom = errors.New("boom")
 )
@@ -116,10 +116,10 @@ func kubernetesObject(om ...kubernetesObjectModifier) *v1alpha2.Object {
 
 func externalResource(rm ...externalResourceModifier) *unstructured.Unstructured {
 	res := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "Namespace",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name": externalResourceName,
 			},
 		},
@@ -154,21 +154,21 @@ func objectReferences() []v1alpha2.Reference {
 
 func referenceObject(rm ...externalResourceModifier) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": v1alpha2.SchemeGroupVersion.String(),
 			"kind":       v1alpha2.ObjectKind,
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      testReferenceObjectName,
 				"namespace": testNamespace,
 			},
-			"spec": map[string]interface{}{
-				"forProvider": map[string]interface{}{
-					"manifest": map[string]interface{}{
+			"spec": map[string]any{
+				"forProvider": map[string]any{
+					"manifest": map[string]any{
 						"apiVersion": "v1",
 						"kind":       "ConfigMap",
-						"metadata": map[string]interface{}{
+						"metadata": map[string]any{
 							"namespace": testNamespace,
-							"labels": map[string]interface{}{
+							"labels": map[string]any{
 								"app": "foo",
 							},
 						},
@@ -185,10 +185,10 @@ func referenceObject(rm ...externalResourceModifier) *unstructured.Unstructured 
 	return obj
 }
 
-func referenceObjectWithFinalizer(val interface{}) *unstructured.Unstructured {
+func referenceObjectWithFinalizer(val any) *unstructured.Unstructured {
 	res := referenceObject(func(res *unstructured.Unstructured) {
-		metadata := res.Object["metadata"].(map[string]interface{})
-		metadata["finalizers"] = []interface{}{val}
+		metadata := res.Object["metadata"].(map[string]any)
+		metadata["finalizers"] = []any{val}
 	})
 	return res
 }
@@ -542,8 +542,8 @@ func TestObserve(t *testing.T) {
 								*obj.(*unstructured.Unstructured) = *externalResource()
 							case testSecretName:
 								*obj.(*unstructured.Unstructured) = unstructured.Unstructured{
-									Object: map[string]interface{}{
-										"data": map[string]interface{}{
+									Object: map[string]any{
+										"data": map[string]any{
 											"db-password": "MTIzNDU=",
 										},
 									},
@@ -1242,12 +1242,12 @@ func TestRemoveFinalizer(t *testing.T) {
 }
 
 func TestConnectionDetails(t *testing.T) {
-	mockClient := func(secretData map[string]interface{}, err error) *test.MockClient {
+	mockClient := func(secretData map[string]any, err error) *test.MockClient {
 		return &test.MockClient{
 			MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 				if o, ok := obj.(*unstructured.Unstructured); o.GetKind() == "Secret" && ok && key.Name == testSecretName && key.Namespace == testNamespace {
 					*obj.(*unstructured.Unstructured) = unstructured.Unstructured{
-						Object: map[string]interface{}{
+						Object: map[string]any{
 							"data": secretData,
 						},
 					}
@@ -1283,7 +1283,7 @@ func TestConnectionDetails(t *testing.T) {
 		"Fail_ObjectNotExisting": {
 			args: args{
 				kube: mockClient(
-					map[string]interface{}{},
+					map[string]any{},
 					kerrors.NewNotFound(schema.GroupResource{Group: "", Resource: "secrets"}, testSecretName),
 				),
 				connDetails: []v1alpha2.ConnectionDetail{connDetail},
@@ -1296,7 +1296,7 @@ func TestConnectionDetails(t *testing.T) {
 		"Fail_FieldPathNotExisting": {
 			args: args{
 				kube: mockClient(
-					map[string]interface{}{
+					map[string]any{
 						"non-db-password": "MTIzNDU=",
 					},
 					nil,
@@ -1311,7 +1311,7 @@ func TestConnectionDetails(t *testing.T) {
 		"Fail_InvalidEncoding": {
 			args: args{
 				kube: mockClient(
-					map[string]interface{}{
+					map[string]any{
 						"db-password": "_messed_up_encoding",
 					},
 					nil,
@@ -1326,7 +1326,7 @@ func TestConnectionDetails(t *testing.T) {
 		"Success": {
 			args: args{
 				kube: mockClient(
-					map[string]interface{}{
+					map[string]any{
 						"db-password": "MTIzNDU=",
 					},
 					nil,
@@ -1370,7 +1370,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 			args: args{
 				obj: &v1alpha2.Object{},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": xpv1.ConditionedStatus{},
 					},
 				},
@@ -1390,7 +1390,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": xpv1.ConditionedStatus{},
 					},
 				},
@@ -1410,7 +1410,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": xpv1.ConditionedStatus{
 							Conditions: []xpv1.Condition{
 								{
@@ -1443,7 +1443,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": xpv1.ConditionedStatus{},
 					},
 				},
@@ -1469,7 +1469,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": xpv1.ConditionedStatus{
 							Conditions: []xpv1.Condition{
 								{
@@ -1502,7 +1502,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": "not a conditioned status",
 					},
 				},
@@ -1528,7 +1528,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": xpv1.ConditionedStatus{},
 					},
 				},
@@ -1553,7 +1553,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": "not a conditioned status",
 					},
 				},
@@ -1578,7 +1578,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": xpv1.ConditionedStatus{
 							Conditions: []xpv1.Condition{
 								{
@@ -1614,7 +1614,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": xpv1.ConditionedStatus{
 							Conditions: []xpv1.Condition{
 								{
@@ -1651,7 +1651,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": xpv1.ConditionedStatus{
 							Conditions: []xpv1.Condition{
 								{
@@ -1688,7 +1688,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": xpv1.ConditionedStatus{
 							Conditions: []xpv1.Condition{
 								{
@@ -1725,7 +1725,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": map[string]any{
 							"isReady": true,
 						},
@@ -1753,7 +1753,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": map[string]any{},
 					},
 				},
@@ -1780,7 +1780,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 					},
 				},
 				observed: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"status": xpv1.ConditionedStatus{
 							Conditions: []xpv1.Condition{
 								{

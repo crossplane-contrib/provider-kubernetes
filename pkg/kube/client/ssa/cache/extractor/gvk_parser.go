@@ -99,7 +99,7 @@ func parseGroupVersionKind(extensions spec.Extensions) []schema.GroupVersionKind
 	}
 
 	// gvk extension must be a list of at least 1 element.
-	gvkList, ok := gvkExtension.([]interface{})
+	gvkList, ok := gvkExtension.([]any)
 	if !ok {
 		return []schema.GroupVersionKind{}
 	}
@@ -108,7 +108,7 @@ func parseGroupVersionKind(extensions spec.Extensions) []schema.GroupVersionKind
 	for _, gvk := range gvkList {
 		// gvk extension list must be a map with group, version, and
 		// kind fields
-		gvkMap, ok := gvk.(map[string]interface{})
+		gvkMap, ok := gvk.(map[string]any)
 		if !ok {
 			continue
 		}

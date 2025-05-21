@@ -39,6 +39,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
+	"maps"
 )
 
 // resourceInformers manages resource informers referenced or managed
@@ -154,21 +155,21 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 		}
 
 		if _, err := inf.AddEventHandler(kcache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
+			AddFunc: func(obj any) {
 				ev := runtimeevent.GenericEvent{
 					Object: obj.(client.Object),
 				}
 
 				i.sink(providerConfig, ev)
 			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
+			UpdateFunc: func(oldObj, newObj any) {
 				ev := runtimeevent.GenericEvent{
 					Object: newObj.(client.Object),
 				}
 
 				i.sink(providerConfig, ev)
 			},
-			DeleteFunc: func(obj interface{}) {
+			DeleteFunc: func(obj any) {
 				if final, ok := obj.(kcache.DeletedFinalStateUnknown); ok {
 					obj = final.Obj
 				}
@@ -224,9 +225,7 @@ func (i *resourceInformers) cleanupResourceInformers(ctx context.Context) {
 	// copy map to avoid locking it for the entire duration of the loop
 	i.lock.RLock()
 	resourceCaches := make(map[gvkWithConfig]resourceCache, len(i.resourceCaches))
-	for gc, ca := range i.resourceCaches {
-		resourceCaches[gc] = ca
-	}
+	maps.Copy(resourceCaches, i.resourceCaches)
 	i.lock.RUnlock()
 
 	// stop old informers

@@ -229,7 +229,7 @@ func (r *Reference) ApplyFromFieldPathPatch(from, to runtime.Object) error {
 // patchFieldValueToObject, given a path, value and "to" object, will
 // apply the value to the "to" object at the given path, returning
 // any errors as they occur.
-func patchFieldValueToObject(path string, value interface{}, to runtime.Object) error {
+func patchFieldValueToObject(path string, value any, to runtime.Object) error {
 	paved, err := fieldpath.PaveObject(to)
 	if err != nil {
 		return err

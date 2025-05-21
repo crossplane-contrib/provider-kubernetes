@@ -125,7 +125,7 @@ func TestReconciler(t *testing.T) {
 						if ulist.GetAPIVersion() != "v1" || ulist.GetKind() != "Foo" {
 							return fmt.Errorf("Unexpected GVK %v", ulist.GroupVersionKind())
 						}
-						for i := 0; i < 2; i++ {
+						for i := range 2 {
 							item := unstructured.Unstructured{}
 							item.SetKind(ulist.GetKind())
 							item.SetAPIVersion(ulist.GetAPIVersion())
@@ -223,7 +223,7 @@ func TestReconciler(t *testing.T) {
 						if ulist.GetAPIVersion() != "v1" || ulist.GetKind() != "Foo" {
 							return fmt.Errorf("Unexpected GVK %v", ulist.GroupVersionKind())
 						}
-						for i := 0; i < 2; i++ {
+						for i := range 2 {
 							item := unstructured.Unstructured{}
 							item.SetKind(ulist.GetKind())
 							item.SetAPIVersion(ulist.GetAPIVersion())
@@ -368,7 +368,7 @@ func TestReconciler(t *testing.T) {
 						if ulist.GetAPIVersion() != "v1" || ulist.GetKind() != "Foo" {
 							return fmt.Errorf("Unexpected GVK %v", ulist.GroupVersionKind())
 						}
-						for i := 0; i < 2; i++ {
+						for i := range 2 {
 							item := unstructured.Unstructured{}
 							item.SetKind(ulist.GetKind())
 							item.SetAPIVersion(ulist.GetAPIVersion())

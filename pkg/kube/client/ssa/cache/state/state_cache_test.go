@@ -15,7 +15,7 @@ import (
 )
 
 func exampleExternalResourceRaw(resName, fieldValue string) []byte {
-	return []byte(fmt.Sprintf(`{
+	return fmt.Appendf(nil, `{
 		"apiVersion": "api.example.org/v1",
 		"kind": "MyCoolKind",
 		"metadata": {
@@ -24,7 +24,7 @@ func exampleExternalResourceRaw(resName, fieldValue string) []byte {
 		"spec": {
 			"coolField": %q
 		}
-	}`, resName, fieldValue))
+	}`, resName, fieldValue)
 }
 
 func exampleManifestHash(resName, fieldValue string) string {
@@ -33,13 +33,13 @@ func exampleManifestHash(resName, fieldValue string) string {
 
 func exampleExtractedResource(resName, fieldValue string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "api.example.org/v1",
 			"kind":       "FooKind",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name": resName,
 			},
-			"spec": map[string]interface{}{
+			"spec": map[string]any{
 				"coolField": fieldValue,
 			},
 		},
@@ -68,10 +68,10 @@ func buildStateCacheManagerStore(existingObjectUIDs []types.UID) map[types.UID]C
 
 		store[uid] = &mockStateCache{
 			u: &unstructured.Unstructured{
-				Object: map[string]interface{}{
+				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "FooKind",
-					"metadata": map[string]interface{}{
+					"metadata": map[string]any{
 						"name": fmt.Sprintf("manifest-of-%s", uid),
 					},
 				},
@@ -231,10 +231,10 @@ func TestDesiredStateCache_GetStateFor(t *testing.T) {
 			},
 			argStateCache: &DesiredStateCache{
 				extracted: &unstructured.Unstructured{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"apiVersion": "v1",
 						"kind":       "BarKind",
-						"metadata": map[string]interface{}{
+						"metadata": map[string]any{
 							"name": "manifest-of-bar",
 						},
 					},

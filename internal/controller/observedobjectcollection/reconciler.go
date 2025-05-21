@@ -45,6 +45,7 @@ import (
 	"github.com/crossplane-contrib/provider-kubernetes/apis/observedobjectcollection/v1alpha1"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
+	"maps"
 )
 
 const (
@@ -269,9 +270,7 @@ func observedObjectPatch(name string, matchedObject unstructured.Unstructured, c
 		membershipLabelKey: collection.Name,
 	}
 	if t := collection.Spec.Template; t != nil {
-		for k, v := range t.Metadata.Labels {
-			labels[k] = v
-		}
+		maps.Copy(labels, t.Metadata.Labels)
 		if len(t.Metadata.Annotations) > 0 {
 			observedObject.SetAnnotations(t.Metadata.Annotations)
 		}

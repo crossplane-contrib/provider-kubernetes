@@ -132,7 +132,7 @@ func (e *cachingUnstructuredExtractor) getParserForGV(ctx context.Context, gv sc
 	//
 	// concurrent schema fetches and cache updates for the same GV
 	// (of the particular k8s cluster) are deduplicated with singleflight.
-	freshParserObj, err, _ := e.cache.sf.Do(gv.String(), func() (interface{}, error) {
+	freshParserObj, err, _ := e.cache.sf.Do(gv.String(), func() (any, error) {
 		freshParser, err := newParserFromOpenAPIGroupVersion(ctx, oapiGV)
 		if err != nil {
 			return nil, err

@@ -229,7 +229,7 @@ func TestExtract(t *testing.T) {
 				t.Fatalf("cannot initialize caching unstructured extractor: %v", err)
 			}
 
-			obj := map[string]interface{}{}
+			obj := map[string]any{}
 			if err := json.Unmarshal(tt.args.objectToExtract, &obj); err != nil {
 				t.Fatalf("an error '%s' was not expected", err)
 			}
@@ -787,7 +787,7 @@ func TestCachingMultipleExtractors(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
