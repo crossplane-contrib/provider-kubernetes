@@ -5,7 +5,7 @@ go 1.23.8
 require (
 	github.com/Azure/kubelogin v0.1.4
 	github.com/alecthomas/kingpin/v2 v2.4.0
-	github.com/crossplane/crossplane-runtime v1.19.0
+	github.com/crossplane/crossplane-runtime v1.20.0
 	github.com/crossplane/crossplane-tools v0.0.0-20240522174801-1ad3d4c87f21
 	github.com/google/cel-go v0.20.1
 	github.com/google/go-cmp v0.6.0
@@ -14,7 +14,7 @@ require (
 	github.com/spf13/pflag v1.0.5
 	github.com/upbound/up-sdk-go v0.3.1-0.20240517133145-e5da98257888
 	go.uber.org/zap v1.27.0
-	golang.org/x/oauth2 v0.21.0
+	golang.org/x/oauth2 v0.27.0
 	golang.org/x/sync v0.12.0
 	google.golang.org/grpc v1.65.0
 	k8s.io/api v0.31.0
@@ -48,7 +48,7 @@ require (
 	github.com/dave/jennifer v1.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.11.2 // indirect
-	github.com/evanphx/json-patch v5.9.0+incompatible // indirect
+	github.com/evanphx/json-patch v5.9.11+incompatible // indirect
 	github.com/evanphx/json-patch/v5 v5.9.0 // indirect
 	github.com/fatih/color v1.17.0 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
