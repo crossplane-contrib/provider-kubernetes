@@ -22,4 +22,6 @@ jobs:
       cleanup-disk: true
     secrets:
       GHCR_PAT: ${{ secrets.GITHUB_TOKEN }}
-      XPKG_UPBOUND_TOKEN: ${{ secrets.XPKG_UPBOUND_TOKEN }}
+      XPKG_MIRROR_TOKEN: ${{ secrets.XPKG_TOKEN }}
+      XPKG_MIRROR_ACCESS_ID: ${{ secrets.XPKG_ACCESS_ID }}
+
