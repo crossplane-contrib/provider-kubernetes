@@ -174,6 +174,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
 		managed.WithConnectionPublishers(cps...),
 		managed.WithMetricRecorder(o.MetricOptions.MRMetrics),
+		managed.WithDeterministicExternalName(true),
 	}
 
 	conn := &connector{
