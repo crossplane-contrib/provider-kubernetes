@@ -1066,6 +1066,32 @@ func TestAddFinalizer(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SuccessfullyAddReferenceFinalizerOnRetry": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.ObjectMeta.Finalizers = append(obj.ObjectMeta.Finalizers, objFinalizerName)
+					obj.Spec.References = objectReferences()
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *referenceObject()
+							return nil
+						}),
+						MockUpdate: test.NewMockUpdateFn(nil, func(obj client.Object) error {
+							name := obj.GetName()
+							if name == testReferenceObjectName {
+								return nil
+							}
+							return errBoom
+						}),
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
