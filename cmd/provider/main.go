@@ -19,6 +19,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -44,6 +45,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis"
 	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/bootcheck"
 	object "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/version"
@@ -56,6 +58,13 @@ const (
 	tlsServerCertDirEnvVar  = "TLS_SERVER_CERTS_DIR"
 	tlsServerCertDir        = "/tls/server"
 )
+
+func init() {
+	err := bootcheck.CheckEnv()
+	if err != nil {
+		log.Fatalf("bootcheck failed. provider will not be started: %v", err)
+	}
+}
 
 func main() {
 	var (
