@@ -800,18 +800,17 @@ func (f *objFinalizer) AddFinalizer(ctx context.Context, res resource.Object) er
 		return errors.New(errNotKubernetesObject)
 	}
 
-	if meta.FinalizerExists(obj, objFinalizerName) {
-		return nil
-	}
-	meta.AddFinalizer(obj, objFinalizerName)
+	if !meta.FinalizerExists(obj, objFinalizerName) {
+		meta.AddFinalizer(obj, objFinalizerName)
 
-	err := f.client.Update(ctx, obj)
-	if err != nil {
-		return errors.Wrap(err, errAddFinalizer)
+		err := f.client.Update(ctx, obj)
+		if err != nil {
+			return errors.Wrap(err, errAddFinalizer)
+		}
 	}
 
 	// Add finalizer to referenced resources if not exists
-	err = f.handleRefFinalizer(ctx, obj, func(
+	err := f.handleRefFinalizer(ctx, obj, func(
 		ctx context.Context, res *unstructured.Unstructured, finalizer string,
 	) error {
 		if !meta.FinalizerExists(res, finalizer) {
