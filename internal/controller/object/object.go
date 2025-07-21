@@ -90,6 +90,7 @@ const (
 	errGetObservedState        = "cannot get observed state"
 	errGetDesiredState         = "cannot get desired state"
 	errUnmarshalTemplate       = "cannot unmarshal template"
+	errUnmarshalAtProvider     = "cannot unmarshal atProvider"
 	errFailedToMarshalExisting = "cannot marshal existing resource"
 
 	errGetReferencedResource       = "cannot get referenced resource"
@@ -370,6 +371,30 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	if c.shouldWatch(obj) {
 		c.kindObserver.WatchResources(c.rest, obj.Spec.ProviderConfigReference.Name, manifest.GroupVersionKind())
+	}
+
+	if len(obj.Status.AtProvider.Manifest.Raw) > 0 && obj.GetDeletionPolicy() == xpv1.DeletionDelete {
+		atProviderManifest := &unstructured.Unstructured{}
+		if err := json.Unmarshal(obj.Status.AtProvider.Manifest.Raw, atProviderManifest); err != nil {
+			return managed.ExternalObservation{}, errors.Wrap(err, errUnmarshalAtProvider)
+		}
+
+		// The name may be empty in the manifest, in which case we should use the name of the object
+		expectedName := manifest.GetName()
+		if expectedName == "" {
+			expectedName = obj.GetName()
+		}
+
+		// If the identity (i.e GVK, name or namespace) of the resource has changed, we need to delete the old resource
+		// before we can proceed with the observing the new resource.
+		if atProviderManifest.GroupVersionKind() != manifest.GroupVersionKind() ||
+			atProviderManifest.GetNamespace() != manifest.GetNamespace() ||
+			atProviderManifest.GetName() != expectedName {
+
+			if err := c.client.Delete(ctx, atProviderManifest); err != nil && !kerrors.IsNotFound(err) {
+				return managed.ExternalObservation{}, errors.Wrap(err, errDeleteObject)
+			}
+		}
 	}
 
 	current := manifest.DeepCopy()
