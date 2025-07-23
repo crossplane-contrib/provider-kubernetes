@@ -151,7 +151,7 @@ func TestWrapRESTConfigTokenFetch(t *testing.T) {
 				ctx = context.WithValue(ctx, oauth2.HTTPClient, &http.Client{Timeout: tc.args.tokenTimeout})
 			}
 			rc := &rest.Config{Host: apiServer.URL}
-			if err := WrapRESTConfig(ctx, rc, externalAccountCredentials(t, tokenServer.URL), DefaultScopes...); err != nil {
+			if err := WrapRESTConfig(ctx, rc, externalAccountCredentials(t, tokenServer.URL), "", DefaultScopes...); err != nil {
 				t.Fatalf("WrapRESTConfig(...): unexpected error: %v", err)
 			}
 			hc, err := rest.HTTPClientFor(rc)
