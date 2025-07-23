@@ -116,7 +116,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 		case kconfig.IdentityTypeGoogleApplicationCredentials:
 			switch id.Source { //nolint:exhaustive
 			case xpv1.CredentialsSourceInjectedIdentity:
-				if err := gke.WrapRESTConfig(ctx, rc, nil, gke.DefaultScopes...); err != nil {
+				if err := gke.WrapRESTConfig(ctx, rc, nil, id.ImpersonateServiceAccount, gke.DefaultScopes...); err != nil {
 					return nil, errors.Wrap(err, errInjectGoogleCredentials)
 				}
 			default:
@@ -125,7 +125,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 					return nil, errors.Wrap(err, errExtractGoogleCredentials)
 				}
 
-				if err := gke.WrapRESTConfig(ctx, rc, creds, gke.DefaultScopes...); err != nil {
+				if err := gke.WrapRESTConfig(ctx, rc, creds, id.ImpersonateServiceAccount, gke.DefaultScopes...); err != nil {
 					return nil, errors.Wrap(err, errInjectGoogleCredentials)
 				}
 			}
