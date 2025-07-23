@@ -137,6 +137,11 @@ spec:
                     required:
                     - path
                     type: object
+                  impersonateServiceAccount:
+                    description: |-
+                      ImpersonateServiceAccount is the email address of the Google Service Account to impersonate.
+                      This is only valid when the identity type is GoogleApplicationCredentials.
+                    type: string
                   secretRef:
                     description: |-
                       A SecretRef is a reference to a secret key that contains the credentials
