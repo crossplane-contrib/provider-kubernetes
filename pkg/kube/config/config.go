@@ -50,6 +50,11 @@ type Identity struct {
 	// Type of identity.
 	Type IdentityType `json:"type"`
 
+	// ImpersonateServiceAccount is the email address of the Google Service Account to impersonate.
+	// This is only valid when the identity type is GoogleApplicationCredentials.
+	// +optional
+	ImpersonateServiceAccount string `json:"impersonateServiceAccount,omitempty"`
+
 	ProviderCredentials `json:",inline"`
 }
 

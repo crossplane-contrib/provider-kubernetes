@@ -22,6 +22,7 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"google.golang.org/api/impersonate"
 	"k8s.io/client-go/rest"
 )
 
@@ -33,10 +34,11 @@ var DefaultScopes []string = []string{
 
 // WrapRESTConfig configures the supplied REST config to use OAuth2 bearer
 // tokens fetched using the supplied Google Application Credentials.
-func WrapRESTConfig(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+func WrapRESTConfig(ctx context.Context, rc *rest.Config, credentials []byte, impersonateSA string, scopes ...string) error {
 	// TODO(turkenh): Use token.ReuseSourceStore to cache token sources and
 	// avoid token regeneration on every reconciliation loop.
 	var ts oauth2.TokenSource
+	var err error
 	if credentials != nil {
 		if isJSON(credentials) {
 			// If credentials are in a JSON format, extract the credential from the JSON
@@ -46,31 +48,37 @@ func WrapRESTConfig(ctx context.Context, rc *rest.Config, credentials []byte, sc
 				return errors.Wrap(err, "cannot load Google Application Credentials from JSON")
 			}
 			ts = creds.TokenSource
-			rc.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-				return &oauth2.Transport{Source: ts, Base: rt}
+		} else {
+			// if the credential not in a JSON format, treat the credential as an access token
+			t := oauth2.Token{
+				AccessToken: string(credentials),
+			}
+			if ok := t.Valid(); !ok {
+				return errors.New("Access token invalid")
+			}
+			ts = oauth2.StaticTokenSource(&t)
+		}
+	} else {
+		var t *oauth2.Token
+		// DefaultTokenSource retrieves a token source from an injected identity.
+		gsrc, err := google.DefaultTokenSource(ctx, scopes...)
+		if err != nil {
+			return errors.Wrap(err, "failed to extract default credentials source")
+		}
+		ts = oauth2.ReuseTokenSource(t, gsrc)
+	}
+
+	if impersonateSA != "" {
+		ts, err = impersonate.CredentialsTokenSource(ctx,
+			impersonate.CredentialsConfig{
+				TargetPrincipal: impersonateSA,
+				Scopes:          scopes,
 			})
-			return nil
+		if err != nil {
+			return errors.Wrap(err, "cannot create impersonated token source")
 		}
-		// if the credential not in a JSON format, treat the credential as an access token
-		t := oauth2.Token{
-			AccessToken: string(credentials),
-		}
-		if ok := t.Valid(); !ok {
-			return errors.New("Access token invalid")
-		}
-		ts = oauth2.StaticTokenSource(&t)
-		rc.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-			return &oauth2.Transport{Source: ts, Base: rt}
-		})
-		return nil
 	}
-	var t *oauth2.Token
-	// DefaultTokenSource retrieves a token source from an injected identity.
-	gsrc, err := google.DefaultTokenSource(ctx, scopes...)
-	if err != nil {
-		return errors.Wrap(err, "failed to extract default credentials source")
-	}
-	ts = oauth2.ReuseTokenSource(t, gsrc)
+
 	rc.Wrap(func(rt http.RoundTripper) http.RoundTripper {
 		return &oauth2.Transport{Source: ts, Base: rt}
 	})
