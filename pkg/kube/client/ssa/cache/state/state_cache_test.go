@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
+	"github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha2"
 )
 
 func exampleExternalResourceRaw(resName, fieldValue string) []byte {

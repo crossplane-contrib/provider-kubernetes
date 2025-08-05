@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
-	xpresource "github.com/crossplane/crossplane-runtime/pkg/resource"
+	xpresource "github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
 	objectv1alpha2 "github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
 )
