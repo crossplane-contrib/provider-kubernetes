@@ -7,11 +7,10 @@ package extractor
 import (
 	"sync"
 
+	xpresource "github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-
-	"github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 )
 
 // GVKParserCacheManager maintains GVK parser cache stores for each provider config.
@@ -41,7 +40,7 @@ func NewGVKParserCacheManager(opts ...GVKParserCacheManagerOption) *GVKParserCac
 // LoadOrNewCacheForProviderConfig returns the *GVKParserCache for the given provider config,
 // initializing an empty cache for the first use.
 // the implementation is concurrency-safe.
-func (cm *GVKParserCacheManager) LoadOrNewCacheForProviderConfig(pc *v1alpha1.ProviderConfig) (*GVKParserCache, error) {
+func (cm *GVKParserCacheManager) LoadOrNewCacheForProviderConfig(pc xpresource.ProviderConfig) (*GVKParserCache, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	sc, ok := cm.cacheStore[pc.GetUID()]
@@ -55,7 +54,7 @@ func (cm *GVKParserCacheManager) LoadOrNewCacheForProviderConfig(pc *v1alpha1.Pr
 }
 
 // RemoveCache removes the cache for the given provider config.
-func (cm *GVKParserCacheManager) RemoveCache(pc *v1alpha1.ProviderConfig) {
+func (cm *GVKParserCacheManager) RemoveCache(pc xpresource.ProviderConfig) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	delete(cm.cacheStore, pc.GetUID())

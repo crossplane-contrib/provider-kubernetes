@@ -7,13 +7,12 @@ package extractor
 import (
 	"testing"
 
+	xpfake "github.com/crossplane/crossplane-runtime/v2/pkg/resource/fake"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-
-	"github.com/crossplane-contrib/provider-kubernetes/apis/v1alpha1"
 )
 
 type testClusterTarget struct {
@@ -43,8 +42,8 @@ func TestParserCacheManager(t *testing.T) {
 	tests := []struct {
 		name               string
 		testClusterTargets map[types.UID]testClusterTarget
-		wantCachedPCs      []*v1alpha1.ProviderConfig
-		wantUncachedPCs    []*v1alpha1.ProviderConfig
+		wantCachedPCs      []*xpfake.ProviderConfig
+		wantUncachedPCs    []*xpfake.ProviderConfig
 	}{
 		{
 			name: "Test Load",
@@ -62,7 +61,7 @@ func TestParserCacheManager(t *testing.T) {
 					},
 				},
 			},
-			wantCachedPCs: []*v1alpha1.ProviderConfig{
+			wantCachedPCs: []*xpfake.ProviderConfig{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						UID: types.UID("foo"),
@@ -74,7 +73,7 @@ func TestParserCacheManager(t *testing.T) {
 					},
 				},
 			},
-			wantUncachedPCs: []*v1alpha1.ProviderConfig{
+			wantUncachedPCs: []*xpfake.ProviderConfig{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						UID: types.UID("bar"),

@@ -10,7 +10,8 @@ import (
 
 	xpresource "github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
-	objectv1alpha2 "github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
+	objectv1alpha2cluster "github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha2"
+	objectv1alpha1namespaced "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
 )
 
 // CacheManager lets you manage Cache entries for XP managed
@@ -23,8 +24,8 @@ type CacheManager interface {
 // Cache is the interface for the caching a k8s
 // *unstructured.Unstructured object
 type Cache interface {
-	SetStateFor(obj *objectv1alpha2.Object, state *unstructured.Unstructured)
-	GetStateFor(obj *objectv1alpha2.Object) (*unstructured.Unstructured, bool)
+	SetStateFor(obj xpresource.Managed, state *unstructured.Unstructured)
+	GetStateFor(obj xpresource.Managed) (*unstructured.Unstructured, bool)
 }
 
 // DesiredStateCache is a concurrency-safe implementation of Cache
@@ -38,8 +39,16 @@ type DesiredStateCache struct {
 }
 
 // GetStateFor returns the stored desired state if exists and valid, for the given *v1alpha2.Object
-func (dc *DesiredStateCache) GetStateFor(obj *objectv1alpha2.Object) (*unstructured.Unstructured, bool) {
-	manifestSum := sha256.Sum256(obj.Spec.ForProvider.Manifest.Raw)
+func (dc *DesiredStateCache) GetStateFor(obj xpresource.Managed) (*unstructured.Unstructured, bool) {
+	var manifestSum [32]byte
+	switch obj := obj.(type) {
+	case *objectv1alpha2cluster.Object:
+		manifestSum = sha256.Sum256(obj.Spec.ForProvider.Manifest.Raw)
+	case *objectv1alpha1namespaced.Object:
+		manifestSum = sha256.Sum256(obj.Spec.ForProvider.Manifest.Raw)
+	default:
+		return nil, false
+	}
 	manifestHash := hex.EncodeToString(manifestSum[:])
 	dc.mu.RLock()
 	defer dc.mu.RUnlock()
@@ -50,8 +59,16 @@ func (dc *DesiredStateCache) GetStateFor(obj *objectv1alpha2.Object) (*unstructu
 }
 
 // SetStateFor stores the desired k8s object state for the given *v1alpha2.Object
-func (dc *DesiredStateCache) SetStateFor(obj *objectv1alpha2.Object, state *unstructured.Unstructured) {
-	manifestSum := sha256.Sum256(obj.Spec.ForProvider.Manifest.Raw)
+func (dc *DesiredStateCache) SetStateFor(obj xpresource.Managed, state *unstructured.Unstructured) {
+	var manifestSum [32]byte
+	switch obj := obj.(type) {
+	case *objectv1alpha2cluster.Object:
+		manifestSum = sha256.Sum256(obj.Spec.ForProvider.Manifest.Raw)
+	case *objectv1alpha1namespaced.Object:
+		manifestSum = sha256.Sum256(obj.Spec.ForProvider.Manifest.Raw)
+	default:
+		return
+	}
 	manifestHash := hex.EncodeToString(manifestSum[:])
 	dc.mu.Lock()
 	defer dc.mu.Unlock()

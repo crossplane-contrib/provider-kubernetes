@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/google/go-cmp/cmp"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -51,11 +52,11 @@ type mockStateCache struct {
 	hash string
 }
 
-func (m *mockStateCache) SetStateFor(_ *v1alpha2.Object, _ *unstructured.Unstructured) {
+func (m *mockStateCache) SetStateFor(_ resource.Managed, _ *unstructured.Unstructured) {
 	// do nothing
 }
 
-func (m *mockStateCache) GetStateFor(obj *v1alpha2.Object) (*unstructured.Unstructured, bool) {
+func (m *mockStateCache) GetStateFor(obj resource.Managed) (*unstructured.Unstructured, bool) {
 	if m.hash == fmt.Sprintf("fake-manifest-hash-of-%s", obj.GetUID()) {
 		return m.u, true
 	}
