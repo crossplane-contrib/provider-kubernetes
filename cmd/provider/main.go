@@ -43,10 +43,12 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 
-	"github.com/crossplane-contrib/provider-kubernetes/apis"
-	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha1"
+	apiscluster "github.com/crossplane-contrib/provider-kubernetes/apis/cluster"
+	objectv1alpha1cluster "github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha1"
+	apisnamespaced "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/bootcheck"
-	object "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
+	controllerCluster "github.com/crossplane-contrib/provider-kubernetes/internal/controller/cluster"
+	controllerNamespaced "github.com/crossplane-contrib/provider-kubernetes/internal/controller/namespaced"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/version"
 
@@ -157,7 +159,8 @@ func main() {
 		MRStateMetrics:          sm,
 	}
 
-	kingpin.FatalIfError(apis.AddToScheme(mgr.GetScheme()), "Cannot add Template APIs to scheme")
+	kingpin.FatalIfError(apiscluster.AddToScheme(mgr.GetScheme()), "Cannot add Template APIs to scheme")
+	kingpin.FatalIfError(apisnamespaced.AddToScheme(mgr.GetScheme()), "Cannot add Template APIs to scheme")
 	o := controller.Options{
 		Logger:                  log,
 		MaxConcurrentReconciles: *maxReconcileRate,
@@ -201,9 +204,10 @@ func main() {
 	// Object. As far as I can see and based on some tests, it doesn't matter
 	// which version we use here. Leaving it as v1alpha1 as it will be easy to
 	// notice and remove when we drop support for v1alpha1.
-	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&v1alpha1.Object{}).Complete(), "Cannot create Object webhook")
+	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&objectv1alpha1cluster.Object{}).Complete(), "Cannot create Object webhook")
 
-	kingpin.FatalIfError(object.Setup(mgr, o, *sanitizeSecrets, pollJitter, *pollJitterPercentage), "Cannot setup controller")
+	kingpin.FatalIfError(controllerCluster.Setup(mgr, o, *sanitizeSecrets, pollJitter, *pollJitterPercentage), "Cannot setup cluster-scoped controller")
+	kingpin.FatalIfError(controllerNamespaced.Setup(mgr, o, *sanitizeSecrets, pollJitter, *pollJitterPercentage), "Cannot setup namespaced controller")
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")
 }
 
