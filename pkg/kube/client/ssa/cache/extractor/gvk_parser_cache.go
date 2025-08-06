@@ -7,10 +7,11 @@ package extractor
 import (
 	"sync"
 
-	xpresource "github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+
+	xpresource "github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 )
 
 // GVKParserCacheManager maintains GVK parser cache stores for each provider config.

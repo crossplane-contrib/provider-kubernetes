@@ -2,9 +2,10 @@ package fake
 
 import (
 	"context"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
 )

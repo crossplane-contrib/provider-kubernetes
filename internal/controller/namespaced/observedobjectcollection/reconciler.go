@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 	"math/rand"
 	"time"
 
@@ -47,6 +46,7 @@ import (
 	observedobjectcollectionv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/observedobjectcollection/v1alpha1"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/v1alpha1"
 	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
+	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )
 
 const (

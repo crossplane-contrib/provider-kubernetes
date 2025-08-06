@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 	"math/rand"
 	"reflect"
 	"strings"
@@ -66,6 +65,7 @@ import (
 	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa/cache/extractor"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa/cache/state"
+	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )
 
 type key int

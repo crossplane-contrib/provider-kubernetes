@@ -7,12 +7,13 @@ package extractor
 import (
 	"testing"
 
-	xpfake "github.com/crossplane/crossplane-runtime/v2/pkg/resource/fake"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+
+	xpfake "github.com/crossplane/crossplane-runtime/v2/pkg/resource/fake"
 )
 
 type testClusterTarget struct {
