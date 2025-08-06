@@ -273,28 +273,12 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
-	var pc resource.ProviderConfig
-	var pcSpec kconfig.ProviderConfigSpec
-	switch obj.Spec.ProviderConfigReference.Kind {
-	case apisv1alpha1.ProviderConfigKind:
-		npc := &apisv1alpha1.ProviderConfig{}
-		if err := c.kube.Get(ctx, client.ObjectKey{Name: obj.Spec.ProviderConfigReference.Name, Namespace: obj.GetNamespace()}, npc); err != nil {
-			return nil, errors.Wrap(err, errGetProviderConfig)
-		}
-		pcSpec = npc.Spec
-		pc = npc
-	case apisv1alpha1.ClusterProviderConfigKind:
-		cpc := &apisv1alpha1.ClusterProviderConfig{}
-		if err := c.kube.Get(ctx, client.ObjectKey{Name: obj.Spec.ProviderConfigReference.Name}, cpc); err != nil {
-			return nil, errors.Wrap(err, errGetProviderConfig)
-		}
-		pcSpec = cpc.Spec
-		pc = cpc
-	default:
-		return nil, errors.Errorf("unknown provider config kind: %q", obj.Spec.ProviderConfigReference.Kind)
+	pc, pcSpec, err := resolveProviderConfig(ctx, c.kube, obj)
+	if err != nil {
+		return nil, err
 	}
 
-	k, rc, err := c.clientBuilder.KubeForProviderConfig(ctx, pcSpec)
+	k, rc, err := c.clientBuilder.KubeForProviderConfig(ctx, *pcSpec)
 	if err != nil {
 		return nil, errors.Wrap(err, errBuildKubeForProviderConfig)
 	}
@@ -913,4 +897,28 @@ func unstructuredFromObjectRef(r v1.ObjectReference) unstructured.Unstructured {
 	u.SetNamespace(r.Namespace)
 
 	return u
+}
+
+func resolveProviderConfig(ctx context.Context, kube client.Client, obj *v1alpha1.Object) (resource.ProviderConfig, *kconfig.ProviderConfigSpec, error) {
+	var pc resource.ProviderConfig
+	var pcSpec *kconfig.ProviderConfigSpec
+	switch obj.Spec.ProviderConfigReference.Kind {
+	case apisv1alpha1.ProviderConfigKind:
+		npc := &apisv1alpha1.ProviderConfig{}
+		if err := kube.Get(ctx, client.ObjectKey{Name: obj.Spec.ProviderConfigReference.Name, Namespace: obj.GetNamespace()}, npc); err != nil {
+			return nil, nil, errors.Wrap(err, errGetProviderConfig)
+		}
+		pcSpec = &npc.Spec
+		pc = npc
+	case apisv1alpha1.ClusterProviderConfigKind:
+		cpc := &apisv1alpha1.ClusterProviderConfig{}
+		if err := kube.Get(ctx, client.ObjectKey{Name: obj.Spec.ProviderConfigReference.Name}, cpc); err != nil {
+			return nil, nil, errors.Wrap(err, errGetProviderConfig)
+		}
+		pcSpec = &cpc.Spec
+		pc = cpc
+	default:
+		return nil, nil, errors.Errorf("unknown provider config kind: %q", obj.Spec.ProviderConfigReference.Kind)
+	}
+	return pc, pcSpec, nil
 }
