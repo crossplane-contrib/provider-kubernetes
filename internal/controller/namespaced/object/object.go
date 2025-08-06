@@ -250,7 +250,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 type connector struct {
 	kube            client.Client
-	usage           resource.ModernTracker
+	usage           modernTracker
 	logger          logging.Logger
 	sanitizeSecrets bool
 	kindObserver    KindObserver
@@ -921,4 +921,19 @@ func resolveProviderConfig(ctx context.Context, kube client.Client, obj *v1alpha
 		return nil, nil, errors.Errorf("unknown provider config kind: %q", obj.Spec.ProviderConfigReference.Kind)
 	}
 	return pc, pcSpec, nil
+}
+
+// TODO: these should better go into crossplane-runtime
+// A modernTracker tracks modern managed resources.
+type modernTracker interface {
+	// Track the supplied modern managed resource.
+	Track(ctx context.Context, mg resource.ModernManaged) error
+}
+
+// A modernTrackerFn is a function that tracks managed resources.
+type modernTrackerFn func(ctx context.Context, mg resource.ModernManaged) error
+
+// Track the supplied managed resource.
+func (fn modernTrackerFn) Track(ctx context.Context, mg resource.ModernManaged) error {
+	return fn(ctx, mg)
 }

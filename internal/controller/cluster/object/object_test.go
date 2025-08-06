@@ -231,7 +231,7 @@ func TestConnect(t *testing.T) {
 	type args struct {
 		client            client.Client
 		clientForProvider client.Client
-		usage             resource.LegacyTracker
+		usage             legacyTracker
 		mg                resource.Managed
 	}
 	type want struct {
@@ -251,7 +251,7 @@ func TestConnect(t *testing.T) {
 		},
 		"FailedToTrackUsage": {
 			args: args{
-				usage: resource.LegacyTrackerFn(func(ctx context.Context, mg resource.LegacyManaged) error { return errBoom }),
+				usage: legacyTrackerFn(func(ctx context.Context, mg resource.LegacyManaged) error { return errBoom }),
 				mg:    kubernetesObject(),
 			},
 			want: want{
@@ -266,7 +266,7 @@ func TestConnect(t *testing.T) {
 						return nil
 					}),
 				},
-				usage: resource.LegacyTrackerFn(func(ctx context.Context, mg resource.LegacyManaged) error { return nil }),
+				usage: legacyTrackerFn(func(ctx context.Context, mg resource.LegacyManaged) error { return nil }),
 				mg:    kubernetesObject(),
 			},
 			want: want{

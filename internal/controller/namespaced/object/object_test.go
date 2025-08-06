@@ -233,7 +233,7 @@ func TestConnect(t *testing.T) {
 	type args struct {
 		client            client.Client
 		clientForProvider client.Client
-		usage             resource.ModernTracker
+		usage             modernTracker
 		mg                resource.Managed
 	}
 	type want struct {
@@ -253,7 +253,7 @@ func TestConnect(t *testing.T) {
 		},
 		"FailedToTrackUsage": {
 			args: args{
-				usage: resource.ModernTrackerFn(func(ctx context.Context, mg resource.ModernManaged) error { return errBoom }),
+				usage: modernTrackerFn(func(ctx context.Context, mg resource.ModernManaged) error { return errBoom }),
 				mg:    kubernetesObject(),
 			},
 			want: want{
@@ -268,7 +268,7 @@ func TestConnect(t *testing.T) {
 						return nil
 					}),
 				},
-				usage: resource.ModernTrackerFn(func(ctx context.Context, mg resource.ModernManaged) error { return nil }),
+				usage: modernTrackerFn(func(ctx context.Context, mg resource.ModernManaged) error { return nil }),
 				mg:    kubernetesObject(),
 			},
 			want: want{

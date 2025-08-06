@@ -249,7 +249,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 type connector struct {
 	kube            client.Client
-	usage           resource.LegacyTracker
+	usage           legacyTracker
 	logger          logging.Logger
 	sanitizeSecrets bool
 	kindObserver    KindObserver
@@ -897,4 +897,19 @@ func unstructuredFromObjectRef(r v1.ObjectReference) unstructured.Unstructured {
 	u.SetNamespace(r.Namespace)
 
 	return u
+}
+
+// TODO: these should better go into crossplane-runtime
+// A legacyTracker tracks legacy managed resources.
+type legacyTracker interface {
+	// Track the supplied legacy managed resource.
+	Track(ctx context.Context, mg resource.LegacyManaged) error
+}
+
+// A legacyTrackerFn is a function that tracks managed resources.
+type legacyTrackerFn func(ctx context.Context, mg resource.LegacyManaged) error
+
+// Track the supplied legacy managed resource.
+func (fn legacyTrackerFn) Track(ctx context.Context, mg resource.LegacyManaged) error {
+	return fn(ctx, mg)
 }
