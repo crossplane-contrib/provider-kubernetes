@@ -16,3 +16,13 @@ spec:
   credentials:
     source: InjectedIdentity
 EOF
+
+cat <<EOF | ${KUBECTL} apply -f -
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: ClusterProviderConfig
+metadata:
+  name: kubernetes-provider
+spec:
+  credentials:
+    source: InjectedIdentity
+EOF
