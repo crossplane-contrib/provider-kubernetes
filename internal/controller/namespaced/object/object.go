@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 	"math/rand"
 	"reflect"
 	"strings"
@@ -272,12 +273,28 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
-	pc := &apisv1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: obj.GetProviderConfigReference().Name}, pc); err != nil {
-		return nil, errors.Wrap(err, errGetProviderConfig)
+	var pc resource.ProviderConfig
+	var pcSpec kconfig.ProviderConfigSpec
+	switch obj.Spec.ProviderConfigReference.Kind {
+	case apisv1alpha1.ProviderConfigKind:
+		npc := &apisv1alpha1.ProviderConfig{}
+		if err := c.kube.Get(ctx, client.ObjectKey{Name: obj.Spec.ProviderConfigReference.Name, Namespace: obj.GetNamespace()}, npc); err != nil {
+			return nil, errors.Wrap(err, errGetProviderConfig)
+		}
+		pcSpec = npc.Spec
+		pc = npc
+	case apisv1alpha1.ClusterProviderConfigKind:
+		cpc := &apisv1alpha1.ClusterProviderConfig{}
+		if err := c.kube.Get(ctx, client.ObjectKey{Name: obj.Spec.ProviderConfigReference.Name}, cpc); err != nil {
+			return nil, errors.Wrap(err, errGetProviderConfig)
+		}
+		pcSpec = cpc.Spec
+		pc = cpc
+	default:
+		return nil, errors.Errorf("unknown provider config kind: %q", obj.Spec.ProviderConfigReference.Kind)
 	}
 
-	k, rc, err := c.clientBuilder.KubeForProviderConfig(ctx, pc.Spec)
+	k, rc, err := c.clientBuilder.KubeForProviderConfig(ctx, pcSpec)
 	if err != nil {
 		return nil, errors.Wrap(err, errBuildKubeForProviderConfig)
 	}
@@ -366,7 +383,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	if c.shouldWatch(obj) {
-		c.kindObserver.WatchResources(c.rest, obj.Spec.ProviderConfigReference.Name, manifest.GroupVersionKind())
+		c.kindObserver.WatchResources(c.rest, providerConfigRefKey(obj), manifest.GroupVersionKind())
 	}
 
 	current := manifest.DeepCopy()

@@ -174,7 +174,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	// Fetch any existing counter-part observe only Objects by collection label.
 	ml := map[string]string{membershipLabelKey: c.Name}
 	ol := &objectv1alpha1.ObjectList{}
-	if err := r.client.List(ctx, ol, client.MatchingLabels(ml)); err != nil {
+	if err := r.client.List(ctx, ol, client.MatchingLabels(ml), client.InNamespace(c.GetNamespace())); err != nil {
 		werr := errors.Wrapf(err, "cannot list members matching labels %v", ml)
 		c.Status.SetConditions(xpv1.ReconcileError(werr))
 		_ = r.client.Status().Update(ctx, c)
@@ -259,7 +259,8 @@ func observedObjectPatch(name string, matchedObject unstructured.Unstructured, c
 	manifest := fmt.Sprintf(objectManifestTemplate, matchedObject.GetKind(), matchedObject.GetAPIVersion(), matchedObject.GetName(), matchedObject.GetNamespace())
 	observedObject := &objectv1alpha1.Object{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name:      name,
+			Namespace: collection.GetNamespace(),
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: collection.APIVersion,

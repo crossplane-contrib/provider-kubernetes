@@ -69,7 +69,8 @@ func IndexByProviderGVK(o client.Object) []string {
 	// We don't expect errors here, as the parseManifest function is already called
 	// in the reconciler and the desired object already validated.
 	d, _ := parseManifest(obj)
-	keys = append(keys, refKeyProviderGVK(obj.Spec.ProviderConfigReference.Name, d.GetKind(), d.GroupVersionKind().Group, d.GroupVersionKind().Version)) // unification is done by the informer.
+	providerConfigKey := fmt.Sprintf("%s:%s:%s", obj.Spec.ProviderConfigReference.Name, obj.Spec.ProviderConfigReference.Kind, obj.GetNamespace())
+	keys = append(keys, refKeyProviderGVK(providerConfigKey, d.GetKind(), d.GroupVersionKind().Group, d.GroupVersionKind().Version)) // unification is done by the informer.
 
 	// unification is done by the informer.
 	return keys
@@ -101,9 +102,14 @@ func IndexByProviderNamespacedNameGVK(o client.Object) []string {
 	// We don't expect errors here, as the parseManifest function is already called
 	// in the reconciler and the desired object already validated.
 	d, _ := parseManifest(obj)
-	keys = append(keys, refKeyProviderNamespacedNameGVK(obj.Spec.ProviderConfigReference.Name, d.GetNamespace(), d.GetName(), d.GetKind(), d.GetAPIVersion())) // unification is done by the informer.
+	providerConfigKey := providerConfigRefKey(obj)
+	keys = append(keys, refKeyProviderNamespacedNameGVK(providerConfigKey, d.GetNamespace(), d.GetName(), d.GetKind(), d.GetAPIVersion())) // unification is done by the informer.
 
 	return keys
+}
+
+func providerConfigRefKey(obj *v1alpha1.Object) string {
+	return fmt.Sprintf("%s/%s/%s", obj.Spec.ProviderConfigReference.Kind, obj.GetNamespace(), obj.Spec.ProviderConfigReference.Name)
 }
 
 func refKeyProviderNamespacedNameGVK(providerConfig, ns, name, kind, apiVersion string) string {
@@ -114,11 +120,11 @@ func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx co
 	return func(ctx context.Context, ev runtimeevent.GenericEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 		pc, _ := ctx.Value(keyProviderConfigName).(string)
 		rGVK := ev.Object.GetObjectKind().GroupVersionKind()
-		key := refKeyProviderNamespacedNameGVK(pc, ev.Object.GetNamespace(), ev.Object.GetName(), rGVK.Kind, rGVK.GroupVersion().String())
+		refKey := refKeyProviderNamespacedNameGVK(pc, ev.Object.GetNamespace(), ev.Object.GetName(), rGVK.Kind, rGVK.GroupVersion().String())
 
 		objects := v1alpha1.ObjectList{}
-		if err := ca.List(ctx, &objects, client.MatchingFields{resourceRefsIndex: key}); err != nil {
-			log.Debug("cannot list objects related to a reference change", "error", err, "fieldSelector", resourceRefsIndex+"="+key)
+		if err := ca.List(ctx, &objects, client.MatchingFields{resourceRefsIndex: refKey}); err != nil {
+			log.Debug("cannot list objects related to a reference change", "error", err, "fieldSelector", resourceRefsIndex+"="+refKey)
 			return
 		}
 		// queue those Objects for reconciliation
@@ -126,8 +132,8 @@ func enqueueObjectsForReferences(ca cache.Cache, log logging.Logger) func(ctx co
 			// We only enqueue the Object if it has the Watch flag set to true.
 			// Not every referencing Object watches the referenced resource.
 			if o.Spec.Watch {
-				log.Info("Enqueueing Object because referenced resource changed", "name", o.GetName(), "referencedGVK", rGVK.String(), "referencedName", ev.Object.GetName(), "providerConfig", pc)
-				q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: o.GetName()}})
+				log.Info("Enqueueing Object because referenced resource changed", "name", o.GetName(), "namespace", o.GetNamespace(), "referencedGVK", rGVK.String(), "referencedName", ev.Object.GetName(), "referencedNamespace", ev.Object.GetNamespace(), "providerConfig", pc)
+				q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: o.GetName(), Namespace: o.GetNamespace()}})
 			}
 		}
 	}
