@@ -4,18 +4,18 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: providerconfigs.kubernetes.crossplane.io
+  name: clusterproviderconfigs.kubernetes.m.crossplane.io
 spec:
-  group: kubernetes.crossplane.io
+  group: kubernetes.m.crossplane.io
   names:
     categories:
     - crossplane
     - provider
     - kubernetes
-    kind: ProviderConfig
-    listKind: ProviderConfigList
-    plural: providerconfigs
-    singular: providerconfig
+    kind: ClusterProviderConfig
+    listKind: ClusterProviderConfigList
+    plural: clusterproviderconfigs
+    singular: clusterproviderconfig
   scope: Cluster
   versions:
   - additionalPrinterColumns:
@@ -29,7 +29,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: A ProviderConfig configures a Template provider.
+        description: A ClusterProviderConfig configures a Kubernetes provider.
         properties:
           apiVersion:
             description: |-
