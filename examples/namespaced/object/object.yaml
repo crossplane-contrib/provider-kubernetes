@@ -1,0 +1,24 @@
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: sample-namespace
+  namespace: default
+  annotations:
+    uptest.upbound.io/timeout: "60"
+spec:
+  # Watch for changes to the Namespace object.
+  # Watching resources is an alpha feature and needs to be enabled with --enable-watches
+  # in the provider to get this configuration working.
+  # watch: true
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        # name in manifest is optional and defaults to Object name
+        # name: some-other-name
+        labels:
+          example: "true"
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider

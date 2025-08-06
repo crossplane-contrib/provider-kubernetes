@@ -1,0 +1,44 @@
+# Note: This example is for the alpha feature of server side apply.
+# It requires the provider to be started with the --enable-server-side-apply flag.
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: sample-deployment-owner
+  namespace: default
+  annotations:
+    uptest.upbound.io/pre-assert-hook: testhooks/enable-ssa.sh
+    uptest.upbound.io/post-assert-hook: testhooks/validate-ssa.sh
+    uptest.upbound.io/timeout: "64"
+spec:
+  forProvider:
+    manifest:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: nginx-deployment
+        namespace: default
+        labels:
+          app: nginx
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: nginx
+        template:
+          metadata:
+            labels:
+              app: nginx
+          spec:
+            containers:
+              - name: nginx
+                image: nginx:1.14.2
+                ports:
+                  - containerPort: 80
+                env:
+                - name: MY_NODE_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: spec.nodeName
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider

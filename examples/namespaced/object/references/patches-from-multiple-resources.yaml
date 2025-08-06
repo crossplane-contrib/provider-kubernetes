@@ -1,0 +1,52 @@
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: foo
+  namespace: default
+spec:
+  references:
+  # Use multiple patchesFrom to patch fields from multiple k8s resources 
+  - patchesFrom:
+      apiVersion: v1
+      kind: ConfigMap
+      name: bar
+      namespace: default
+      fieldPath: data.sample-key-from-bar
+    # toFieldPath in manifest is optional and defaults to fieldPath
+    # toFieldPath: data.sample-key-from-bar
+  - patchesFrom:
+      apiVersion: v1
+      kind: ConfigMap
+      name: baz
+      namespace: default
+      fieldPath: data.sample-key-from-baz
+    # toFieldPath in manifest is optional and defaults to fieldPath
+    # toFieldPath: data.sample-key-from-baz
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        namespace: default
+      data:
+        sample-key: sample-value
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bar
+  namespace: default
+data:
+  sample-key-from-bar: sample-value
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: baz
+  namespace: default
+data:
+  sample-key-from-baz: sample-value

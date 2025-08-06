@@ -1,0 +1,28 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: foo
+  namespace: default
+data:
+  sample-key: sample-value
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: foo
+spec:
+  # Use management policy Observe Delete to observe or delete k8s resource,
+  # but leave to third party to create or update the resource
+  managementPolicies: ["Observe", "Delete"]
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        # name in manifest is optional and defaults to Object name
+        # name: some-other-name
+        namespace: default
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider

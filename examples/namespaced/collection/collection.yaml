@@ -1,0 +1,44 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: configmap-bar
+  namespace: other-ns
+  labels:
+    foo: bar
+data:
+  sample-key: "sample-value"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: configmap-foo
+  namespace: default
+  labels:
+    foo: bar
+data:
+  sample-key: "sample-value2"
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: ObservedObjectCollection
+metadata:
+  name: foo-collection
+  namespace: default
+spec:
+  observeObjects:
+    apiVersion: v1
+    kind: ConfigMap
+    selector:
+      matchLabels:
+        foo: bar
+  objectTemplate:
+    metadata:
+      labels:
+        l1: v1
+      annotations:
+        a1: v1
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider
+
