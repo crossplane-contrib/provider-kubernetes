@@ -1,0 +1,9 @@
+# Check ./provider-in-cluster.yaml to see how to grant permissions to the Provider
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: kubernetes-provider
+  namespace: default
+spec:
+  credentials:
+    source: InjectedIdentity

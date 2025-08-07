@@ -1,0 +1,44 @@
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: foo
+  namespace: default
+spec:
+  references:
+  # Use dependsOn to declare dependency on other object for this object
+  - dependsOn:
+      # apiVersion is optional and defaults to Object apiVersion
+      # kind is optional and defaults to Object kind
+      # namespace is not needed when it is cluster-scoped resource
+      name: bar
+      namespace: default
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        namespace: default
+      data:
+        sample-key: sample-value
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: bar
+  namespace: default
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        namespace: default
+      data:
+        sample-key: sample-value
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider

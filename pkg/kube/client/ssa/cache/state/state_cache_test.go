@@ -11,7 +11,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/crossplane-contrib/provider-kubernetes/apis/object/v1alpha2"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+
+	"github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha2"
 )
 
 func exampleExternalResourceRaw(resName, fieldValue string) []byte {
@@ -51,11 +53,11 @@ type mockStateCache struct {
 	hash string
 }
 
-func (m *mockStateCache) SetStateFor(_ *v1alpha2.Object, _ *unstructured.Unstructured) {
+func (m *mockStateCache) SetStateFor(_ resource.Managed, _ *unstructured.Unstructured) {
 	// do nothing
 }
 
-func (m *mockStateCache) GetStateFor(obj *v1alpha2.Object) (*unstructured.Unstructured, bool) {
+func (m *mockStateCache) GetStateFor(obj resource.Managed) (*unstructured.Unstructured, bool) {
 	if m.hash == fmt.Sprintf("fake-manifest-hash-of-%s", obj.GetUID()) {
 		return m.u, true
 	}

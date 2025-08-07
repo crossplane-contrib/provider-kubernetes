@@ -31,14 +31,14 @@ GO_STATIC_PACKAGES = $(GO_PROJECT)/cmd/provider
 GO_LDFLAGS += -X $(GO_PROJECT)/internal/version.Version=$(VERSION)
 GO_SUBDIRS += cmd internal apis pkg
 GO111MODULE = on
-GOLANGCILINT_VERSION = 1.62.0
+GOLANGCILINT_VERSION = 1.64.8
 -include build/makelib/golang.mk
 
 # ====================================================================================
 # Setup Kubernetes tools
-KIND_VERSION = v0.22.0
-UP_VERSION = v0.28.0
-UP_CHANNEL = stable
+KIND_VERSION = v0.29.0
+UP_VERSION = v0.40.0-0.rc.3
+UP_CHANNEL = alpha
 USE_HELM3 = true
 -include build/makelib/k8s_tools.mk
 
@@ -85,7 +85,7 @@ cobertura:
 
 # ====================================================================================
 # End to End Testing
-CROSSPLANE_VERSION = 1.19.0
+CROSSPLANE_VERSION = 1.20.0
 CROSSPLANE_NAMESPACE = crossplane-system
 -include build/makelib/local.xpkg.mk
 -include build/makelib/controlplane.mk
@@ -93,10 +93,10 @@ CROSSPLANE_NAMESPACE = crossplane-system
 # TODO(turkenh): Add "examples/object/object-ssa-owner.yaml" to the list to test the SSA functionality as part of the e2e tests.
 # The test is disabled for now because uptest clears the package cache when the provider restarted with the SSA flag.
 # Enable after https://github.com/crossplane/uptest/issues/17 is fixed.
-UPTEST_EXAMPLE_LIST ?= "examples/object/object.yaml,examples/object/object-watching.yaml"
-uptest: $(UPTEST) $(KUBECTL) $(KUTTL)
+UPTEST_EXAMPLE_LIST ?= "examples/namespaced/object/object.yaml,examples/namespaced/object/object-watching.yaml"
+uptest: $(UPTEST) $(KUBECTL) $(KUTTL) $(CHAINSAW)
 	@$(INFO) running automated tests
-	@KUBECTL=$(KUBECTL) KUTTL=$(KUTTL) CROSSPLANE_NAMESPACE=${CROSSPLANE_NAMESPACE} $(UPTEST) e2e "$(UPTEST_EXAMPLE_LIST)" --setup-script=cluster/test/setup.sh || $(FAIL)
+	@KUBECTL=$(KUBECTL) KUTTL=$(KUTTL) CHAINSAW=$(CHAINSAW) CROSSPLANE_NAMESPACE=${CROSSPLANE_NAMESPACE} $(UPTEST) e2e "$(UPTEST_EXAMPLE_LIST)" --setup-script=cluster/test/setup.sh || $(FAIL)
 	@$(OK) running automated tests
 
 local-dev: controlplane.up

@@ -1,0 +1,39 @@
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: foo
+  namespace: default
+spec:
+  # Watch for changes to the Namespace object.
+  # Watching resources is an alpha feature and needs to be enabled with --enable-watches
+  # in the provider to get this configuration working.
+  # watch: true
+  references:
+  # Use patchesFrom to patch field from other k8s resource to this object
+  - patchesFrom:
+      apiVersion: v1
+      kind: ConfigMap
+      name: bar
+      namespace: default
+      fieldPath: data.sample-key
+    toFieldPath: data.sample-key-from-bar
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        namespace: default
+      data:
+        sample-key: sample-value
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bar
+  namespace: default
+data:
+  sample-key: sample-value

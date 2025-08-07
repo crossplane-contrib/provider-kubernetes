@@ -19,7 +19,7 @@ limitations under the License.
 // +kubebuilder:object:generate=true
 package config
 
-import xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+import xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 
 // IdentityType used to authenticate to the Kubernetes API.
 // +kubebuilder:validation:Enum=GoogleApplicationCredentials;AzureServicePrincipalCredentials;AzureWorkloadIdentityCredentials;UpboundTokens
