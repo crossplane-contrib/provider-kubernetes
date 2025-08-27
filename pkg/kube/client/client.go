@@ -16,6 +16,8 @@ package client
 import (
 	"context"
 	"strings"
+	"net/http"
+	"net/url"
 
 	"github.com/pkg/errors"
 	"k8s.io/client-go/rest"
@@ -206,6 +208,17 @@ func fromAPIConfig(c *api.Config) (*rest.Config, error) {
 			KeyData:    user.ClientKeyData,
 			CAData:     cluster.CertificateAuthorityData,
 		},
+		Proxy: (func() (func(*http.Request) (*url.URL, error)) {
+			// If proxyURL is set in kubeconfig, use it.
+			// See https://pkg.go.dev/k8s.io/client-go/rest#Config
+			if cluster.ProxyURL != "" {
+				return func(*http.Request) (*url.URL, error) {
+					return url.Parse(cluster.ProxyURL)
+				}
+			}
+			// Otherwhise leave proxy configuration untouched
+			return nil
+		})(),
 	}
 
 	// NOTE(tnthornton): these values match the burst and QPS values in kubectl.
