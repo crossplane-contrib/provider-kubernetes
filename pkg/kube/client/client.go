@@ -14,14 +14,17 @@ limitations under the License.
 package client
 
 import (
+	"fmt"
 	"context"
 	"strings"
+	"net/http"
+	"net/url"
 
 	"github.com/pkg/errors"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client"	
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
@@ -206,6 +209,17 @@ func fromAPIConfig(c *api.Config) (*rest.Config, error) {
 			KeyData:    user.ClientKeyData,
 			CAData:     cluster.CertificateAuthorityData,
 		},
+		Proxy: (func() (func(*http.Request) (*url.URL, error)) {
+			// If proxyURL is set in kubeconfig, use it.
+			// See https://pkg.go.dev/k8s.io/client-go/rest#Config
+			if cluster.ProxyURL != "" {
+				return func(*http.Request) (*url.URL, error) {
+					return url.Parse(cluster.ProxyURL)
+				}
+			}
+			// Otherwhise leave proxy configuration untouched
+			return nil
+		})(),
 	}
 
 	// NOTE(tnthornton): these values match the burst and QPS values in kubectl.
