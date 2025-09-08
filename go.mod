@@ -14,7 +14,7 @@ require (
 	github.com/spf13/pflag v1.0.6
 	github.com/upbound/up-sdk-go v1.13.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/oauth2 v0.27.0
+	golang.org/x/oauth2 v0.31.0
 	golang.org/x/sync v0.13.0
 	google.golang.org/grpc v1.68.1
 	k8s.io/api v0.33.0
