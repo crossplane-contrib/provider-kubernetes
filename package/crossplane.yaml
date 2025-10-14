@@ -17,3 +17,6 @@ metadata:
       - An `Object` resource type that is to manage Kubernetes Objects.
       - A managed resource controller that reconciles `Object` typed resources and manages
       arbitrary Kubernetes Objects.
+spec:
+  capabilities:
+    - SafeStart

@@ -247,6 +247,17 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 	), o.GlobalRateLimiter))
 }
 
+// SetupGated registers a controller setup function that reconciles Object managed resources.
+// The controller setup is initiated after the CRD for Object becomes available.
+func SetupGated(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitterPercentage uint) error {
+	o.Gate.Register(func() {
+		if err := Setup(mgr, o, sanitizeSecrets, pollJitterPercentage); err != nil {
+			mgr.GetLogger().Error(err, "unable to setup reconciler", "gvk", v1alpha2.ObjectGroupVersionKind.String())
+		}
+	}, v1alpha2.ObjectGroupVersionKind)
+	return nil
+}
+
 type connector struct {
 	kube            client.Client
 	usage           legacyTracker
