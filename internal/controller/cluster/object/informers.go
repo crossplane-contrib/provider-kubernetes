@@ -243,7 +243,7 @@ func (i *resourceInformers) cleanupResourceInformers(ctx context.Context) {
 		}
 
 		ca.cancelFn()
-		i.log.Info("Stopped resource watch", "provider config", gc.providerConfig, "gvk", gc.gvk)
+		i.log.Info("Stopped resource watch", "providerConfig", gc.providerConfig, "gvk", gc.gvk)
 		i.lock.Lock()
 		delete(i.resourceCaches, gc)
 		i.lock.Unlock()
