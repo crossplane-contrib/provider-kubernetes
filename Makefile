@@ -36,11 +36,11 @@ GOLANGCILINT_VERSION = 1.64.8
 
 # ====================================================================================
 # Setup Kubernetes tools
-KIND_VERSION = v0.29.0
-UP_VERSION = v0.40.0-0.rc.3
-UP_CHANNEL = alpha
+KIND_VERSION = v0.30.0
 USE_HELM3 = true
-UPTEST_VERSION = v2.0.1
+UPTEST_VERSION = v2.2.0
+CROSSPLANE_VERSION = 2.0.2
+CROSSPLANE_CLI_VERSION = v2.0.2
 
 -include build/makelib/k8s_tools.mk
 
@@ -87,7 +87,6 @@ cobertura:
 
 # ====================================================================================
 # End to End Testing
-CROSSPLANE_VERSION = 1.20.0
 CROSSPLANE_NAMESPACE = crossplane-system
 -include build/makelib/local.xpkg.mk
 -include build/makelib/controlplane.mk
@@ -117,7 +116,7 @@ submodules:
 # NOTE(hasheddan): we must ensure up is installed in tool cache prior to build
 # as including the k8s_tools machinery prior to the xpkg machinery sets UP to
 # point to tool cache.
-build.init: $(UP)
+build.init: $(CROSSPLANE_CLI)
 
 # This is for running out-of-cluster locally, and is for convenience. Running
 # this make target will print out the command which was used. For more control,
