@@ -28,7 +28,7 @@ import (
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/cluster/observedobjectcollection"
 )
 
-// Setup creates all Template controllers with the supplied logger and adds them to
+// Setup creates all Kubernetes controllers with the supplied logger and adds them to
 // the supplied manager.
 func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitter time.Duration, pollJitterPercentage uint) error {
 	if err := config.Setup(mgr, o); err != nil {
@@ -38,6 +38,22 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		return err
 	}
 	if err := observedobjectcollection.Setup(mgr, o, pollJitter); err != nil {
+		return err
+	}
+	return nil
+}
+
+// SetupGated registers all Kubernetes controllers setup functions with the supplied
+// logger and adds them to the supplied manager. The controller setup calls are
+// initiated after the relevant CRDs become available.
+func SetupGated(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitter time.Duration, pollJitterPercentage uint) error {
+	if err := config.SetupGated(mgr, o); err != nil {
+		return err
+	}
+	if err := object.SetupGated(mgr, o, sanitizeSecrets, pollJitterPercentage); err != nil {
+		return err
+	}
+	if err := observedobjectcollection.SetupGated(mgr, o, pollJitter); err != nil {
 		return err
 	}
 	return nil

@@ -86,6 +86,18 @@ func Setup(mgr ctrl.Manager, o controller.Options, pollJitter time.Duration) err
 		Complete(ratelimiter.NewReconciler(name, xperrors.WithSilentRequeueOnConflict(r), o.GlobalRateLimiter))
 }
 
+// SetupGated registers a controller setup function that reconciles
+// ObservedObjectCollection managed resources. The controller setup is
+// initiated after the CRD for ObservedObjectCollection becomes available.
+func SetupGated(mgr ctrl.Manager, o controller.Options, pollJitter time.Duration) error {
+	o.Gate.Register(func() {
+		if err := Setup(mgr, o, pollJitter); err != nil {
+			mgr.GetLogger().Error(err, "unable to setup reconciler", "gvk", v1alpha1.ObservedObjectCollectionGroupVersionKind.String())
+		}
+	}, v1alpha1.ObservedObjectCollectionGroupVersionKind)
+	return nil
+}
+
 // Reconcile fetches objects specified by their GVK and label selector
 // and creates observed-only Objects for the matches.
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, error error) { //nolint:gocyclo

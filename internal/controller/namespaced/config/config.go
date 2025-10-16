@@ -78,3 +78,14 @@ func setupClusterProviderConfig(mgr ctrl.Manager, o controller.Options) error {
 		Watches(&v1alpha1.ProviderConfigUsage{}, &resource.EnqueueRequestForProviderConfig{}).
 		Complete(ratelimiter.NewReconciler(name, r, o.GlobalRateLimiter))
 }
+
+// SetupGated adds a controller that reconciles ProviderConfigs by accounting for
+// their current usage.
+func SetupGated(mgr ctrl.Manager, o controller.Options) error {
+	o.Gate.Register(func() {
+		if err := Setup(mgr, o); err != nil {
+			mgr.GetLogger().Error(err, "unable to setup reconcilers", "gvk", v1alpha1.ClusterProviderConfigGroupVersionKind.String(), "gvk", v1alpha1.ProviderConfigGroupVersionKind.String())
+		}
+	}, v1alpha1.ClusterProviderConfigGroupVersionKind, v1alpha1.ProviderConfigGroupVersionKind, v1alpha1.ProviderConfigUsageGroupVersionKind)
+	return nil
+}
