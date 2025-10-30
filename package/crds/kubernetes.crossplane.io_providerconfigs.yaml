@@ -172,6 +172,7 @@ spec:
                     - AzureServicePrincipalCredentials
                     - AzureWorkloadIdentityCredentials
                     - UpboundTokens
+                    - AWSWebIdentityCredentials
                     type: string
                 required:
                 - source

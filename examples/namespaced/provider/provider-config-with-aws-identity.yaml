@@ -1,0 +1,44 @@
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: kubernetes-provider
+  namespace: crossplane-system
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: cluster-config
+      key: kubeconfig
+  identity:
+    source: InjectedIdentity
+    type: AWSWebIdentityCredentials
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-config
+  namespace: crossplane-system
+type: Opaque
+stringData:
+  # The cluster name must be the actual EKS cluster name or the full ARN.
+  # Examples:
+  #   - name: my-cluster-name
+  #   - name: arn:aws:eks:us-west-2:123456789012:cluster/my-cluster-name
+  kubeconfig: |
+    apiVersion: v1
+    kind: Config
+    clusters:
+    - cluster:
+        certificate-authority-data: LS0tLS1CRUdJTi...BASE64_ENCODED_CA...
+        server: https://ABCD1234EFGH5678.gr7.us-west-2.eks.amazonaws.com
+      name: eks-cluster
+    contexts:
+    - context:
+        cluster: eks-cluster
+        user: eks-user
+      name: eks-context
+    current-context: eks-context
+    users:
+    - name: eks-user
+      user: {}

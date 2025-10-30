@@ -26,6 +26,7 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
+	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/aws"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/azure"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/gke"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/token"
@@ -42,6 +43,7 @@ const (
 	errInjectAzureCredentials    = "failed to wrap REST client with Azure Application Credentials"
 	errExtractUpboundCredentials = "failed to extract Upbound token"
 	errInjectUpboundCredentials  = "failed to wrap REST client with Upbound token"
+	errInjectAWSCredentials      = "failed to wrap REST client with AWS credentials"
 )
 
 // A Builder creates Kubernetes clients and REST configs for a given provider
@@ -86,8 +88,11 @@ func (b *IdentityAwareBuilder) KubeForProviderConfig(ctx context.Context, pc kco
 
 // restForProviderConfig returns the *rest.config for the given provider config.
 func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (*rest.Config, error) { // nolint:gocyclo
-	var rc *rest.Config
-	var err error
+	var (
+		rc  *rest.Config
+		err error
+		ac  *api.Config
+	)
 
 	switch cd := pc.Credentials; cd.Source { //nolint:exhaustive
 	case xpv1.CredentialsSourceInjectedIdentity:
@@ -101,7 +106,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 			return nil, errors.Wrap(err, errGetCreds)
 		}
 
-		ac, err := clientcmd.Load(kc)
+		ac, err = clientcmd.Load(kc)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to load kubeconfig")
 		}
@@ -161,6 +166,28 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 				if err := upbound.WrapRESTConfig(ctx, rc, strings.TrimSpace(string(staticToken)), b.store); err != nil {
 					return nil, errors.Wrap(err, errInjectUpboundCredentials)
 				}
+			}
+		case kconfig.IdentityTypeAWSWebIdentityCredentials:
+			switch id.Source { //nolint:exhaustive
+			case xpv1.CredentialsSourceInjectedIdentity:
+				// Extract the cluster name from the provided kubeconfig.
+				// We need the actual cluster name (or ARN) for the presigned URL,
+				// not the random endpoint ID from the server URL.
+				var clusterName string
+				if ac != nil && ac.CurrentContext != "" {
+					if ctxConfig := ac.Contexts[ac.CurrentContext]; ctxConfig != nil {
+						clusterName = ctxConfig.Cluster
+					}
+				}
+				// AWS Web Identity credentials use the default AWS credentials chain
+				// which includes IRSA (IAM Roles for Service Accounts) via environment variables:
+				// AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE, AWS_REGION
+				if err := aws.WrapRESTConfig(ctx, rc, clusterName); err != nil {
+					return nil, errors.Wrap(err, errInjectAWSCredentials)
+				}
+			default:
+				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
+					id.Source, kconfig.IdentityTypeAWSWebIdentityCredentials)
 			}
 		default:
 			return nil, errors.Errorf("unknown identity type: %s", id.Type)
