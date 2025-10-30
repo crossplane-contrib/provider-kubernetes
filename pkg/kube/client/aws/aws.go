@@ -59,12 +59,6 @@ func WrapRESTConfig(ctx context.Context, rc *rest.Config, clusterNameFromKubecon
 	// Create STS client with the credentials (which may already be assumed role credentials)
 	stsClient := sts.NewFromConfig(cfg)
 
-	// Verify credentials by getting caller identity
-	_, err = stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
-	if err != nil {
-		return errors.Wrap(err, "failed to verify AWS credentials with GetCallerIdentity")
-	}
-
 	// Create a token source that generates EKS tokens on demand
 	tokenSource := &eksTokenSource{
 		ctx:       ctx,
