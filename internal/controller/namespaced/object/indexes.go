@@ -69,7 +69,7 @@ func IndexByProviderGVK(o client.Object) []string {
 	// We don't expect errors here, as the parseManifest function is already called
 	// in the reconciler and the desired object already validated.
 	d, _ := parseManifest(obj)
-	providerConfigKey := fmt.Sprintf("%s:%s:%s", obj.Spec.ProviderConfigReference.Name, obj.Spec.ProviderConfigReference.Kind, obj.GetNamespace())
+	providerConfigKey := providerConfigRefKey(obj)
 	keys = append(keys, refKeyProviderGVK(providerConfigKey, d.GetKind(), d.GroupVersionKind().Group, d.GroupVersionKind().Version)) // unification is done by the informer.
 
 	// unification is done by the informer.
