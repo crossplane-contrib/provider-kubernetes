@@ -16,3 +16,5 @@ guidelines and responsibilities for the steering committee and maintainers.
 * Philippe Scorsolini <philippe.scorsolini@upbound.io> ([phisco](https://github.com/phisco))
 * Sergen Yalcin <sergen@upbound.io> ([sergenyalcin](https://github.com/sergenyalcin))
 * Fatih Turken <fatih@upbound.io> ([turkenf](https://github.com/turkenf)))
+* Alper Ulucinar <alper@upbound.io> ([ulucinar](https://github.com/ulucinar))
+* Erhan Cagirici <erhan@upbound.io> ([erhancagirici](https://github.com/erhancagirici))
