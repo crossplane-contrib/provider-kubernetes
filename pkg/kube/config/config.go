@@ -52,7 +52,18 @@ type Identity struct {
 	// Type of identity.
 	Type IdentityType `json:"type"`
 
+	// ImpersonateServiceAccount is the email address of the Google Service Account to impersonate.
+	// This is only valid when the identity type is GoogleApplicationCredentials.
+	// +optional
+	ImpersonateServiceAccount *ImpersonateServiceAccountConfig `json:"impersonateServiceAccount,omitempty"`
+
 	ProviderCredentials `json:",inline"`
+}
+
+// ImpersonateServiceAccountConfig contains the configuration for impersonating a service account.
+type ImpersonateServiceAccountConfig struct {
+	// Name of the service account to impersonate.
+	Name string `json:"name"`
 }
 
 // A ProviderConfigSpec defines the desired state of a ProviderConfig.
