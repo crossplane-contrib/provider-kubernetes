@@ -156,9 +156,7 @@ func main() {
 		HealthProbeBindAddress: *healthProbeBindAddress,
 	})
 	kingpin.FatalIfError(err, "Cannot create controller manager")
-	if len(certDir) > 0 {
-		kingpin.FatalIfError(mgr.AddReadyzCheck("webhook", mgr.GetWebhookServer().StartedChecker()), "Cannot add webhook server readyz checker to controller manager")
-	}
+	kingpin.FatalIfError(mgr.AddReadyzCheck("webhook", mgr.GetWebhookServer().StartedChecker()), "Cannot add webhook server readyz checker to controller manager")
 	mm := managed.NewMRMetricRecorder()
 	sm := statemetrics.NewMRStateMetrics()
 

@@ -101,7 +101,7 @@ uptest: $(UPTEST) $(KUBECTL) $(CHAINSAW) $(CROSSPLANE_CLI)
 	@$(OK) running automated tests
 
 local-dev: controlplane.up
-local-deploy: build controlplane.up
+local-deploy: build controlplane.up $(YQ)
 	$(MAKE) local.xpkg.deploy.provider.$(PROJECT_NAME) DRC_FILE="./examples/deploymentruntimeconfig.yaml" && \
 	$(INFO) running locally built provider && \
 	$(KUBECTL) wait provider.pkg $(PROJECT_NAME) --for condition=Healthy --timeout 5m && \
