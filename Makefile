@@ -101,11 +101,12 @@ uptest: $(UPTEST) $(KUBECTL) $(CHAINSAW) $(CROSSPLANE_CLI)
 	@$(OK) running automated tests
 
 local-dev: controlplane.up
-local-deploy: build controlplane.up local.xpkg.deploy.provider.$(PROJECT_NAME)
-	@$(INFO) running locally built provider
-	@$(KUBECTL) wait provider.pkg $(PROJECT_NAME) --for condition=Healthy --timeout 5m
-	@$(KUBECTL) -n $(CROSSPLANE_NAMESPACE) wait --for=condition=Available deployment --all --timeout=5m
-	@$(OK) running locally built provider
+local-deploy: build controlplane.up
+	$(MAKE) local.xpkg.deploy.provider.$(PROJECT_NAME) DRC_FILE="./examples/deploymentruntimeconfig.yaml" && \
+	$(INFO) running locally built provider && \
+	$(KUBECTL) wait provider.pkg $(PROJECT_NAME) --for condition=Healthy --timeout 5m && \
+	$(KUBECTL) -n $(CROSSPLANE_NAMESPACE) wait --for=condition=Available deployment --all --timeout=5m && \
+	$(OK) running locally built provider
 
 e2e: local-deploy uptest
 # Update the submodules, such as the common build scripts.
