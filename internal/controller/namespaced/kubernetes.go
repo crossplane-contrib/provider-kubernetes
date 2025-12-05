@@ -17,12 +17,11 @@ limitations under the License.
 package controller
 
 import (
-	"time"
-
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 
+	pcontroller "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/namespaced/config"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/namespaced/object"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/namespaced/observedobjectcollection"
@@ -30,14 +29,14 @@ import (
 
 // Setup creates all Kubernetes controllers with the supplied logger and adds them to
 // the supplied manager.
-func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitter time.Duration, pollJitterPercentage uint) error {
+func Setup(mgr ctrl.Manager, o controller.Options, po pcontroller.Options) error {
 	if err := config.Setup(mgr, o); err != nil {
 		return err
 	}
-	if err := object.Setup(mgr, o, sanitizeSecrets, pollJitterPercentage); err != nil {
+	if err := object.Setup(mgr, o, po.SanitizeSecrets, po.PollJitterPercentage, po.LegacyCSAFieldManagers); err != nil {
 		return err
 	}
-	if err := observedobjectcollection.Setup(mgr, o, pollJitter); err != nil {
+	if err := observedobjectcollection.Setup(mgr, o, po.PollJitter); err != nil {
 		return err
 	}
 	return nil
@@ -46,14 +45,14 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 // SetupGated registers all Kubernetes controllers setup functions with the supplied
 // logger and adds them to the supplied manager. The controller setup calls are
 // initiated after the relevant CRDs become available.
-func SetupGated(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitter time.Duration, pollJitterPercentage uint) error {
+func SetupGated(mgr ctrl.Manager, o controller.Options, po pcontroller.Options) error {
 	if err := config.SetupGated(mgr, o); err != nil {
 		return err
 	}
-	if err := object.SetupGated(mgr, o, sanitizeSecrets, pollJitterPercentage); err != nil {
+	if err := object.SetupGated(mgr, o, po.SanitizeSecrets, po.PollJitterPercentage, po.LegacyCSAFieldManagers); err != nil {
 		return err
 	}
-	if err := observedobjectcollection.SetupGated(mgr, o, pollJitter); err != nil {
+	if err := observedobjectcollection.SetupGated(mgr, o, po.PollJitter); err != nil {
 		return err
 	}
 	return nil
