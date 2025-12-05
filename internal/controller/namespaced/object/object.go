@@ -61,6 +61,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/v1alpha1"
+	pcontroller "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa/cache/extractor"
@@ -152,7 +153,7 @@ type ResourceSyncer interface {
 }
 
 // Setup adds a controller that reconciles Object managed resources.
-func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitterPercentage uint) error { // nolint:gocyclo // Too many branches due to alpha features, hopefully we can clean them up after we graduate them.
+func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitterPercentage uint, legacyCSAFieldManagers []string) error { // nolint:gocyclo // Too many branches due to alpha features, hopefully we can clean them up after we graduate them.
 	name := managed.ControllerName(v1alpha1.ObjectGroupKind)
 	l := o.Logger.WithValues("controller", name)
 
@@ -183,10 +184,15 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		clientBuilder:   kubeclient.NewIdentityAwareBuilder(mgr.GetClient()),
 	}
 
-	if o.Features.Enabled(features.EnableAlphaServerSideApply) {
+	if o.Features.Enabled(features.EnableBetaServerSideApply) {
 		conn.ssaEnabled = true
 		conn.stateCacheManager = state.NewDesiredStateCacheManager()
 		conn.parserCacheManager = extractor.NewGVKParserCacheManager()
+
+		defaultCSAFieldManager := pcontroller.DefaultCSAFieldManager()
+		csaFieldManagers := sets.New(defaultCSAFieldManager)
+		csaFieldManagers.Insert(legacyCSAFieldManagers...)
+		conn.legacyCSAFieldManagers = csaFieldManagers
 	}
 
 	cb := ctrl.NewControllerManagedBy(mgr).
@@ -250,9 +256,9 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 // SetupGated registers a gated controller that reconciles Object managed resources.
 // The controller setup is initiated after the CRD for Object becomes available.
-func SetupGated(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitterPercentage uint) error {
+func SetupGated(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitterPercentage uint, legacyCSAFieldManagers []string) error {
 	o.Gate.Register(func() {
-		if err := Setup(mgr, o, sanitizeSecrets, pollJitterPercentage); err != nil {
+		if err := Setup(mgr, o, sanitizeSecrets, pollJitterPercentage, legacyCSAFieldManagers); err != nil {
 			mgr.GetLogger().Error(err, "unable to setup reconciler", "gvk", v1alpha1.ObjectGroupVersionKind.String())
 		}
 	}, v1alpha1.ObjectGroupVersionKind)
@@ -269,9 +275,10 @@ type connector struct {
 
 	clientBuilder kubeclient.Builder
 
-	stateCacheManager state.CacheManager
-
-	parserCacheManager *extractor.GVKParserCacheManager
+	// server-side apply
+	stateCacheManager      state.CacheManager
+	parserCacheManager     *extractor.GVKParserCacheManager
+	legacyCSAFieldManagers sets.Set[string]
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -332,6 +339,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 			desiredStateCacheFn: func() state.Cache {
 				return c.stateCacheManager.LoadOrNewForManaged(mg)
 			},
+			legacyCSAFieldManagers: c.legacyCSAFieldManagers,
 		}
 		e.desiredStateCacheCleanupFn = func() {
 			c.stateCacheManager.Remove(mg)

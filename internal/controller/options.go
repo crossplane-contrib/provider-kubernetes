@@ -1,5 +1,5 @@
 /*
-Copyright 2024 The Crossplane Authors.
+Copyright 2025 The Crossplane Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,15 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package features
+package controller
 
-import "github.com/crossplane/crossplane-runtime/v2/pkg/feature"
-
-// Feature flags.
-const (
-	// EnableAlphaWatches enables alpha support for watching referenced and
-	// managed resources.
-	EnableAlphaWatches feature.Flag = "EnableAlphaWatches"
-	// EnableBetaServerSideApply enables beta support for Server Side Apply.
-	EnableBetaServerSideApply feature.Flag = "EnableBetaServerSideApply"
+import (
+	"time"
 )
+
+// Options holds the configuration options for the provider controllers
+type Options struct {
+	SanitizeSecrets        bool
+	PollJitter             time.Duration
+	PollJitterPercentage   uint
+	LegacyCSAFieldManagers []string
+}
