@@ -39,8 +39,8 @@ GOLANGCILINT_VERSION = 1.64.8
 KIND_VERSION = v0.30.0
 USE_HELM3 = true
 UPTEST_VERSION = v2.2.0
-CROSSPLANE_VERSION = 2.0.2
-CROSSPLANE_CLI_VERSION = v2.0.2
+CROSSPLANE_VERSION = 2.1.3
+CROSSPLANE_CLI_VERSION = v2.1.3
 
 -include build/makelib/k8s_tools.mk
 
@@ -91,10 +91,7 @@ CROSSPLANE_NAMESPACE = crossplane-system
 -include build/makelib/local.xpkg.mk
 -include build/makelib/controlplane.mk
 
-# TODO(turkenh): Add "examples/object/object-ssa-owner.yaml" to the list to test the SSA functionality as part of the e2e tests.
-# The test is disabled for now because uptest clears the package cache when the provider restarted with the SSA flag.
-# Enable after https://github.com/crossplane/uptest/issues/17 is fixed.
-UPTEST_EXAMPLE_LIST ?= "examples/namespaced/object/object.yaml,examples/namespaced/object/object-watching.yaml"
+UPTEST_EXAMPLE_LIST ?= "examples/namespaced/object/object.yaml,examples/namespaced/object/object-watching.yaml,examples/namespaced/object/object-ssa-owner.yaml,examples/namespaced/object/object-csa-migration.yaml"
 uptest: $(UPTEST) $(KUBECTL) $(CHAINSAW) $(CROSSPLANE_CLI)
 	@$(INFO) running automated tests
 	@KUBECTL=$(KUBECTL) CHAINSAW=$(CHAINSAW) CROSSPLANE_CLI=$(CROSSPLANE_CLI) CROSSPLANE_NAMESPACE=$(CROSSPLANE_NAMESPACE) $(UPTEST) e2e "$(UPTEST_EXAMPLE_LIST)" --setup-script=cluster/test/setup.sh || $(FAIL)

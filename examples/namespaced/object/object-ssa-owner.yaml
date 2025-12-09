@@ -6,7 +6,6 @@ metadata:
   name: sample-service-owner
   namespace: default
   annotations:
-    uptest.upbound.io/pre-assert-hook: testhooks/enable-ssa.sh
     uptest.upbound.io/post-assert-hook: testhooks/validate-ssa.sh
     uptest.upbound.io/timeout: "60"
 spec:

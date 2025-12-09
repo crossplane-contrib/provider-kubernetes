@@ -55,6 +55,7 @@ import (
 	objectv1alpha1cluster "github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha1"
 	apisnamespaced "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/bootcheck"
+	pcontroller "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 	controllerCluster "github.com/crossplane-contrib/provider-kubernetes/internal/controller/cluster"
 	controllerNamespaced "github.com/crossplane-contrib/provider-kubernetes/internal/controller/namespaced"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
@@ -92,8 +93,10 @@ func main() {
 
 		enableManagementPolicies = app.Flag("enable-management-policies", "Enable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
 		enableWatches            = app.Flag("enable-watches", "Enable support for watching resources.").Default("false").Envar("ENABLE_WATCHES").Bool()
-		enableServerSideApply    = app.Flag("enable-server-side-apply", "Enable server side apply to sync object manifests to k8s API.").Default("false").Envar("ENABLE_SERVER_SIDE_APPLY").Bool()
+		enableServerSideApply    = app.Flag("enable-server-side-apply", "Enable server side apply to sync object manifests to k8s API.").Default("true").Envar("ENABLE_SERVER_SIDE_APPLY").Bool()
 		enableChangeLogs         = app.Flag("enable-changelogs", "Enable support for capturing change logs during reconciliation.").Default("false").Envar("ENABLE_CHANGE_LOGS").Bool()
+		// Additional legacy field managers to upgrade to Server-side apply field manager
+		legacyCSAFieldManagers = app.Flag("legacy-csa-field-managers", "Additional legacy client-side apply Kubernetes field manager names for upgrading to SSA field manager").Default().Strings()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
@@ -181,6 +184,12 @@ func main() {
 		MetricOptions:           &mo,
 	}
 
+	po := pcontroller.Options{
+		SanitizeSecrets:      *sanitizeSecrets,
+		PollJitter:           pollJitter,
+		PollJitterPercentage: *pollJitterPercentage,
+	}
+
 	if *enableManagementPolicies {
 		o.Features.Enable(feature.EnableBetaManagementPolicies)
 		log.Info("Beta feature enabled", "flag", feature.EnableBetaManagementPolicies)
@@ -192,8 +201,9 @@ func main() {
 	}
 
 	if *enableServerSideApply {
-		o.Features.Enable(features.EnableAlphaServerSideApply)
-		log.Info("Alpha feature enabled", "flag", features.EnableAlphaServerSideApply)
+		o.Features.Enable(features.EnableBetaServerSideApply)
+		po.LegacyCSAFieldManagers = *legacyCSAFieldManagers
+		log.Info("Beta feature enabled", "flag", features.EnableBetaServerSideApply)
 	}
 
 	if *enableChangeLogs {
@@ -229,12 +239,12 @@ func main() {
 			MaxConcurrentReconciles: 1,
 		}
 		kingpin.FatalIfError(customresourcesgate.Setup(mgr, gateOpts), "Cannot setup CRD gate")
-		kingpin.FatalIfError(controllerCluster.SetupGated(mgr, o, *sanitizeSecrets, pollJitter, *pollJitterPercentage), "Cannot setup cluster-scoped controller")
-		kingpin.FatalIfError(controllerNamespaced.SetupGated(mgr, o, *sanitizeSecrets, pollJitter, *pollJitterPercentage), "Cannot setup namespaced controller")
+		kingpin.FatalIfError(controllerCluster.SetupGated(mgr, o, po), "Cannot setup cluster-scoped controller")
+		kingpin.FatalIfError(controllerNamespaced.SetupGated(mgr, o, po), "Cannot setup namespaced controller")
 	} else {
 		log.Info("Provider has missing RBAC permissions for watching CRDs, controller SafeStart capability will be disabled")
-		kingpin.FatalIfError(controllerCluster.Setup(mgr, o, *sanitizeSecrets, pollJitter, *pollJitterPercentage), "Cannot setup cluster-scoped controller")
-		kingpin.FatalIfError(controllerNamespaced.Setup(mgr, o, *sanitizeSecrets, pollJitter, *pollJitterPercentage), "Cannot setup namespaced controller")
+		kingpin.FatalIfError(controllerCluster.Setup(mgr, o, po), "Cannot setup cluster-scoped controller")
+		kingpin.FatalIfError(controllerNamespaced.Setup(mgr, o, po), "Cannot setup namespaced controller")
 	}
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")
 }

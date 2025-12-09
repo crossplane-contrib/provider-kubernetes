@@ -1,0 +1,40 @@
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: foo-service-owner
+  namespace: default
+  annotations:
+    # We test a specific scenario of CSA->SSA migration
+    # https://github.com/kubernetes/kubernetes/issues/99003
+    # For that, we disable SSA first.
+    uptest.upbound.io/pre-assert-hook: testhooks/disable-ssa.sh
+    # The provider runs SSA-enabled by default. The above hook runs
+    # pre-assertion but after MR creation. We create the MR
+    # as paused, to prevent it from being reconciled with SSA-enabled
+    # at creation. The hook ensures that the SSA is disabled, then
+    # unpauses the MR to ensure it gets reconciled first with CSA.
+    crossplane.io/paused: "true"
+    uptest.upbound.io/post-assert-hook: testhooks/validate-ssa-migration.sh
+    uptest.upbound.io/timeout: "60"
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: foo-service
+        namespace: default
+        labels:
+          foo: fooval
+          bar: barval
+          unwanted: remove-me
+      spec:
+        selector:
+          app.kubernetes.io/name: MyApp
+        ports:
+          - protocol: TCP
+            port: 80
+            targetPort: 9999
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider
