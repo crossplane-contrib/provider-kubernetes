@@ -27,7 +27,7 @@ import (
 )
 
 // ConvertTo converts this Object to the Hub version (v1alpha2).
-func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // We want to use different names for receiver parameter to be more clear.
+func (src *Object) ConvertTo(dstRaw conversion.Hub) error {
 	dst := dstRaw.(*v1alpha2.Object)
 
 	// copy identical fields
@@ -108,7 +108,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error { // nolint:golint // 
 }
 
 // ConvertFrom converts from the Hub version (v1alpha2) to this version.
-func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { // nolint:golint, gocyclo // We want to use different names for receiver parameter to be more clear.
+func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { //nolint:gocyclo // We want to use different names for receiver parameter to be more clear.
 	src := srcRaw.(*v1alpha2.Object)
 
 	// copy identical fields

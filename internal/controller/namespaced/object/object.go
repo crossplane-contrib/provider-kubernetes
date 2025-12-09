@@ -637,7 +637,7 @@ func (c *external) checkDeriveFromCelQuery(obj *v1alpha1.Object, observed *unstr
 	ast, iss := env.Compile(obj.Spec.Readiness.CelQuery)
 	if iss.Err() != nil {
 		c.logger.Debug("failed to compile query", "err", iss.Err())
-		err = errors.Wrap(err, errCelQueryFailedToCompile)
+		err = errors.Wrap(iss.Err(), errCelQueryFailedToCompile)
 		return ready, err
 	}
 	if !reflect.DeepEqual(ast.OutputType(), cel.BoolType) {
@@ -734,7 +734,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 }
 
 func (c *external) handleObservation(ctx context.Context, obj *v1alpha1.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
-	isUpToDate := false
+	isUpToDate := false //nolint:staticcheck
 
 	if !sets.New[xpv1.ManagementAction](obj.GetManagementPolicies()...).
 		HasAny(xpv1.ManagementActionUpdate, xpv1.ManagementActionCreate, xpv1.ManagementActionAll) {

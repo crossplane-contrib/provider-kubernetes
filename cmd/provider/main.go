@@ -225,7 +225,7 @@ func main() {
 	// Object. As far as I can see and based on some tests, it doesn't matter
 	// which version we use here. Leaving it as v1alpha1 as it will be easy to
 	// notice and remove when we drop support for v1alpha1.
-	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&objectv1alpha1cluster.Object{}).Complete(), "Cannot create Object webhook")
+	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr).For(&objectv1alpha1cluster.Object{}).Complete(), "Cannot create Object webhook") //nolint:staticcheck // registering conversion webhook for deprecated api
 	precheckCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	canSafeStart, err := canWatchCRD(precheckCtx, mgr)
