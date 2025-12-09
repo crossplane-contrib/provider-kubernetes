@@ -11,7 +11,7 @@ on:
 env:
   # Common versions
   GO_VERSION: '1.24.11'
-  GOLANGCI_VERSION: 'v1.64.8'
+  GOLANGCI_VERSION: 'v2.7.2'
   DOCKER_BUILDX_VERSION: 'v0.30.1'
 
 jobs:
@@ -49,7 +49,7 @@ jobs:
         run: make vendor vendor.check
 
       - name: Lint
-        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
+        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
           version: ${{ env.GOLANGCI_VERSION }}
 
