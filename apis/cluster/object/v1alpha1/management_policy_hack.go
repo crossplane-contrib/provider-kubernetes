@@ -32,6 +32,7 @@ type ResourceSpec struct {
 
 	// ProviderReference specifies the provider that will be used to create,
 	// observe, update, and delete this managed resource.
+	//
 	// Deprecated: Please use ProviderConfigReference, i.e. `providerConfigRef`
 	ProviderReference *xpv1.Reference `json:"providerRef,omitempty"`
 

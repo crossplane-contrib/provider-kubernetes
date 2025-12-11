@@ -464,10 +464,11 @@ func TestObserve(t *testing.T) {
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
 						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-							if key.Name == testReferenceObjectName {
+							switch key.Name {
+							case testReferenceObjectName:
 								*obj.(*unstructured.Unstructured) = *referenceObject()
 								return nil
-							} else if key.Name == externalResourceName {
+							case externalResourceName:
 								return kerrors.NewNotFound(schema.GroupResource{}, "")
 							}
 							return errBoom
@@ -489,10 +490,11 @@ func TestObserve(t *testing.T) {
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
 						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-							if key.Name == testReferenceObjectName {
+							switch key.Name {
+							case testReferenceObjectName:
 								*obj.(*unstructured.Unstructured) = *referenceObject()
 								return nil
-							} else if key.Name == externalResourceName {
+							case externalResourceName:
 								*obj.(*unstructured.Unstructured) = *externalResource()
 								return nil
 							}

@@ -187,6 +187,7 @@ type ObjectStatus struct {
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:scope=Cluster,categories={crossplane,managed,kubernetes}
 // +kubebuilder:deprecatedversion
+//
 // Deprecated: v1alpha1.Object is deprecated in favor of v1alpha2.Object
 type Object struct {
 	metav1.TypeMeta   `json:",inline"`

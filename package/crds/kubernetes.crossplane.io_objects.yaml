@@ -59,6 +59,7 @@ spec:
       openAPIV3Schema:
         description: |-
           A Object is an provider Kubernetes API type
+
           Deprecated: v1alpha1.Object is deprecated in favor of v1alpha2.Object
         properties:
           apiVersion:
@@ -209,6 +210,7 @@ spec:
                 description: |-
                   ProviderReference specifies the provider that will be used to create,
                   observe, update, and delete this managed resource.
+
                   Deprecated: Please use ProviderConfigReference, i.e. `providerConfigRef`
                 properties:
                   name:
