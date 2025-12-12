@@ -10,6 +10,8 @@ spec:
     webhook:
       clientConfig:
         service:
+          name: crossplane-webhook
+          namespace: crossplane-system
           path: /convert
       conversionReviewVersions:
       - v1
