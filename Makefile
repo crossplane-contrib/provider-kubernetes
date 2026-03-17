@@ -91,7 +91,7 @@ CROSSPLANE_NAMESPACE = crossplane-system
 -include build/makelib/local.xpkg.mk
 -include build/makelib/controlplane.mk
 
-UPTEST_EXAMPLE_LIST ?= "examples/namespaced/object/object.yaml,examples/namespaced/object/object-watching.yaml,examples/namespaced/object/object-ssa-owner.yaml,examples/namespaced/object/object-csa-migration.yaml"
+UPTEST_EXAMPLE_LIST ?= "examples/namespaced/object/object.yaml,examples/namespaced/object/object-watching.yaml,examples/namespaced/object/object-ssa-owner.yaml,examples/namespaced/object/object-csa-migration.yaml,examples/namespaced/object/object-wrapped-provider-config.yaml"
 uptest: $(UPTEST) $(KUBECTL) $(CHAINSAW) $(CROSSPLANE_CLI)
 	@$(INFO) running automated tests
 	@KUBECTL=$(KUBECTL) CHAINSAW=$(CHAINSAW) CROSSPLANE_CLI=$(CROSSPLANE_CLI) CROSSPLANE_NAMESPACE=$(CROSSPLANE_NAMESPACE) $(UPTEST) e2e "$(UPTEST_EXAMPLE_LIST)" --setup-script=cluster/test/setup.sh || $(FAIL)

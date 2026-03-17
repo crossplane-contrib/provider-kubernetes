@@ -1,0 +1,27 @@
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: sample-wrapped-providerconfig
+  namespace: default
+  annotations:
+    uptest.upbound.io/timeout: "60"
+spec:
+  forProvider:
+    manifest:
+      apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: ProviderConfig
+      metadata:
+        name: demo-provider-config
+        namespace: default
+        labels:
+          foo: bar
+      spec:
+        credentials:
+          source: Secret
+          secretRef:
+            namespace: default
+            name: foo-cluster-config
+            key: kubeconfig
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider
