@@ -148,11 +148,37 @@ func (s *SSAResourceSyncer) needSSAFieldManagerUpgrade(accessor metav1.Object) b
 	}
 	mfes := accessor.GetManagedFields()
 	for _, mfe := range mfes {
-		if mfe.Operation == metav1.ManagedFieldsOperationUpdate && s.legacyCSAFieldManagers.Has(mfe.Manager) {
-			return true
+		if mfe.Operation != metav1.ManagedFieldsOperationUpdate || !s.legacyCSAFieldManagers.Has(mfe.Manager) {
+			continue
 		}
+		if mfe.Subresource == "status" {
+			continue
+		}
+		if isFinalizersOnlyManagedFieldsEntry(mfe) {
+			continue
+		}
+		return true
 	}
 	return false
+}
+
+func isFinalizersOnlyManagedFieldsEntry(mfe metav1.ManagedFieldsEntry) bool {
+	if mfe.FieldsV1 == nil || len(mfe.FieldsV1.Raw) == 0 {
+		return false
+	}
+	fields := map[string]any{}
+	if err := json.Unmarshal(mfe.FieldsV1.Raw, &fields); err != nil {
+		return false
+	}
+	if len(fields) != 1 {
+		return false
+	}
+	metadata, ok := fields["f:metadata"].(map[string]any)
+	if !ok || len(metadata) != 1 {
+		return false
+	}
+	_, ok = metadata["f:finalizers"].(map[string]any)
+	return ok
 }
 
 // maybeUpgradeFieldManagers upgrades managed field entries of the managed k8s resource
