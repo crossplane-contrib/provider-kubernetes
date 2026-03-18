@@ -17,7 +17,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
