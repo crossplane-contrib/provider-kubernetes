@@ -213,7 +213,11 @@ func fromAPIConfig(c *api.Config) (*rest.Config, error) {
 			// See https://pkg.go.dev/k8s.io/client-go/rest#Config
 			if cluster.ProxyURL != "" {
 				return func(*http.Request) (*url.URL, error) {
-					return url.Parse(cluster.ProxyURL)
+					parsedURL, err := url.Parse(cluster.ProxyURL)
+					if err != nil {
+					  return nil, err
+					}
+					return parsedURL, nil
 				}
 			}
 			// Otherwhise leave proxy configuration untouched
