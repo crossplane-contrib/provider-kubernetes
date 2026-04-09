@@ -471,7 +471,13 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalDelete{}, errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Deleting", "resource", obj)
+	// Apply deletion policy set in the Object spec
+	propagationPolicy := obj.Spec.ForProvider.DeletionPropagationPolicy
+	deleteOptions := &client.DeleteOptions{
+		PropagationPolicy: &propagationPolicy,
+	}
+
+	c.logger.Debug("Deleting", "resource", obj, "propagationPolicy", obj.Spec.ForProvider.DeletionPropagationPolicy)
 
 	res, err := parseManifest(obj)
 	if err != nil {
@@ -482,7 +488,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.Ext
 	if c.desiredStateCacheCleanupFn != nil {
 		c.desiredStateCacheCleanupFn()
 	}
-	return managed.ExternalDelete{}, errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, res)), errDeleteObject)
+
+	return managed.ExternalDelete{}, errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, res, deleteOptions)), errDeleteObject)
 }
 
 func (c *external) Disconnect(ctx context.Context) error {
