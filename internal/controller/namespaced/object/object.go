@@ -31,7 +31,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -485,9 +484,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.Ext
 		c.desiredStateCacheCleanupFn()
 	}
 
-	// Use Foreground deletion propagation to ensure that dependent resources (like Pods owned by a Job) are properly deleted
-	// See: https://kubernetes.io/docs/concepts/architecture/garbage-collection/#foreground-deletion
-	propagationPolicy := metav1.DeletePropagationForeground
+	// Apply deletion policy set in the Object spec
+	propagationPolicy := obj.Spec.ForProvider.DeletionPropagationPolicy
 	deleteOptions := &client.DeleteOptions{
 		PropagationPolicy: &propagationPolicy,
 	}

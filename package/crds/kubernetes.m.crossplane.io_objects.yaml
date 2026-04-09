@@ -122,6 +122,15 @@ spec:
               forProvider:
                 description: ObjectParameters are the configurable fields of a Object.
                 properties:
+                  deletionPropagationPolicy:
+                    default: Background
+                    description: Deletion policy for created kubernetes object, defaults
+                      to Background
+                    enum:
+                    - Orphan
+                    - Background
+                    - Foreground
+                    type: string
                   manifest:
                     description: Raw JSON representation of the kubernetes object
                       to be created.
