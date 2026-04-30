@@ -15,7 +15,10 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/client-go/rest"
@@ -60,21 +63,48 @@ func (fn BuilderFn) KubeForProviderConfig(ctx context.Context, pc kconfig.Provid
 	return fn(ctx, pc)
 }
 
+// CacheClient that can be used for connection instead
+// of a new connection on every request
+type cachedClient struct {
+	client     client.Client
+	restConfig *rest.Config
+	createdAt  time.Time
+}
+
 // IdentityAwareBuilder is a Builder that can inject identity credentials into
 // the REST config of a Kubernetes client.
 type IdentityAwareBuilder struct {
-	local client.Client
-	store *token.ReuseSourceStore
+	local    client.Client
+	store    *token.ReuseSourceStore
+	cache    sync.Map // map[string]*cachedClient - key is "namespace/name"
+	cacheTTL time.Duration
 }
 
 // NewIdentityAwareBuilder returns a new IdentityAwareBuilder.
 func NewIdentityAwareBuilder(local client.Client) *IdentityAwareBuilder {
-	return &IdentityAwareBuilder{local: local, store: token.NewReuseSourceStore()}
+	return &IdentityAwareBuilder{
+		local:    local,
+		store:    token.NewReuseSourceStore(),
+		cacheTTL: 30 * time.Minute, // Configurable
+	}
 }
 
 // KubeForProviderConfig returns the kube client and *rest.config for the given
 // provider config.
 func (b *IdentityAwareBuilder) KubeForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (client.Client, *rest.Config, error) {
+	// Generate Cache Key from Provider Config
+	cacheKey := b.cacheKeyForProviderConfig(pc)
+
+	if cached, ok := b.cache.Load(cacheKey); ok {
+		cachedClient := cached.(*cachedClient)
+		if time.Since(cachedClient.createdAt) < b.cacheTTL {
+			return cachedClient.client, cachedClient.restConfig, nil
+		}
+		// Expired Remove from Cache
+		b.cache.Delete(cacheKey)
+	}
+
+	// Create new Client
 	rc, err := b.restForProviderConfig(ctx, pc)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "cannot get REST config for provider")
@@ -83,7 +113,34 @@ func (b *IdentityAwareBuilder) KubeForProviderConfig(ctx context.Context, pc kco
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "cannot create Kubernetes client for provider")
 	}
+
+	// Store in Cache
+	b.cache.Store(cacheKey, &cachedClient{
+		client:     k,
+		restConfig: rc,
+		createdAt:  time.Now(),
+	})
+
 	return k, rc, nil
+}
+
+// cacheKeyForProviderConfig generates a stable cache key for a provider config.
+// We use the credential source and reference details as the key.
+func (b *IdentityAwareBuilder) cacheKeyForProviderConfig(pc kconfig.ProviderConfigSpec) string {
+	creds := pc.Credentials
+
+	// For injected identity use fixed key
+	if creds.Source == xpv1.CredentialsSourceInjectedIdentity {
+		return "injected-identity"
+	}
+
+	// For secret refs use namespace/name
+	if creds.SecretRef != nil {
+		return fmt.Sprintf("secret:%s/%s", creds.SecretRef.Namespace, creds.SecretRef.Name)
+	}
+
+	// Fallback: hash the entire spec (less ideal but safe)
+	return fmt.Sprintf("source:%s", creds.Source)
 }
 
 // restForProviderConfig returns the *rest.config for the given provider config.
