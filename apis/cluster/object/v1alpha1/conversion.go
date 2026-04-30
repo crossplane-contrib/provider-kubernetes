@@ -40,7 +40,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error {
 		},
 	}
 
-	connectionDetails := []v1alpha2.ConnectionDetail{}
+	connectionDetails := make([]v1alpha2.ConnectionDetail, 0, len(src.Spec.ConnectionDetails))
 	for _, cd := range src.Spec.ConnectionDetails {
 		connectionDetails = append(connectionDetails, v1alpha2.ConnectionDetail{
 			ObjectReference:       cd.ObjectReference,
@@ -48,7 +48,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error {
 		})
 	}
 
-	references := []v1alpha2.Reference{}
+	references := make([]v1alpha2.Reference, 0, len(src.Spec.References))
 	for _, r := range src.Spec.References {
 		ref := v1alpha2.Reference{}
 		if r.DependsOn != nil {
@@ -120,7 +120,7 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { //nolint:gocyclo /
 		},
 	}
 
-	connectionDetails := []ConnectionDetail{}
+	connectionDetails := make([]ConnectionDetail, 0, len(src.Spec.ConnectionDetails))
 	for _, cd := range src.Spec.ConnectionDetails {
 		connectionDetails = append(connectionDetails, ConnectionDetail{
 			ObjectReference:       cd.ObjectReference,
@@ -128,7 +128,7 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { //nolint:gocyclo /
 		})
 	}
 
-	references := []Reference{}
+	references := make([]Reference, 0, len(src.Spec.References))
 	for _, r := range src.Spec.References {
 		ref := Reference{}
 		if r.DependsOn != nil {
