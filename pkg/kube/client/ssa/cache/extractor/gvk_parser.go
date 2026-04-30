@@ -31,7 +31,7 @@ package extractor
 import (
 	"fmt"
 
-	"github.com/pkg/errors"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/kube-openapi/pkg/schemaconv"
 	"k8s.io/kube-openapi/pkg/validation/spec"
