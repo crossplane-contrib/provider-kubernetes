@@ -112,7 +112,7 @@ func TestParserCacheManager(t *testing.T) {
 				if diff := cmp.Diff(len(cache.store), len(test.testClusterTargets[pc.GetUID()].gvs)); diff != "" {
 					t.Fatalf("cache length: -want length, +got length\n: %v", diff)
 				}
-				var cacheKeys []schema.GroupVersion
+				cacheKeys := make([]schema.GroupVersion, 0, len(cache.store))
 				for k := range cache.store {
 					cacheKeys = append(cacheKeys, k)
 				}
