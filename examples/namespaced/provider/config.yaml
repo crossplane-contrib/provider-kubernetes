@@ -11,6 +11,7 @@ apiVersion: kubernetes.m.crossplane.io/v1alpha1
 kind: ClusterProviderConfig
 metadata:
   name: kubernetes-provider
+  namespace: default
 spec:
   credentials:
     source: Secret
