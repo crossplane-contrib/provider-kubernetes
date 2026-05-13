@@ -934,6 +934,78 @@ func TestDelete(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SuccessWithForegroundPropagation": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.ForProvider.DeletionPropagationPolicy = metav1.DeletePropagationForeground
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockDelete: func(_ context.Context, _ client.Object, opts ...client.DeleteOption) error {
+							do := &client.DeleteOptions{}
+							for _, o := range opts {
+								o.ApplyToDelete(do)
+							}
+							if do.PropagationPolicy == nil || *do.PropagationPolicy != metav1.DeletePropagationForeground {
+								t.Errorf("expected Foreground propagation policy, got %v", do.PropagationPolicy)
+							}
+							return nil
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"SuccessWithOrphanPropagation": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.ForProvider.DeletionPropagationPolicy = metav1.DeletePropagationOrphan
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockDelete: func(_ context.Context, _ client.Object, opts ...client.DeleteOption) error {
+							do := &client.DeleteOptions{}
+							for _, o := range opts {
+								o.ApplyToDelete(do)
+							}
+							if do.PropagationPolicy == nil || *do.PropagationPolicy != metav1.DeletePropagationOrphan {
+								t.Errorf("expected Orphan propagation policy, got %v", do.PropagationPolicy)
+							}
+							return nil
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"SuccessWithBackgroundPropagation": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.ForProvider.DeletionPropagationPolicy = metav1.DeletePropagationBackground
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockDelete: func(_ context.Context, _ client.Object, opts ...client.DeleteOption) error {
+							do := &client.DeleteOptions{}
+							for _, o := range opts {
+								o.ApplyToDelete(do)
+							}
+							if do.PropagationPolicy == nil || *do.PropagationPolicy != metav1.DeletePropagationBackground {
+								t.Errorf("expected Background propagation policy, got %v", do.PropagationPolicy)
+							}
+							return nil
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
