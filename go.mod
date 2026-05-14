@@ -1,6 +1,6 @@
 module github.com/crossplane-contrib/provider-kubernetes
 
-go 1.24.13
+go 1.26.3
 
 tool golang.org/x/tools/cmd/goimports
 
