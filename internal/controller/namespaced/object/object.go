@@ -47,7 +47,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/event"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
@@ -58,6 +57,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
+	xpv1 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/v1alpha1"
@@ -233,7 +233,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 		cb = cb.WatchesRawSource(&i)
 	}
-	reconcilerOptions = append(reconcilerOptions, managed.WithExternalConnecter(conn))
+	reconcilerOptions = append(reconcilerOptions, managed.WithExternalConnector(conn))
 
 	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
 		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
@@ -760,7 +760,7 @@ func (c *external) handleObservation(ctx context.Context, obj *v1alpha1.Object, 
 			obj.Status.SetConditions(xpv1.Available())
 		}
 
-		cd, err := connectionDetails(ctx, c.client, obj.Spec.ConnectionDetails)
+		cd, err := connectionDetails(ctx, c.client.Client, obj.Spec.ConnectionDetails)
 		if err != nil {
 			return managed.ExternalObservation{}, errors.Wrap(err, errGetConnectionDetails)
 		}

@@ -26,8 +26,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
 
-	v1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	v1 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha1"
 	"github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha2"
@@ -103,7 +103,7 @@ func TestConvertTo(t *testing.T) {
 						Name: "coolobject",
 					},
 					Spec: v1alpha2.ObjectSpec{
-						ResourceSpec: v1.ResourceSpec{
+						ClusterManagedResourceSpec: v1.ClusterManagedResourceSpec{
 							DeletionPolicy:     v1.DeletionDelete,
 							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionObserve},
 						},
@@ -170,7 +170,7 @@ func TestConvertTo(t *testing.T) {
 						Name: "coolobject",
 					},
 					Spec: v1alpha2.ObjectSpec{
-						ResourceSpec: v1.ResourceSpec{
+						ClusterManagedResourceSpec: v1.ClusterManagedResourceSpec{
 							DeletionPolicy:     v1.DeletionDelete,
 							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionAll},
 						},
@@ -225,7 +225,7 @@ func TestConvertTo(t *testing.T) {
 						Name: "coolobject",
 					},
 					Spec: v1alpha2.ObjectSpec{
-						ResourceSpec: v1.ResourceSpec{
+						ClusterManagedResourceSpec: v1.ClusterManagedResourceSpec{
 							DeletionPolicy:     v1.DeletionDelete,
 							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionObserve},
 						},
@@ -310,7 +310,7 @@ func TestConvertFrom(t *testing.T) {
 						Name: "coolobject",
 					},
 					Spec: v1alpha2.ObjectSpec{
-						ResourceSpec: v1.ResourceSpec{
+						ClusterManagedResourceSpec: v1.ClusterManagedResourceSpec{
 							DeletionPolicy:     v1.DeletionDelete,
 							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionObserve},
 						},
@@ -409,7 +409,7 @@ func TestConvertFrom(t *testing.T) {
 						Name: "coolobject",
 					},
 					Spec: v1alpha2.ObjectSpec{
-						ResourceSpec: v1.ResourceSpec{
+						ClusterManagedResourceSpec: v1.ClusterManagedResourceSpec{
 							DeletionPolicy:     v1.DeletionDelete,
 							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionObserve},
 						},
@@ -480,7 +480,7 @@ func TestConvertFrom(t *testing.T) {
 						Name: "coolobject",
 					},
 					Spec: v1alpha2.ObjectSpec{
-						ResourceSpec: v1.ResourceSpec{
+						ClusterManagedResourceSpec: v1.ClusterManagedResourceSpec{
 							DeletionPolicy: v1.DeletionDelete,
 						},
 						ForProvider: v1alpha2.ObjectParameters{
@@ -516,7 +516,7 @@ func TestConvertFrom(t *testing.T) {
 						Name: "coolobject",
 					},
 					Spec: v1alpha2.ObjectSpec{
-						ResourceSpec: v1.ResourceSpec{
+						ClusterManagedResourceSpec: v1.ClusterManagedResourceSpec{
 							DeletionPolicy:     v1.DeletionDelete,
 							ManagementPolicies: []v1.ManagementAction{v1.ManagementActionDelete},
 						},

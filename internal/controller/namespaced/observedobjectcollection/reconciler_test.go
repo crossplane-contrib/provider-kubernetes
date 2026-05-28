@@ -37,9 +37,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv1 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	objectv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
 	objcollectionv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/observedobjectcollection/v1alpha1"

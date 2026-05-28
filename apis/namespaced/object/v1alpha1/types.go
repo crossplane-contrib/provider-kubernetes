@@ -21,9 +21,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/fieldpath"
+	xpv1 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // ObjectAction defines actions applicable to Object
@@ -99,7 +98,7 @@ type ObjectObservation struct {
 
 // A ObjectSpec defines the desired state of a Object.
 type ObjectSpec struct {
-	xpv2.ManagedResourceSpec `json:",inline"`
+	xpv1.ManagedResourceSpec `json:",inline"`
 	ConnectionDetails        []ConnectionDetail `json:"connectionDetails,omitempty"`
 	ForProvider              ObjectParameters   `json:"forProvider"`
 	References               []Reference        `json:"references,omitempty"`
@@ -162,8 +161,8 @@ type ConnectionDetail struct {
 
 // A ObjectStatus represents the observed state of a Object.
 type ObjectStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
-	AtProvider          ObjectObservation `json:"atProvider,omitempty"`
+	xpv1.ManagedResourceStatus `json:",inline"`
+	AtProvider                 ObjectObservation `json:"atProvider,omitempty"`
 }
 
 // +kubebuilder:object:root=true
