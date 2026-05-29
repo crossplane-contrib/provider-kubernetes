@@ -171,7 +171,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 			return pollInterval + time.Duration((rand.Float64()-0.5)*2*float64(pollJitter)) //nolint G404 // No need for secure randomness
 		}),
 		managed.WithLogger(l),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
+		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))), //nolint:staticcheck // crossplane-runtime NewAPIRecorder still expects old record.EventRecorder
 		managed.WithMetricRecorder(o.MetricOptions.MRMetrics),
 		managed.WithDeterministicExternalName(true),
 	}

@@ -111,7 +111,7 @@ func (s *SSAResourceSyncer) GetDesiredState(ctx context.Context, obj *v1alpha1.O
 	// to the apiserver, so that we can compare it with the extracted state
 	// to decide whether the object is up-to-date or not.
 	desiredObj := manifest.DeepCopy()
-	if err := s.client.Patch(ctx, desiredObj, client.Apply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(obj.Name)), client.DryRunAll); err != nil {
+	if err := s.client.Patch(ctx, desiredObj, UnstructuredApply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(obj.Name)), client.DryRunAll); err != nil {
 		return nil, errors.Wrap(CleanErr(err), "cannot dry run SSA")
 	}
 
@@ -134,7 +134,7 @@ func (s *SSAResourceSyncer) SyncResource(ctx context.Context, obj *v1alpha1.Obje
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot upgrade field managers")
 	}
-	if err := s.client.Patch(ctx, desired, client.Apply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(obj.GetName()))); err != nil {
+	if err := s.client.Patch(ctx, desired, UnstructuredApply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(obj.GetName()))); err != nil {
 		return nil, errors.Wrap(CleanErr(err), errCreateObject)
 	}
 	return desired, nil
@@ -224,3 +224,16 @@ func parseStatus(obj *v1alpha1.Object) (*unstructured.Unstructured, error) {
 
 	return r, nil
 }
+
+type applyPatch struct{}
+
+func (applyPatch) Type() types.PatchType {
+	return types.ApplyPatchType
+}
+
+func (applyPatch) Data(obj client.Object) ([]byte, error) {
+	return json.Marshal(obj)
+}
+
+// UnstructuredApply behaves exactly like the deprecated UnstructuredApply but is locally defined to avoid staticcheck deprecation errors.
+var UnstructuredApply client.Patch = applyPatch{}

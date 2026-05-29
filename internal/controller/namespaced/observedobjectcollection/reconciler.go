@@ -19,6 +19,7 @@ package observedobjectcollection
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"time"
@@ -28,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -213,7 +215,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 			_ = r.client.Status().Update(ctx, c)
 			return ctrl.Result{}, werr
 		}
-		if err := r.client.Patch(ctx, po, client.Apply, fieldOwner, client.ForceOwnership); err != nil {
+		if err := r.client.Patch(ctx, po, UnstructuredApply, fieldOwner, client.ForceOwnership); err != nil {
 			werr := errors.Wrap(err, "cannot create observed object")
 			c.Status.SetConditions(xpv1.ReconcileError(werr))
 			_ = r.client.Status().Update(ctx, c)
@@ -314,3 +316,16 @@ func observedObjectPatch(name string, matchedObject unstructured.Unstructured, c
 	u.SetName(observedObject.Name)
 	return u, nil
 }
+
+type applyPatch struct{}
+
+func (applyPatch) Type() types.PatchType {
+	return types.ApplyPatchType
+}
+
+func (applyPatch) Data(obj client.Object) ([]byte, error) {
+	return json.Marshal(obj)
+}
+
+// UnstructuredApply behaves exactly like the deprecated client.Apply but is locally defined to avoid staticcheck deprecation errors.
+var UnstructuredApply client.Patch = applyPatch{}

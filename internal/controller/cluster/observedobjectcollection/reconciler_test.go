@@ -136,7 +136,7 @@ func TestReconciler(t *testing.T) {
 						return nil
 					},
 					MockPatch: func(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-						if patch != client.Apply {
+						if patch != UnstructuredApply {
 							return fmt.Errorf("Expected SSA patch, but got: %v", patch)
 						}
 						u := obj.(*unstructured.Unstructured)
@@ -240,7 +240,7 @@ func TestReconciler(t *testing.T) {
 						return nil
 					},
 					MockPatch: func(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-						if patch != client.Apply {
+						if patch != UnstructuredApply {
 							return fmt.Errorf("Expected SSA patch, but got: %v", patch)
 						}
 						u := obj.(*unstructured.Unstructured)

@@ -170,7 +170,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 			return pollInterval + time.Duration((rand.Float64()-0.5)*2*float64(pollJitter)) //nolint G404 // No need for secure randomness
 		}),
 		managed.WithLogger(l),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
+		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))), //nolint:staticcheck // crossplane-runtime NewAPIRecorder still expects old record.EventRecorder
 		managed.WithMetricRecorder(o.MetricOptions.MRMetrics),
 		managed.WithDeterministicExternalName(true),
 	}
@@ -286,7 +286,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.New(errNotKubernetesObject)
 	}
 
-	if err := c.usage.Track(ctx, mg.(resource.LegacyManaged)); err != nil {
+	if err := c.usage.Track(ctx, mg.(resource.LegacyManaged)); err != nil { //nolint:staticcheck // cluster-scoped managed resources must implement LegacyManaged
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
@@ -928,13 +928,13 @@ func unstructuredFromObjectRef(r v1.ObjectReference) unstructured.Unstructured {
 // A legacyTracker tracks legacy managed resources.
 type legacyTracker interface {
 	// Track the supplied legacy managed resource.
-	Track(ctx context.Context, mg resource.LegacyManaged) error
+	Track(ctx context.Context, mg resource.LegacyManaged) error //nolint:staticcheck // cluster-scoped managed resources must implement LegacyManaged
 }
 
 // A legacyTrackerFn is a function that tracks managed resources.
-type legacyTrackerFn func(ctx context.Context, mg resource.LegacyManaged) error
+type legacyTrackerFn func(ctx context.Context, mg resource.LegacyManaged) error //nolint:staticcheck // cluster-scoped managed resources must implement LegacyManaged
 
 // Track the supplied legacy managed resource.
-func (fn legacyTrackerFn) Track(ctx context.Context, mg resource.LegacyManaged) error {
+func (fn legacyTrackerFn) Track(ctx context.Context, mg resource.LegacyManaged) error { //nolint:staticcheck // cluster-scoped managed resources must implement LegacyManaged
 	return fn(ctx, mg)
 }

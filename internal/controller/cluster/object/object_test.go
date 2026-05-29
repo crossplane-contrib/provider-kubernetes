@@ -251,7 +251,7 @@ func TestConnect(t *testing.T) {
 		},
 		"FailedToTrackUsage": {
 			args: args{
-				usage: legacyTrackerFn(func(ctx context.Context, mg resource.LegacyManaged) error { return errBoom }),
+				usage: legacyTrackerFn(func(ctx context.Context, mg resource.LegacyManaged) error { return errBoom }), //nolint:staticcheck // cluster-scoped managed resources must implement LegacyManaged
 				mg:    kubernetesObject(),
 			},
 			want: want{
@@ -266,7 +266,7 @@ func TestConnect(t *testing.T) {
 						return nil
 					}),
 				},
-				usage: legacyTrackerFn(func(ctx context.Context, mg resource.LegacyManaged) error { return nil }),
+				usage: legacyTrackerFn(func(ctx context.Context, mg resource.LegacyManaged) error { return nil }), //nolint:staticcheck // cluster-scoped managed resources must implement LegacyManaged
 				mg:    kubernetesObject(),
 			},
 			want: want{
