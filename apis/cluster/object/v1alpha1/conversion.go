@@ -20,8 +20,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
+	xpv1 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha2"
 )
@@ -34,7 +34,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error {
 	dst.ObjectMeta = src.ObjectMeta
 
 	dst.Status = v1alpha2.ObjectStatus{
-		ResourceStatus: src.Status.ResourceStatus,
+		ManagedResourceStatus: src.Status.ManagedResourceStatus,
 		AtProvider: v1alpha2.ObjectObservation{
 			Manifest: src.Status.AtProvider.Manifest,
 		},
@@ -75,7 +75,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error {
 	}
 
 	dst.Spec = v1alpha2.ObjectSpec{
-		ResourceSpec: xpv1.ResourceSpec{
+		ClusterManagedResourceSpec: xpv1.ClusterManagedResourceSpec{
 			WriteConnectionSecretToReference: src.GetWriteConnectionSecretToReference(),
 			ProviderConfigReference:          src.GetProviderConfigReference(),
 			DeletionPolicy:                   src.GetDeletionPolicy(),
@@ -114,7 +114,7 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { //nolint:gocyclo /
 	// copy identical fields
 	dst.ObjectMeta = src.ObjectMeta
 	dst.Status = ObjectStatus{
-		ResourceStatus: src.Status.ResourceStatus,
+		ManagedResourceStatus: src.Status.ManagedResourceStatus,
 		AtProvider: ObjectObservation{
 			Manifest: src.Status.AtProvider.Manifest,
 		},

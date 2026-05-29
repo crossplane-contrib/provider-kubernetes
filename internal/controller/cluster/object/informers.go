@@ -127,7 +127,7 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 		log := i.log.WithValues("providerConfig", providerConfig, "gvk", gvk.String())
 
 		ca, err := cache.New(rc, cache.Options{
-			DefaultWatchErrorHandler: func(r *kcache.Reflector, err error) {
+			DefaultWatchErrorHandler: func(ctx context.Context, r *kcache.Reflector, err error) {
 				if errors.Is(io.EOF, err) {
 					// Watch closed normally.
 					return

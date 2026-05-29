@@ -70,9 +70,12 @@ func discoveryPaths(ctx context.Context, rc rest.Interface) (map[string]OpenAPIG
 		return nil, nil, err
 	}
 
+	rootPrefix := strings.TrimSuffix(rc.Get().AbsPath("/").URL().Path, "/")
+
 	oapiPathsToGV := map[string]OpenAPIGroupVersion{}
 	oapiPathsToETags := map[string]string{}
 	for path, oapiGV := range discoMap.Paths {
+		oapiGV.ServerRelativeURL = strings.TrimPrefix(oapiGV.ServerRelativeURL, rootPrefix)
 		parse, err := url.Parse(oapiGV.ServerRelativeURL)
 		if err != nil {
 			return nil, nil, err

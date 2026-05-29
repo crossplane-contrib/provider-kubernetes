@@ -32,8 +32,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	xperrors "github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
@@ -41,6 +39,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/ratelimiter"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+	xpv1 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	objectv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
 	observedobjectcollectionv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/observedobjectcollection/v1alpha1"
@@ -283,7 +282,7 @@ func observedObjectPatch(name string, matchedObject unstructured.Unstructured, c
 			},
 		},
 		Spec: objectv1alpha1.ObjectSpec{
-			ManagedResourceSpec: xpv2.ManagedResourceSpec{
+			ManagedResourceSpec: xpv1.ManagedResourceSpec{
 				ProviderConfigReference: &collection.Spec.ProviderConfigReference,
 				ManagementPolicies:      []xpv1.ManagementAction{xpv1.ManagementActionObserve},
 			},

@@ -58,7 +58,7 @@ func (p *PatchingResourceSyncer) SyncResource(ctx context.Context, obj *v1alpha2
 		v1.LastAppliedConfigAnnotation: string(obj.Spec.ForProvider.Manifest.Raw),
 	})
 
-	if err := p.client.Apply(ctx, desired); err != nil {
+	if err := p.client.Applicator.Apply(ctx, desired); err != nil {
 		return nil, errors.Wrap(CleanErr(err), errApplyObject)
 	}
 

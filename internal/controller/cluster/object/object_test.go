@@ -36,11 +36,11 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv1 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha2"
 	kubernetesv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/cluster/v1alpha1"
@@ -94,7 +94,7 @@ func kubernetesObject(om ...kubernetesObjectModifier) *v1alpha2.Object {
 			Namespace: testNamespace,
 		},
 		Spec: v1alpha2.ObjectSpec{
-			ResourceSpec: xpv1.ResourceSpec{
+			ClusterManagedResourceSpec: xpv1.ClusterManagedResourceSpec{
 				ProviderConfigReference: &xpv1.Reference{
 					Name: providerName,
 				},
@@ -649,7 +649,7 @@ func TestObserve(t *testing.T) {
 			e := &external{
 				logger:      logging.NewNopLogger(),
 				client:      tc.args.client,
-				localClient: tc.args.client,
+				localClient: tc.args.client.Client,
 				syncer:      tc.args.syncer,
 			}
 			got, gotErr := e.Observe(context.Background(), tc.args.mg)
@@ -1144,7 +1144,7 @@ func TestAddFinalizer(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := &objFinalizer{
-				client: tc.args.client,
+				client: tc.args.client.Client,
 			}
 			gotErr := f.AddFinalizer(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
@@ -1297,7 +1297,7 @@ func TestRemoveFinalizer(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := &objFinalizer{
-				client: tc.args.client,
+				client: tc.args.client.Client,
 			}
 
 			gotErr := f.RemoveFinalizer(context.Background(), tc.args.mg)

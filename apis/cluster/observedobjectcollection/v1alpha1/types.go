@@ -19,7 +19,7 @@ package v1alpha1
 import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	v12 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	v12 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // +kubebuilder:object:root=true
@@ -108,7 +108,7 @@ type ObservedObjectTemplateMetadata struct {
 
 // ObservedObjectCollectionStatus represents the observed state of a ObservedObjectCollection
 type ObservedObjectCollectionStatus struct {
-	v12.ResourceStatus `json:",inline"`
+	v12.ManagedResourceStatus `json:",inline"`
 
 	// MembershipLabel is the label set on each member of this collection
 	// and can be used for fetching them.
