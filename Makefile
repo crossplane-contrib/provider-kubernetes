@@ -36,7 +36,7 @@ GOLANGCILINT_VERSION = 2.11.4
 
 # ====================================================================================
 # Setup Kubernetes tools
-KIND_VERSION = v0.31.0
+KIND_VERSION = v0.32.0
 USE_HELM3 = true
 UPTEST_VERSION = v2.2.0
 CROSSPLANE_VERSION = 2.3.2
