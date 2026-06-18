@@ -173,6 +173,7 @@ spec:
                     - AzureWorkloadIdentityCredentials
                     - UpboundTokens
                     - AWSWebIdentityCredentials
+                    - NebiusServiceAccountCredentials
                     type: string
                 required:
                 - source

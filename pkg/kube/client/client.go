@@ -29,6 +29,7 @@ import (
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/aws"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/azure"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/gke"
+	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/nebius"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/token"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/upbound"
 	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
@@ -44,6 +45,8 @@ const (
 	errExtractUpboundCredentials = "failed to extract Upbound token"
 	errInjectUpboundCredentials  = "failed to wrap REST client with Upbound token"
 	errInjectAWSCredentials      = "failed to wrap REST client with AWS credentials"
+	errExtractNebiusCredentials  = "failed to extract Nebius service account credentials"
+	errInjectNebiusCredentials   = "failed to wrap REST client with Nebius service account credentials"
 )
 
 // A Builder creates Kubernetes clients and REST configs for a given provider
@@ -63,13 +66,18 @@ func (fn BuilderFn) KubeForProviderConfig(ctx context.Context, pc kconfig.Provid
 // IdentityAwareBuilder is a Builder that can inject identity credentials into
 // the REST config of a Kubernetes client.
 type IdentityAwareBuilder struct {
-	local client.Client
-	store *token.ReuseSourceStore
+	local       client.Client
+	store       *token.ReuseSourceStore
+	nebiusStore *nebius.SDKStore
 }
 
 // NewIdentityAwareBuilder returns a new IdentityAwareBuilder.
 func NewIdentityAwareBuilder(local client.Client) *IdentityAwareBuilder {
-	return &IdentityAwareBuilder{local: local, store: token.NewReuseSourceStore()}
+	return &IdentityAwareBuilder{
+		local:       local,
+		store:       token.NewReuseSourceStore(),
+		nebiusStore: nebius.NewSDKStore(),
+	}
 }
 
 // KubeForProviderConfig returns the kube client and *rest.config for the given
@@ -188,6 +196,20 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 			default:
 				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
 					id.Source, kconfig.IdentityTypeAWSWebIdentityCredentials)
+			}
+		case kconfig.IdentityTypeNebiusServiceAccountCredentials:
+			switch id.Source { //nolint:exhaustive
+			case xpv1.CredentialsSourceInjectedIdentity:
+				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
+					xpv1.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeNebiusServiceAccountCredentials)
+			default:
+				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
+				if err != nil {
+					return nil, errors.Wrap(err, errExtractNebiusCredentials)
+				}
+				if err := nebius.WrapRESTConfig(ctx, rc, creds, b.nebiusStore); err != nil {
+					return nil, errors.Wrap(err, errInjectNebiusCredentials)
+				}
 			}
 		default:
 			return nil, errors.Errorf("unknown identity type: %s", id.Type)
