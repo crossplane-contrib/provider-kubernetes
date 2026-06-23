@@ -31,10 +31,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	authv1 "k8s.io/api/authorization/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -53,7 +55,11 @@ import (
 
 	apiscluster "github.com/crossplane-contrib/provider-kubernetes/apis/cluster"
 	objectv1alpha1cluster "github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha1"
+	objectv1alpha2cluster "github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha2"
+	observedobjectcollectionv1alpha1cluster "github.com/crossplane-contrib/provider-kubernetes/apis/cluster/observedobjectcollection/v1alpha1"
 	apisnamespaced "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced"
+	objectv1alpha1namespaced "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
+	observedobjectcollectionv1alpha1namespaced "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/observedobjectcollection/v1alpha1"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/bootcheck"
 	pcontroller "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 	controllerCluster "github.com/crossplane-contrib/provider-kubernetes/internal/controller/cluster"
@@ -79,17 +85,18 @@ func init() {
 
 func main() {
 	var (
-		app                     = kingpin.New(filepath.Base(os.Args[0]), "Template support for Crossplane.").DefaultEnvars()
-		debug                   = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
-		syncInterval            = app.Flag("sync", "Controller manager sync period such as 300ms, 1.5h, or 2h45m").Short('s').Default("1h").Duration()
-		pollInterval            = app.Flag("poll", "Poll interval controls how often an individual resource should be checked for drift.").Default("10m").Duration()
-		pollStateMetricInterval = app.Flag("poll-state-metric", "State metric recording interval").Default("5s").Duration()
-		pollJitterPercentage    = app.Flag("poll-jitter-percentage", "Percentage of jitter to apply to poll interval. It cannot be negative, and must be less than 100.").Default("10").Uint()
-		leaderElection          = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
-		maxReconcileRate        = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("100").Int()
-		sanitizeSecrets         = app.Flag("sanitize-secrets", "when enabled, redacts Secret data from Object status").Default("false").Envar("SANITIZE_SECRETS").Bool()
-		healthProbeBindAddress  = app.Flag("health-probe-bind-addr", "The address the health/readiness probe server listens on").Default(":8081").Envar("HEALTH_PROBE_BIND_ADDRESS").String()
-		changelogsSocketPath    = app.Flag("changelogs-socket-path", "Path for changelogs socket (if enabled)").Default("/var/run/changelogs/changelogs.sock").Envar("CHANGELOGS_SOCKET_PATH").String()
+		app                      = kingpin.New(filepath.Base(os.Args[0]), "Template support for Crossplane.").DefaultEnvars()
+		debug                    = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
+		syncInterval             = app.Flag("sync", "Controller manager sync period such as 300ms, 1.5h, or 2h45m").Short('s').Default("1h").Duration()
+		pollInterval             = app.Flag("poll", "Poll interval controls how often an individual resource should be checked for drift.").Default("10m").Duration()
+		pollStateMetricInterval  = app.Flag("poll-state-metric", "State metric recording interval").Default("5s").Duration()
+		pollJitterPercentage     = app.Flag("poll-jitter-percentage", "Percentage of jitter to apply to poll interval. It cannot be negative, and must be less than 100.").Default("10").Uint()
+		leaderElection           = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
+		maxReconcileRate         = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("100").Int()
+		sanitizeSecrets          = app.Flag("sanitize-secrets", "when enabled, redacts Secret data from Object status").Default("false").Envar("SANITIZE_SECRETS").Bool()
+		healthProbeBindAddress   = app.Flag("health-probe-bind-addr", "The address the health/readiness probe server listens on").Default(":8081").Envar("HEALTH_PROBE_BIND_ADDRESS").String()
+		changelogsSocketPath     = app.Flag("changelogs-socket-path", "Path for changelogs socket (if enabled)").Default("/var/run/changelogs/changelogs.sock").Envar("CHANGELOGS_SOCKET_PATH").String()
+		objectCacheLabelSelector = app.Flag("object-cache-label-selector", "Optional label selector limiting Object and ObservedObjectCollection manager caches.").Default("").Envar("OBJECT_CACHE_LABEL_SELECTOR").String()
 
 		enableManagementPolicies = app.Flag("enable-management-policies", "Enable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
 		enableWatches            = app.Flag("enable-watches", "Enable support for watching resources.").Default("false").Envar("ENABLE_WATCHES").Bool()
@@ -114,6 +121,10 @@ func main() {
 	if *pollJitterPercentage >= 100 {
 		kingpin.Fatalf("invalid --poll-jitter-percentage %v must be less than 100", *pollJitterPercentage)
 	}
+
+	objectCacheSelector, err := parseObjectCacheLabelSelector(*objectCacheLabelSelector)
+	kingpin.FatalIfError(err, "Cannot parse object cache label selector")
+
 	pollJitter := time.Duration(float64(*pollInterval) * (float64(*pollJitterPercentage) / 100.0))
 	log.Debug("Starting",
 		"sync-interval", syncInterval.String(),
@@ -137,9 +148,7 @@ func main() {
 	}
 
 	mgr, err := ctrl.NewManager(ratelimiter.LimitRESTConfig(cfg, *maxReconcileRate), ctrl.Options{
-		Cache: cache.Options{
-			SyncPeriod: syncInterval,
-		},
+		Cache: newCacheOptions(syncInterval, objectCacheSelector),
 
 		// controller-runtime uses both ConfigMaps and Leases for leader
 		// election by default. Leases expire after 15 seconds, with a
@@ -247,6 +256,40 @@ func main() {
 		kingpin.FatalIfError(controllerNamespaced.Setup(mgr, o, po), "Cannot setup namespaced controller")
 	}
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")
+}
+
+func parseObjectCacheLabelSelector(selector string) (labels.Selector, error) {
+	if selector == "" {
+		return nil, nil
+	}
+	return labels.Parse(selector)
+}
+
+func newCacheOptions(syncInterval *time.Duration, objectCacheSelector labels.Selector) cache.Options {
+	opts := cache.Options{
+		SyncPeriod: syncInterval,
+	}
+	if objectCacheSelector == nil {
+		return opts
+	}
+	opts.ByObject = map[client.Object]cache.ByObject{
+		&objectv1alpha1cluster.Object{}: {
+			Label: objectCacheSelector,
+		},
+		&objectv1alpha2cluster.Object{}: {
+			Label: objectCacheSelector,
+		},
+		&objectv1alpha1namespaced.Object{}: {
+			Label: objectCacheSelector,
+		},
+		&observedobjectcollectionv1alpha1cluster.ObservedObjectCollection{}: {
+			Label: objectCacheSelector,
+		},
+		&observedobjectcollectionv1alpha1namespaced.ObservedObjectCollection{}: {
+			Label: objectCacheSelector,
+		},
+	}
+	return opts
 }
 
 // UseISO8601 sets the logger to use ISO8601 timestamp format
