@@ -417,12 +417,9 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObservedState)
 	}
 
-	var desiredState *unstructured.Unstructured
-	if desiredState, err = c.syncer.GetDesiredState(ctx, obj, manifest); err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errGetDesiredState)
-	}
-
-	return c.handleObservation(ctx, obj, observedState, desiredState)
+	// Pass the raw manifest to handleObservation; desired state will only be
+	// computed there when the management policy requires it.
+	return c.handleObservation(ctx, obj, observedState, manifest)
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
@@ -739,17 +736,36 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 	return nil
 }
 
-func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
+// handleObservation determines whether the managed resource is up-to-date.
+// For observe-only resources (management policies that do not include Create,
+// Update, or All), the desired state is never computed: those resources are
+// always considered up-to-date from a drift perspective. This avoids
+// unnecessary dry-run SSA requests for manifests that intentionally omit
+// fields such as spec (e.g. an Endpoints resource defined with only metadata).
+func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, observedState, manifest *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	isUpToDate := false //nolint:staticcheck
 
-	if !sets.New[xpv1.ManagementAction](obj.GetManagementPolicies()...).
-		HasAny(xpv1.ManagementActionUpdate, xpv1.ManagementActionCreate, xpv1.ManagementActionAll) {
-		// Treated as up-to-date as we don't update or create the resource
+	isObserveOnly := !sets.New[xpv1.ManagementAction](obj.GetManagementPolicies()...).
+		HasAny(xpv1.ManagementActionUpdate, xpv1.ManagementActionCreate, xpv1.ManagementActionAll)
+
+	if isObserveOnly {
+		// Observe-only: no create/update will ever be issued, so there is no
+		// meaningful notion of drift. Treat the resource as up-to-date and skip
+		// the desired-state computation entirely (which for SSA involves a
+		// dry-run apply that can fail for intentionally sparse manifests).
 		isUpToDate = true
-	}
-	if last != nil && equality.Semantic.DeepEqual(last, desired) {
-		// Mark as up-to-date since last is equal to desired
-		isUpToDate = true
+	} else {
+		// Only compute desired state when we actually manage the resource.
+		// For SSA this performs a dry-run apply; skipping it for observe-only
+		// resources avoids failures on manifests that omit spec fields.
+		desiredState, err := c.syncer.GetDesiredState(ctx, obj, manifest)
+		if err != nil {
+			return managed.ExternalObservation{}, errors.Wrap(err, errGetDesiredState)
+		}
+		if observedState != nil && equality.Semantic.DeepEqual(observedState, desiredState) {
+			// Mark as up-to-date since observed matches desired
+			isUpToDate = true
+		}
 	}
 
 	if isUpToDate {

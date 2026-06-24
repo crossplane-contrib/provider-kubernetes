@@ -629,12 +629,12 @@ func TestObserve(t *testing.T) {
 						}),
 					},
 				},
+				// GetDesiredStateFn is intentionally absent: for observe-only resources
+				// desired state must never be computed (e.g. SSA dry-run would fail for
+				// manifests that deliberately omit spec fields such as Endpoints).
 				syncer: &fake.ResourceSyncer{
 					GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 						return current, nil
-					},
-					GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-						return manifest, nil
 					},
 				},
 			},

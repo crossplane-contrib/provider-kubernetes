@@ -65,6 +65,30 @@ current_provider_args=$(${KUBECTL} get pods -A -l pkg.crossplane.io/provider=pro
 echo " ⛭ current provider args: $current_provider_args"
 echo " ☑️ Enabled server-side apply in provider..."
 
+# Wait for the provider to reconcile the object after SSA is enabled.
+# The provider needs time to observe the object, upgrade field managers, and
+# apply the desired state which removes the unwanted label and last-applied annotation.
+SSA_RECONCILE_TIMEOUT=60
+SSA_RECONCILE_START=$(date +%s)
+echo " ⏳ Waiting up to ${SSA_RECONCILE_TIMEOUT}s for SSA migration to complete..."
+while true; do
+  NOW=$(date +%s)
+  ELAPSED=$((NOW - SSA_RECONCILE_START))
+  if (( ELAPSED >= SSA_RECONCILE_TIMEOUT )); then
+    _pending_unwanted=$(${KUBECTL} -n default get service foo-service -o jsonpath='{.metadata.labels.unwanted}' 2>/dev/null || echo "")
+    _pending_ann=$(${KUBECTL} -n default get service foo-service -o jsonpath="{.metadata.annotations['kubectl.kubernetes.io/last-applied-configuration']}" 2>/dev/null || echo "")
+    echo " ❌ Timeout after ${SSA_RECONCILE_TIMEOUT}s. Still pending — unwanted label: '${_pending_unwanted}', annotation present: $( [ -n "$_pending_ann" ] && echo yes || echo no )"
+    break
+  fi
+  _unwanted=$(${KUBECTL} -n default get service foo-service -o jsonpath='{.metadata.labels.unwanted}' 2>/dev/null || echo "")
+  _annotation=$(${KUBECTL} -n default get service foo-service -o jsonpath="{.metadata.annotations['kubectl.kubernetes.io/last-applied-configuration']}" 2>/dev/null || echo "")
+  if [ -z "$_unwanted" ] && [ -z "$_annotation" ]; then
+    echo " ✅ SSA migration completed: unwanted label and annotation removed."
+    break
+  fi
+  sleep 2
+done
+
 # We have enabled the server-side apply
 # Validate last applied annotation is removed from the target object, as part of the SSA migration
 last_applied_annotation=$(${KUBECTL} -n default get service foo-service -o jsonpath="{.metadata.annotations['kubectl.kubernetes.io/last-applied-configuration']}")
