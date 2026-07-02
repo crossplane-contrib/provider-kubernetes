@@ -18,7 +18,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/nebius/gosdk v0.2.28
 	github.com/pkg/errors v0.9.1
-	github.com/spf13/pflag v1.0.6
+	github.com/spf13/pflag v1.0.10
 	github.com/upbound/up-sdk-go v1.13.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/oauth2 v0.34.0
