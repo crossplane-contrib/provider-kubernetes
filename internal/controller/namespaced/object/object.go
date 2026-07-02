@@ -27,7 +27,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	celtypes "github.com/google/cel-go/common/types"
-	"github.com/pkg/errors"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"

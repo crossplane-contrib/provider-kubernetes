@@ -23,7 +23,6 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/pkg/errors"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -128,19 +127,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 
 	if meta.IsPaused(c) {
 		c.Status.SetConditions(xpv1.ReconcilePaused())
-		return ctrl.Result{}, errors.Wrap(r.client.Status().Update(ctx, c), errStatusUpdate)
+		return ctrl.Result{}, xperrors.Wrap(r.client.Status().Update(ctx, c), errStatusUpdate)
 	}
 
 	log.Info("Reconciling")
 
 	pc := &apisv1alpha1.ProviderConfig{}
 	if err = r.client.Get(ctx, client.ObjectKey{Name: c.Spec.ProviderConfigReference.Name}, pc); err != nil {
-		return ctrl.Result{}, errors.Wrap(err, errGetProviderConfig)
+		return ctrl.Result{}, xperrors.Wrap(err, errGetProviderConfig)
 	}
 	// Get client for the referenced provider config.
 	clusterClient, _, err := r.clientBuilder.KubeForProviderConfig(ctx, pc.Spec)
 	if err != nil {
-		werr := errors.Wrap(err, errBuildKubeForProviderConfig)
+		werr := xperrors.Wrap(err, errBuildKubeForProviderConfig)
 		c.Status.SetConditions(xpv1.ReconcileError(werr))
 		_ = r.client.Status().Update(ctx, c)
 		return ctrl.Result{}, werr
@@ -153,7 +152,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	selector, err := metav1.LabelSelectorAsSelector(&c.Spec.ObserveObjects.Selector)
 
 	if err != nil {
-		werr := errors.Wrap(err, "error creating selector")
+		werr := xperrors.Wrap(err, "error creating selector")
 		c.Status.SetConditions(xpv1.ReconcileError(werr))
 		_ = r.client.Status().Update(ctx, c)
 		return ctrl.Result{}, werr
@@ -161,7 +160,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 
 	lo := client.ListOptions{LabelSelector: selector, Namespace: c.Spec.ObserveObjects.Namespace}
 	if err := clusterClient.List(ctx, k8sobjects, &lo); err != nil {
-		werr := errors.Wrapf(err, "error fetching objects for GVK %v and options %v", k8sobjects.GetObjectKind().GroupVersionKind(), lo)
+		werr := xperrors.Wrapf(err, "error fetching objects for GVK %v and options %v", k8sobjects.GetObjectKind().GroupVersionKind(), lo)
 		c.Status.SetConditions(xpv1.ReconcileError(werr))
 		_ = r.client.Status().Update(ctx, c)
 		return ctrl.Result{}, werr
@@ -171,7 +170,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	ml := map[string]string{membershipLabelKey: c.Name}
 	ol := &v1alpha2.ObjectList{}
 	if err := r.client.List(ctx, ol, client.MatchingLabels(ml)); err != nil {
-		werr := errors.Wrapf(err, "cannot list members matching labels %v", ml)
+		werr := xperrors.Wrapf(err, "cannot list members matching labels %v", ml)
 		c.Status.SetConditions(xpv1.ReconcileError(werr))
 		_ = r.client.Status().Update(ctx, c)
 		return ctrl.Result{}, werr
@@ -184,7 +183,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 		log.Debug("creating observed object for the matched item", "gvk", o.GroupVersionKind(), "name", o.GetName())
 		name, err := r.observedObjectName(c, &o)
 		if err != nil {
-			werr := errors.Wrapf(err, "error generating name for observed object, matched object: %v", o)
+			werr := xperrors.Wrapf(err, "error generating name for observed object, matched object: %v", o)
 			c.Status.SetConditions(xpv1.ReconcileError(werr))
 			_ = r.client.Status().Update(ctx, c)
 			return ctrl.Result{}, werr
@@ -193,13 +192,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 		// Create patch
 		po, err := observedObjectPatch(name, o, c)
 		if err != nil {
-			werr := errors.Wrapf(err, "error generating patch for matched object %v", o)
+			werr := xperrors.Wrapf(err, "error generating patch for matched object %v", o)
 			c.Status.SetConditions(xpv1.ReconcileError(werr))
 			_ = r.client.Status().Update(ctx, c)
 			return ctrl.Result{}, werr
 		}
 		if err := r.client.Patch(ctx, po, client.Apply, fieldOwner, client.ForceOwnership); err != nil {
-			werr := errors.Wrap(err, "cannot create observed object")
+			werr := xperrors.Wrap(err, "cannot create observed object")
 			c.Status.SetConditions(xpv1.ReconcileError(werr))
 			_ = r.client.Status().Update(ctx, c)
 			return ctrl.Result{}, werr
@@ -217,7 +216,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 		}
 		log.Debug("Removing", "name", o.Name)
 		if err := r.client.Delete(ctx, &ol.Items[i]); err != nil {
-			werr := errors.Wrapf(err, "cannot delete observed object %v", o)
+			werr := xperrors.Wrapf(err, "cannot delete observed object %v", o)
 			c.Status.SetConditions(xpv1.ReconcileError(werr))
 			_ = r.client.Status().Update(ctx, c)
 			return ctrl.Result{}, werr
@@ -291,7 +290,7 @@ func observedObjectPatch(name string, matchedObject unstructured.Unstructured, c
 	observedObject.SetLabels(labels)
 	v, err := runtime.DefaultUnstructuredConverter.ToUnstructured(observedObject)
 	if err != nil {
-		return nil, errors.Wrap(err, "cannot convert to unstructured")
+		return nil, xperrors.Wrap(err, "cannot convert to unstructured")
 	}
 	u := &unstructured.Unstructured{Object: v}
 	u.SetGroupVersionKind(v1alpha2.ObjectGroupVersionKind)

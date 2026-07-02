@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/Azure/kubelogin/pkg/token"
-	"github.com/pkg/errors"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 )
 
 // tokenTransport is an http.RoundTripper that injects a token to requests,
