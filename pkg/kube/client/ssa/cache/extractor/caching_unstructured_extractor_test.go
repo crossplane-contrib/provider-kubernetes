@@ -108,6 +108,21 @@ type mockAPIServer struct {
 	server        *httptest.Server
 	discoveryData handler3.OpenAPIV3Discovery
 	rootPrefix    string
+
+	mu             sync.Mutex
+	requestedPaths []string
+}
+
+func (mas *mockAPIServer) recordRequestPath(path string) {
+	mas.mu.Lock()
+	defer mas.mu.Unlock()
+	mas.requestedPaths = append(mas.requestedPaths, path)
+}
+
+func (mas *mockAPIServer) requestPaths() []string {
+	mas.mu.Lock()
+	defer mas.mu.Unlock()
+	return append([]string(nil), mas.requestedPaths...)
 }
 
 var discoveryDataInitial = map[string]string{
@@ -140,6 +155,7 @@ func newMockAPIServerWithRootPrefix(rootPrefix string) (*mockAPIServer, error) {
 	as.setDiscoveryData(discoveryDataInitial)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		as.recordRequestPath(r.URL.Path)
 		path := strings.TrimPrefix(r.URL.Path, rootPrefix)
 		switch {
 		case strings.HasPrefix(path, "/openapi/v3/api"):
@@ -321,7 +337,8 @@ func TestDiscovery(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			paths, etags, err := discoveryPaths(context.TODO(), dc.RESTClient())
+			ctx := t.Context()
+			paths, etags, err := discoveryPaths(ctx, dc.RESTClient())
 			if diff := cmp.Diff(tt.want.err, err, test.EquateErrors()); diff != "" {
 				t.Fatalf("discovery error (-want +got):\n%s", diff)
 			}
@@ -335,28 +352,79 @@ func TestDiscovery(t *testing.T) {
 					t.Fatalf("wanted path %s not found in discovery", wp)
 				}
 
-				// discoveryPaths must strip any root path prefix from the
-				// ServerRelativeURL so that the value hits the "/openapi/v3"
-				// prefix check and the client uses AbsPath (which prepends
-				// the client's own base path) rather than issuing the raw
-				// server-relative URL directly.
-				concrete, ok := oapiGV.(*customOAPIGroupVersion)
-				if !ok {
-					t.Fatalf("expected *customOAPIGroupVersion, got %T", oapiGV)
-				}
-				if !strings.HasPrefix(concrete.item.ServerRelativeURL, "/openapi/v3") {
-					t.Fatalf("ServerRelativeURL for %s should start with /openapi/v3 after prefix stripping, got %q", wp, concrete.item.ServerRelativeURL)
-				}
-				if !concrete.useClientPrefix {
-					t.Fatalf("useClientPrefix should be true for %s after prefix stripping, got false", wp)
-				}
-
-				// End-to-end sanity: with the prefix correctly handled, the
-				// schema fetch and parser build should succeed against the
-				// mock server for both the default and prefixed cases.
-				if _, err := newParserFromOpenAPIGroupVersion(context.TODO(), oapiGV); err != nil {
+				// Round-trip the schema fetch through the returned
+				// OpenAPIGroupVersion. This exercises the whole flow -
+				// discovery, URL normalization and schema retrieval -
+				// against the mock server for both the default and
+				// prefixed cases.
+				if _, err := newParserFromOpenAPIGroupVersion(ctx, oapiGV); err != nil {
 					t.Fatalf("unexpected error building parser for %s (rootPrefix=%q): %v", wp, tt.rootPrefix, err)
 				}
+			}
+
+			// Every request that hit the mock server (discovery + each
+			// per-GV schema fetch) must arrive with the configured
+			// rootPrefix intact, i.e. the client rebuilt the full URL
+			// correctly from the normalized ServerRelativeURL and never
+			// dropped or double-stamped the prefix.
+			wantPathPrefix := tt.rootPrefix + "/openapi/v3"
+			for _, got := range mockK8sAPIServer.requestPaths() {
+				if !strings.HasPrefix(got, wantPathPrefix) {
+					t.Fatalf("request %q did not start with expected prefix %q (rootPrefix=%q)", got, wantPathPrefix, tt.rootPrefix)
+				}
+			}
+		})
+	}
+}
+
+func TestStripAPIRootPrefix(t *testing.T) {
+	tests := []struct {
+		name                string
+		input               handler3.OpenAPIV3DiscoveryGroupVersion
+		rootPrefix          string
+		wantURL             string
+		wantUseClientPrefix bool
+	}{
+		{
+			name:                "NoPrefix",
+			input:               handler3.OpenAPIV3DiscoveryGroupVersion{ServerRelativeURL: "/openapi/v3/apis/apps/v1?hash=111"},
+			rootPrefix:          "",
+			wantURL:             "/openapi/v3/apis/apps/v1?hash=111",
+			wantUseClientPrefix: true,
+		},
+		{
+			// Regression coverage: an API server exposed behind a URL
+			// path prefix returns ServerRelativeURL values that include
+			// the prefix. stripAPIRootPrefix must remove that prefix so
+			// the "/openapi/v3" check matches and the client uses AbsPath
+			// (which prepends its own base path) rather than issuing the
+			// raw, already-prefixed URL directly.
+			name:                "WithPrefix",
+			input:               handler3.OpenAPIV3DiscoveryGroupVersion{ServerRelativeURL: "/k8s/openapi/v3/apis/apps/v1?hash=111"},
+			rootPrefix:          "/k8s",
+			wantURL:             "/openapi/v3/apis/apps/v1?hash=111",
+			wantUseClientPrefix: true,
+		},
+		{
+			// Safety: an entry that legitimately does not start with
+			// /openapi/v3 (either because the server returned an
+			// absolute-looking URL or because our rootPrefix guess was
+			// wrong) must not be flagged for AbsPath-style URL rebuilding.
+			name:                "NoOpenAPIv3Prefix",
+			input:               handler3.OpenAPIV3DiscoveryGroupVersion{ServerRelativeURL: "/some/other/path"},
+			rootPrefix:          "",
+			wantURL:             "/some/other/path",
+			wantUseClientPrefix: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotGV, gotUseClientPrefix := stripAPIRootPrefix(tt.input, tt.rootPrefix)
+			if gotGV.ServerRelativeURL != tt.wantURL {
+				t.Errorf("ServerRelativeURL = %q, want %q", gotGV.ServerRelativeURL, tt.wantURL)
+			}
+			if gotUseClientPrefix != tt.wantUseClientPrefix {
+				t.Errorf("useClientPrefix = %v, want %v", gotUseClientPrefix, tt.wantUseClientPrefix)
 			}
 		})
 	}
