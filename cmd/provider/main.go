@@ -138,7 +138,8 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ratelimiter.LimitRESTConfig(cfg, *maxReconcileRate), ctrl.Options{
 		Cache: cache.Options{
-			SyncPeriod: syncInterval,
+			SyncPeriod:       syncInterval,
+			DefaultTransform: cache.TransformStripManagedFields(),
 		},
 
 		// controller-runtime uses both ConfigMaps and Leases for leader

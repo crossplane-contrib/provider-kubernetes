@@ -22,7 +22,7 @@ import (
 	"strings"
 	"sync"
 
-	kunstructured "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	kcache "k8s.io/client-go/tools/cache"
@@ -127,6 +127,7 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 		log := i.log.WithValues("providerConfig", providerConfig, "gvk", gvk.String())
 
 		ca, err := cache.New(rc, cache.Options{
+			DefaultTransform: cache.TransformStripManagedFields(),
 			DefaultWatchErrorHandler: func(r *kcache.Reflector, err error) {
 				if errors.Is(io.EOF, err) {
 					// Watch closed normally.
@@ -144,9 +145,9 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 		// happy case it's called from the go routine starting the cache below.
 		ctx, cancelFn := context.WithCancel(context.Background())
 
-		u := kunstructured.Unstructured{}
+		u := &metav1.PartialObjectMetadata{}
 		u.SetGroupVersionKind(gvk)
-		inf, err := ca.GetInformer(ctx, &u, cache.BlockUntilSynced(false)) // don't block. We wait in the go routine below.
+		inf, err := ca.GetInformer(ctx, u, cache.BlockUntilSynced(false)) // don't block. We wait in the go routine below.
 		if err != nil {
 			cancelFn()
 			log.Debug("failed getting informer", "error", err)
