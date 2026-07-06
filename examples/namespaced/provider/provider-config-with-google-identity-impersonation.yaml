@@ -1,0 +1,27 @@
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: kubernetes-provider
+  namespace: crossplane-system
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: cluster-config
+      key: kubeconfig
+  identity:
+    type: GoogleApplicationCredentials
+    # The base credentials (here the provider's injected Workload Identity) are
+    # used to impersonate the target service account. The impersonated token is
+    # what ultimately authenticates to the Kubernetes API.
+    source: InjectedIdentity
+    impersonateServiceAccount:
+      # Email address of the Google service account to impersonate.
+      name: target-sa@my-project.iam.gserviceaccount.com
+      # Optional delegation chain. Each service account must have
+      # roles/iam.serviceAccountTokenCreator on the next one, ending with the
+      # last delegate having it on 'name'. The base identity must have that
+      # role on the first delegate. Omit this to impersonate 'name' directly.
+      delegates:
+      - intermediate-sa@my-project.iam.gserviceaccount.com

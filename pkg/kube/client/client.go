@@ -127,13 +127,16 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 	if id := pc.Identity; id != nil {
 		switch id.Type {
 		case kconfig.IdentityTypeGoogleApplicationCredentials:
-			impersonateSA := ""
+			var impersonation *gke.Impersonation
 			if id.ImpersonateServiceAccount != nil {
-				impersonateSA = id.ImpersonateServiceAccount.Name
+				impersonation = &gke.Impersonation{
+					TargetPrincipal: id.ImpersonateServiceAccount.Name,
+					Delegates:       id.ImpersonateServiceAccount.Delegates,
+				}
 			}
 			switch id.Source { //nolint:exhaustive
 			case xpv2.CredentialsSourceInjectedIdentity:
-				if err := gke.WrapRESTConfig(ctx, rc, nil, impersonateSA, gke.DefaultScopes...); err != nil {
+				if err := gke.WrapRESTConfig(ctx, rc, nil, impersonation, gke.DefaultScopes...); err != nil {
 					return nil, errors.Wrap(err, errInjectGoogleCredentials)
 				}
 			default:
@@ -142,7 +145,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 					return nil, errors.Wrap(err, errExtractGoogleCredentials)
 				}
 
-				if err := gke.WrapRESTConfig(ctx, rc, creds, impersonateSA, gke.DefaultScopes...); err != nil {
+				if err := gke.WrapRESTConfig(ctx, rc, creds, impersonation, gke.DefaultScopes...); err != nil {
 					return nil, errors.Wrap(err, errInjectGoogleCredentials)
 				}
 			}
