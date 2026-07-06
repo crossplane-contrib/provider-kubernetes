@@ -66,6 +66,14 @@ type Identity struct {
 type ImpersonateServiceAccountConfig struct {
 	// Name of the service account to impersonate.
 	Name string `json:"name"`
+
+	// Delegates is an optional chain of service accounts used to reach the
+	// impersonated service account. Each service account must be granted
+	// roles/iam.serviceAccountTokenCreator on the next one in the chain, with
+	// the last delegate having it on the service account referenced by Name.
+	// The base identity must have that role on the first delegate.
+	// +optional
+	Delegates []string `json:"delegates,omitempty"`
 }
 
 // A ProviderConfigSpec defines the desired state of a ProviderConfig.

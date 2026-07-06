@@ -294,15 +294,21 @@ func (b *IdentityAwareBuilder) resolve(ctx context.Context, pc kconfig.ProviderC
 func (b *IdentityAwareBuilder) identityInjector(ctx context.Context, id *kconfig.Identity, ac *api.Config, digest hash.Hash) (func(ctx context.Context, rc *rest.Config) error, error) { //nolint:gocyclo // one case per identity type and source
 	switch id.Type {
 	case kconfig.IdentityTypeGoogleApplicationCredentials:
-		impersonateSA := ""
-		if id.ImpersonateServiceAccount != nil {
-			impersonateSA = id.ImpersonateServiceAccount.Name
+		var impersonation *gke.Impersonation
+		if isa := id.ImpersonateServiceAccount; isa != nil {
+			impersonation = &gke.Impersonation{
+				TargetPrincipal: isa.Name,
+				Delegates:       isa.Delegates,
+			}
+			digestWrite(digest, []byte(isa.Name))
+			for _, d := range isa.Delegates {
+				digestWrite(digest, []byte(d))
+			}
 		}
-		digestWrite(digest, []byte(impersonateSA))
 		switch id.Source { //nolint:exhaustive
 		case xpv2.CredentialsSourceInjectedIdentity:
 			return func(ctx context.Context, rc *rest.Config) error {
-				return errors.Wrap(gke.WrapRESTConfig(ctx, rc, nil, impersonateSA, gke.DefaultScopes...), errInjectGoogleCredentials)
+				return errors.Wrap(gke.WrapRESTConfig(ctx, rc, nil, impersonation, gke.DefaultScopes...), errInjectGoogleCredentials)
 			}, nil
 		default:
 			creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
@@ -311,7 +317,7 @@ func (b *IdentityAwareBuilder) identityInjector(ctx context.Context, id *kconfig
 			}
 			digestWrite(digest, creds)
 			return func(ctx context.Context, rc *rest.Config) error {
-				return errors.Wrap(gke.WrapRESTConfig(ctx, rc, creds, impersonateSA, gke.DefaultScopes...), errInjectGoogleCredentials)
+				return errors.Wrap(gke.WrapRESTConfig(ctx, rc, creds, impersonation, gke.DefaultScopes...), errInjectGoogleCredentials)
 			}, nil
 		}
 	case kconfig.IdentityTypeAzureServicePrincipalCredentials, kconfig.IdentityTypeAzureWorkloadIdentityCredentials:
