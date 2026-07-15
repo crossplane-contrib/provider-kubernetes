@@ -1,6 +1,6 @@
 package v1alpha1
 
-import xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+import xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 // Note(turkenh): Provider Kubernetes Object already has a ManagementPolicy
 // field and implements the logic in its own controller.
@@ -22,19 +22,19 @@ type ResourceSpec struct {
 	// and connection details would be published to both without affecting
 	// each other.
 	// +optional
-	WriteConnectionSecretToReference *xpv1.SecretReference `json:"writeConnectionSecretToRef,omitempty"`
+	WriteConnectionSecretToReference *xpv2.SecretReference `json:"writeConnectionSecretToRef,omitempty"`
 
 	// ProviderConfigReference specifies how the provider that will be used to
 	// create, observe, update, and delete this managed resource should be
 	// configured.
 	// +kubebuilder:default={"name": "default"}
-	ProviderConfigReference *xpv1.Reference `json:"providerConfigRef,omitempty"`
+	ProviderConfigReference *xpv2.Reference `json:"providerConfigRef,omitempty"`
 
 	// ProviderReference specifies the provider that will be used to create,
 	// observe, update, and delete this managed resource.
 	//
 	// Deprecated: Please use ProviderConfigReference, i.e. `providerConfigRef`
-	ProviderReference *xpv1.Reference `json:"providerRef,omitempty"`
+	ProviderReference *xpv2.Reference `json:"providerRef,omitempty"`
 
 	// THIS IS AN ALPHA FIELD. Do not use it in production. It is not honored
 	// unless the relevant Crossplane feature flag is enabled, and may be
@@ -47,7 +47,7 @@ type ResourceSpec struct {
 	// See the design doc for more information: https://github.com/crossplane/crossplane/blob/499895a25d1a1a0ba1604944ef98ac7a1a71f197/design/design-doc-observe-only-resources.md?plain=1#L223
 	// +optional
 	// +kubebuilder:default=FullControl
-	// ManagementPolicy xpv1.ManagementPolicy `json:"managementPolicy,omitempty"`
+	// ManagementPolicy xpv2.ManagementPolicy `json:"managementPolicy,omitempty"`
 
 	// DeletionPolicy specifies what will happen to the underlying external
 	// when this managed resource is deleted - either "Delete" or "Orphan" the
@@ -58,17 +58,17 @@ type ResourceSpec struct {
 	// See the design doc for more information: https://github.com/crossplane/crossplane/blob/499895a25d1a1a0ba1604944ef98ac7a1a71f197/design/design-doc-observe-only-resources.md?plain=1#L223
 	// +optional
 	// +kubebuilder:default=Delete
-	DeletionPolicy xpv1.DeletionPolicy `json:"deletionPolicy,omitempty"`
+	DeletionPolicy xpv2.DeletionPolicy `json:"deletionPolicy,omitempty"`
 }
 
 // GetManagementPolicies of this Object.
-func (mg *Object) GetManagementPolicies() xpv1.ManagementPolicies {
+func (mg *Object) GetManagementPolicies() xpv2.ManagementPolicies {
 	// Note(turkenh): Crossplane runtime reconciler should leave handling of
 	// ManagementPolicies to the provider controller. This is a temporary hack
 	// until we remove the ManagementPolicy field from the Provider Kubernetes
 	// Object in favor of the one in the ResourceSpec.
-	return []xpv1.ManagementAction{xpv1.ManagementActionAll}
+	return []xpv2.ManagementAction{xpv2.ManagementActionAll}
 }
 
 // SetManagementPolicies of this Object.
-func (mg *Object) SetManagementPolicies(r xpv1.ManagementPolicies) {}
+func (mg *Object) SetManagementPolicies(r xpv2.ManagementPolicies) {}

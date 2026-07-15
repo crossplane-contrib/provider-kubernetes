@@ -23,8 +23,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/aws"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/azure"
@@ -103,7 +103,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 	)
 
 	switch cd := pc.Credentials; cd.Source { //nolint:exhaustive
-	case xpv1.CredentialsSourceInjectedIdentity:
+	case xpv2.CredentialsSourceInjectedIdentity:
 		rc, err = rest.InClusterConfig()
 		if err != nil {
 			return nil, errors.Wrap(err, errCreateRestConfig)
@@ -128,7 +128,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 		switch id.Type {
 		case kconfig.IdentityTypeGoogleApplicationCredentials:
 			switch id.Source { //nolint:exhaustive
-			case xpv1.CredentialsSourceInjectedIdentity:
+			case xpv2.CredentialsSourceInjectedIdentity:
 				if err := gke.WrapRESTConfig(ctx, rc, nil, gke.DefaultScopes...); err != nil {
 					return nil, errors.Wrap(err, errInjectGoogleCredentials)
 				}
@@ -144,9 +144,9 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 			}
 		case kconfig.IdentityTypeAzureServicePrincipalCredentials, kconfig.IdentityTypeAzureWorkloadIdentityCredentials:
 			switch id.Source { //nolint:exhaustive
-			case xpv1.CredentialsSourceInjectedIdentity:
+			case xpv2.CredentialsSourceInjectedIdentity:
 				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
-					xpv1.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeAzureServicePrincipalCredentials)
+					xpv2.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeAzureServicePrincipalCredentials)
 			default:
 				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
 				if err != nil {
@@ -159,9 +159,9 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 			}
 		case kconfig.IdentityTypeUpboundTokens:
 			switch id.Source { //nolint:exhaustive
-			case xpv1.CredentialsSourceInjectedIdentity:
+			case xpv2.CredentialsSourceInjectedIdentity:
 				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
-					xpv1.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeUpboundTokens)
+					xpv2.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeUpboundTokens)
 			default:
 				staticToken, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
 				if err != nil {
@@ -177,7 +177,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 			}
 		case kconfig.IdentityTypeAWSWebIdentityCredentials:
 			switch id.Source { //nolint:exhaustive
-			case xpv1.CredentialsSourceInjectedIdentity:
+			case xpv2.CredentialsSourceInjectedIdentity:
 				// Extract the cluster name from the provided kubeconfig.
 				// We need the actual cluster name (or ARN) for the presigned URL,
 				// not the random endpoint ID from the server URL.
@@ -199,9 +199,9 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 			}
 		case kconfig.IdentityTypeNebiusServiceAccountCredentials:
 			switch id.Source { //nolint:exhaustive
-			case xpv1.CredentialsSourceInjectedIdentity:
+			case xpv2.CredentialsSourceInjectedIdentity:
 				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
-					xpv1.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeNebiusServiceAccountCredentials)
+					xpv2.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeNebiusServiceAccountCredentials)
 			default:
 				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
 				if err != nil {

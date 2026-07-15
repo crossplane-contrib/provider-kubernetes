@@ -47,7 +47,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/event"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
@@ -58,6 +57,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha2"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/cluster/v1alpha1"
@@ -160,7 +160,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		managed.WithFinalizer(&objFinalizer{client: mgr.GetClient()}),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithPollIntervalHook(func(mg resource.Managed, pollInterval time.Duration) time.Duration {
-			if mg.GetCondition(xpv1.TypeReady).Status != v1.ConditionTrue {
+			if mg.GetCondition(xpv2.TypeReady).Status != v1.ConditionTrue {
 				// If the resource is not ready, we should poll more frequently not to delay time to readiness.
 				pollInterval = 30 * time.Second
 			}
@@ -170,7 +170,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 			return pollInterval + time.Duration((rand.Float64()-0.5)*2*float64(pollJitter)) //nolint G404 // No need for secure randomness
 		}),
 		managed.WithLogger(l),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
+		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))), //nolint:staticcheck // SA1019: keeping the legacy events API until crossplane-runtime's event package moves to GetEventRecorder
 		managed.WithMetricRecorder(o.MetricOptions.MRMetrics),
 		managed.WithDeterministicExternalName(true),
 	}
@@ -232,7 +232,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 		cb = cb.WatchesRawSource(&i)
 	}
-	reconcilerOptions = append(reconcilerOptions, managed.WithExternalConnecter(conn))
+	reconcilerOptions = append(reconcilerOptions, managed.WithExternalConnector(conn))
 
 	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
 		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
@@ -286,7 +286,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.New(errNotKubernetesObject)
 	}
 
-	if err := c.usage.Track(ctx, mg.(resource.LegacyManaged)); err != nil {
+	if err := c.usage.Track(ctx, mg.(resource.LegacyManaged)); err != nil { //nolint:staticcheck // SA1019: v1alpha1 Object is a legacy cluster-scoped MR; usage tracking still requires the LegacyManaged shape
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
@@ -558,16 +558,16 @@ func (c *external) updateConditionFromObserved(obj *v1alpha2.Object, observed *u
 	}
 
 	if err != nil {
-		obj.SetConditions(xpv1.Unavailable().WithMessage(err.Error()))
+		obj.SetConditions(xpv2.Unavailable().WithMessage(err.Error()))
 		return nil
 	}
 
 	if !ready {
-		obj.SetConditions(xpv1.Unavailable())
+		obj.SetConditions(xpv2.Unavailable())
 		return nil
 	}
 
-	obj.SetConditions(xpv1.Available())
+	obj.SetConditions(xpv2.Available())
 	return nil
 }
 
@@ -592,12 +592,12 @@ func getReferenceInfo(ref v1alpha2.Reference) (string, string, string, string) {
 }
 
 func (c *external) checkDeriveFromObject(observed *unstructured.Unstructured) bool {
-	conditioned := xpv1.ConditionedStatus{}
+	conditioned := xpv2.ConditionedStatus{}
 	if err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned); err != nil {
 		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
 		return false
 	}
-	if status := conditioned.GetCondition(xpv1.TypeReady).Status; status != v1.ConditionTrue {
+	if status := conditioned.GetCondition(xpv2.TypeReady).Status; status != v1.ConditionTrue {
 		c.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", observed)
 		return false
 	}
@@ -605,7 +605,7 @@ func (c *external) checkDeriveFromObject(observed *unstructured.Unstructured) bo
 }
 
 func (c *external) checkAllConditions(observed *unstructured.Unstructured) (allTrue bool) {
-	conditioned := xpv1.ConditionedStatus{}
+	conditioned := xpv2.ConditionedStatus{}
 	err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
 	if err != nil {
 		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
@@ -742,8 +742,8 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	isUpToDate := false //nolint:staticcheck
 
-	if !sets.New[xpv1.ManagementAction](obj.GetManagementPolicies()...).
-		HasAny(xpv1.ManagementActionUpdate, xpv1.ManagementActionCreate, xpv1.ManagementActionAll) {
+	if !sets.New[xpv2.ManagementAction](obj.GetManagementPolicies()...).
+		HasAny(xpv2.ManagementActionUpdate, xpv2.ManagementActionCreate, xpv2.ManagementActionAll) {
 		// Treated as up-to-date as we don't update or create the resource
 		isUpToDate = true
 	}
@@ -756,10 +756,10 @@ func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, 
 		c.logger.Debug("Up to date!")
 
 		if p := obj.Spec.Readiness.Policy; p == v1alpha2.ReadinessPolicySuccessfulCreate || p == "" {
-			obj.Status.SetConditions(xpv1.Available())
+			obj.Status.SetConditions(xpv2.Available())
 		}
 
-		cd, err := connectionDetails(ctx, c.client, obj.Spec.ConnectionDetails)
+		cd, err := connectionDetails(ctx, c.client.Client, obj.Spec.ConnectionDetails)
 		if err != nil {
 			return managed.ExternalObservation{}, errors.Wrap(err, errGetConnectionDetails)
 		}
@@ -925,16 +925,24 @@ func unstructuredFromObjectRef(r v1.ObjectReference) unstructured.Unstructured {
 }
 
 // TODO: these should better go into crossplane-runtime
-// A legacyTracker tracks legacy managed resources.
+// A legacyTracker tracks legacy managed resources. This entire abstraction
+// exists specifically to work with the LegacyManaged type; the deprecation is
+// intentional here.
+//
+//nolint:staticcheck // SA1019: the v1alpha1 Object is a cluster-scoped legacy managed resource; deprecation is intentional
 type legacyTracker interface {
 	// Track the supplied legacy managed resource.
 	Track(ctx context.Context, mg resource.LegacyManaged) error
 }
 
 // A legacyTrackerFn is a function that tracks managed resources.
+//
+//nolint:staticcheck // SA1019: matches legacyTracker; intentional for v1alpha1 Object
 type legacyTrackerFn func(ctx context.Context, mg resource.LegacyManaged) error
 
 // Track the supplied legacy managed resource.
+//
+//nolint:staticcheck // SA1019: implements legacyTracker; intentional for v1alpha1 Object
 func (fn legacyTrackerFn) Track(ctx context.Context, mg resource.LegacyManaged) error {
 	return fn(ctx, mg)
 }

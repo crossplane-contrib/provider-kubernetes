@@ -21,9 +21,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/fieldpath"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // ObjectAction defines actions applicable to Object
@@ -162,8 +161,8 @@ type ConnectionDetail struct {
 
 // A ObjectStatus represents the observed state of a Object.
 type ObjectStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
-	AtProvider          ObjectObservation `json:"atProvider,omitempty"`
+	xpv2.ManagedResourceStatus `json:",inline"`
+	AtProvider                 ObjectObservation `json:"atProvider,omitempty"`
 }
 
 // +kubebuilder:object:root=true

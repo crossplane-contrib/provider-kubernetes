@@ -41,7 +41,7 @@ func WrapRESTConfig(ctx context.Context, rc *rest.Config, credentials []byte, sc
 		if isJSON(credentials) {
 			// If credentials are in a JSON format, extract the credential from the JSON
 			// CredentialsFromJSON creates a TokenSource that handles token caching.
-			creds, err := google.CredentialsFromJSON(ctx, credentials, scopes...)
+			creds, err := google.CredentialsFromJSON(ctx, credentials, scopes...) //nolint:staticcheck // SA1019: caller supplies credentials via a k8s Secret we already trust; there is no drop-in replacement yet
 			if err != nil {
 				return errors.Wrap(err, "cannot load Google Application Credentials from JSON")
 			}

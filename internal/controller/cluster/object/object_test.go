@@ -36,11 +36,11 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha2"
 	kubernetesv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/cluster/v1alpha1"
@@ -94,11 +94,11 @@ func kubernetesObject(om ...kubernetesObjectModifier) *v1alpha2.Object {
 			Namespace: testNamespace,
 		},
 		Spec: v1alpha2.ObjectSpec{
-			ResourceSpec: xpv1.ResourceSpec{
-				ProviderConfigReference: &xpv1.Reference{
+			ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+				ProviderConfigReference: &xpv2.Reference{
 					Name: providerName,
 				},
-				ManagementPolicies: xpv1.ManagementPolicies{xpv1.ManagementActionAll},
+				ManagementPolicies: xpv2.ManagementPolicies{xpv2.ManagementActionAll},
 			},
 			ForProvider: v1alpha2.ObjectParameters{
 				Manifest: runtime.RawExtension{Raw: externalResourceRaw},
@@ -205,25 +205,25 @@ func TestConnect(t *testing.T) {
 	}
 
 	providerConfigGoogleInjectedIdentity := *providerConfig.DeepCopy()
-	providerConfigGoogleInjectedIdentity.Spec.Identity.Source = xpv1.CredentialsSourceInjectedIdentity
+	providerConfigGoogleInjectedIdentity.Spec.Identity.Source = xpv2.CredentialsSourceInjectedIdentity
 
 	providerConfigAzure := &kubernetesv1alpha1.ProviderConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: providerName},
 		Spec: kconfig.ProviderConfigSpec{
 			Credentials: kconfig.ProviderCredentials{
-				Source: xpv1.CredentialsSourceNone,
+				Source: xpv2.CredentialsSourceNone,
 			},
 			Identity: &kconfig.Identity{
 				Type: kconfig.IdentityTypeAzureServicePrincipalCredentials,
 				ProviderCredentials: kconfig.ProviderCredentials{
-					Source: xpv1.CredentialsSourceNone,
+					Source: xpv2.CredentialsSourceNone,
 				},
 			},
 		},
 	}
 
 	providerConfigAzureInjectedIdentity := *providerConfigAzure.DeepCopy()
-	providerConfigAzureInjectedIdentity.Spec.Identity.Source = xpv1.CredentialsSourceInjectedIdentity
+	providerConfigAzureInjectedIdentity.Spec.Identity.Source = xpv2.CredentialsSourceInjectedIdentity
 
 	providerConfigUnknownIdentitySource := *providerConfigAzure.DeepCopy()
 	providerConfigUnknownIdentitySource.Spec.Identity.Type = "foo"
@@ -251,7 +251,7 @@ func TestConnect(t *testing.T) {
 		},
 		"FailedToTrackUsage": {
 			args: args{
-				usage: legacyTrackerFn(func(ctx context.Context, mg resource.LegacyManaged) error { return errBoom }),
+				usage: legacyTrackerFn(func(ctx context.Context, mg resource.LegacyManaged) error { return errBoom }), //nolint:staticcheck // SA1019: v1alpha1 Object is a legacy cluster-scoped MR; deprecation is intentional
 				mg:    kubernetesObject(),
 			},
 			want: want{
@@ -266,7 +266,7 @@ func TestConnect(t *testing.T) {
 						return nil
 					}),
 				},
-				usage: legacyTrackerFn(func(ctx context.Context, mg resource.LegacyManaged) error { return nil }),
+				usage: legacyTrackerFn(func(ctx context.Context, mg resource.LegacyManaged) error { return nil }), //nolint:staticcheck // SA1019: v1alpha1 Object is a legacy cluster-scoped MR; deprecation is intentional
 				mg:    kubernetesObject(),
 			},
 			want: want{
@@ -619,7 +619,7 @@ func TestObserve(t *testing.T) {
 		"Observe Only - up to date by default": {
 			args: args{
 				mg: kubernetesObject(func(obj *v1alpha2.Object) {
-					obj.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionObserve}
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
 				}),
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
@@ -649,7 +649,7 @@ func TestObserve(t *testing.T) {
 			e := &external{
 				logger:      logging.NewNopLogger(),
 				client:      tc.args.client,
-				localClient: tc.args.client,
+				localClient: tc.args.client.Client,
 				syncer:      tc.args.syncer,
 			}
 			got, gotErr := e.Observe(context.Background(), tc.args.mg)
@@ -1144,7 +1144,7 @@ func TestAddFinalizer(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := &objFinalizer{
-				client: tc.args.client,
+				client: tc.args.client.Client,
 			}
 			gotErr := f.AddFinalizer(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
@@ -1297,7 +1297,7 @@ func TestRemoveFinalizer(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := &objFinalizer{
-				client: tc.args.client,
+				client: tc.args.client.Client,
 			}
 
 			gotErr := f.RemoveFinalizer(context.Background(), tc.args.mg)
@@ -1434,7 +1434,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 	}
 	type want struct {
 		err        error
-		conditions []xpv1.Condition
+		conditions []xpv2.Condition
 	}
 	cases := map[string]struct {
 		args
@@ -1445,7 +1445,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				obj: &v1alpha2.Object{},
 				observed: &unstructured.Unstructured{
 					Object: map[string]interface{}{
-						"status": xpv1.ConditionedStatus{},
+						"status": xpv2.ConditionedStatus{},
 					},
 				},
 			},
@@ -1465,7 +1465,7 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 				observed: &unstructured.Unstructured{
 					Object: map[string]interface{}{
-						"status": xpv1.ConditionedStatus{},
+						"status": xpv2.ConditionedStatus{},
 					},
 				},
 			},
@@ -1485,10 +1485,10 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 				observed: &unstructured.Unstructured{
 					Object: map[string]interface{}{
-						"status": xpv1.ConditionedStatus{
-							Conditions: []xpv1.Condition{
+						"status": xpv2.ConditionedStatus{
+							Conditions: []xpv2.Condition{
 								{
-									Type:   xpv1.TypeReady,
+									Type:   xpv2.TypeReady,
 									Status: corev1.ConditionFalse,
 								},
 							},
@@ -1498,11 +1498,11 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 			},
 			want: want{
 				err: nil,
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:   xpv1.TypeReady,
+						Type:   xpv2.TypeReady,
 						Status: corev1.ConditionFalse,
-						Reason: xpv1.ReasonUnavailable,
+						Reason: xpv2.ReasonUnavailable,
 					},
 				},
 			},
@@ -1518,17 +1518,17 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 				observed: &unstructured.Unstructured{
 					Object: map[string]interface{}{
-						"status": xpv1.ConditionedStatus{},
+						"status": xpv2.ConditionedStatus{},
 					},
 				},
 			},
 			want: want{
 				err: nil,
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:   xpv1.TypeReady,
+						Type:   xpv2.TypeReady,
 						Status: corev1.ConditionFalse,
-						Reason: xpv1.ReasonUnavailable,
+						Reason: xpv2.ReasonUnavailable,
 					},
 				},
 			},
@@ -1544,10 +1544,10 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 				observed: &unstructured.Unstructured{
 					Object: map[string]interface{}{
-						"status": xpv1.ConditionedStatus{
-							Conditions: []xpv1.Condition{
+						"status": xpv2.ConditionedStatus{
+							Conditions: []xpv2.Condition{
 								{
-									Type:   xpv1.TypeReady,
+									Type:   xpv2.TypeReady,
 									Status: corev1.ConditionTrue,
 								},
 							},
@@ -1557,11 +1557,11 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 			},
 			want: want{
 				err: nil,
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:   xpv1.TypeReady,
+						Type:   xpv2.TypeReady,
 						Status: corev1.ConditionTrue,
-						Reason: xpv1.ReasonAvailable,
+						Reason: xpv2.ReasonAvailable,
 					},
 				},
 			},
@@ -1583,11 +1583,11 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 			},
 			want: want{
 				err: nil,
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:   xpv1.TypeReady,
+						Type:   xpv2.TypeReady,
 						Status: corev1.ConditionFalse,
-						Reason: xpv1.ReasonUnavailable,
+						Reason: xpv2.ReasonUnavailable,
 					},
 				},
 			},
@@ -1603,16 +1603,16 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 				observed: &unstructured.Unstructured{
 					Object: map[string]interface{}{
-						"status": xpv1.ConditionedStatus{},
+						"status": xpv2.ConditionedStatus{},
 					},
 				},
 			},
 			want: want{
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:   xpv1.TypeReady,
+						Type:   xpv2.TypeReady,
 						Status: corev1.ConditionFalse,
-						Reason: xpv1.ReasonUnavailable,
+						Reason: xpv2.ReasonUnavailable,
 					},
 				},
 			},
@@ -1633,11 +1633,11 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 			},
 			want: want{
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:   xpv1.TypeReady,
+						Type:   xpv2.TypeReady,
 						Status: corev1.ConditionFalse,
-						Reason: xpv1.ReasonUnavailable,
+						Reason: xpv2.ReasonUnavailable,
 					},
 				},
 			},
@@ -1653,14 +1653,14 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 				observed: &unstructured.Unstructured{
 					Object: map[string]interface{}{
-						"status": xpv1.ConditionedStatus{
-							Conditions: []xpv1.Condition{
+						"status": xpv2.ConditionedStatus{
+							Conditions: []xpv2.Condition{
 								{
 									Type:   "condition1",
 									Status: corev1.ConditionFalse,
 								},
 								{
-									Type:   xpv1.TypeReady,
+									Type:   xpv2.TypeReady,
 									Status: corev1.ConditionTrue,
 								},
 							},
@@ -1669,11 +1669,11 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 			},
 			want: want{
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:   xpv1.TypeReady,
+						Type:   xpv2.TypeReady,
 						Status: corev1.ConditionFalse,
-						Reason: xpv1.ReasonUnavailable,
+						Reason: xpv2.ReasonUnavailable,
 					},
 				},
 			},
@@ -1689,14 +1689,14 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 				observed: &unstructured.Unstructured{
 					Object: map[string]interface{}{
-						"status": xpv1.ConditionedStatus{
-							Conditions: []xpv1.Condition{
+						"status": xpv2.ConditionedStatus{
+							Conditions: []xpv2.Condition{
 								{
 									Type:   "condition1",
 									Status: corev1.ConditionTrue,
 								},
 								{
-									Type:   xpv1.TypeReady,
+									Type:   xpv2.TypeReady,
 									Status: corev1.ConditionTrue,
 								},
 							},
@@ -1705,11 +1705,11 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 			},
 			want: want{
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:   xpv1.TypeReady,
+						Type:   xpv2.TypeReady,
 						Status: corev1.ConditionTrue,
-						Reason: xpv1.ReasonAvailable,
+						Reason: xpv2.ReasonAvailable,
 					},
 				},
 			},
@@ -1726,14 +1726,14 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 				observed: &unstructured.Unstructured{
 					Object: map[string]interface{}{
-						"status": xpv1.ConditionedStatus{
-							Conditions: []xpv1.Condition{
+						"status": xpv2.ConditionedStatus{
+							Conditions: []xpv2.Condition{
 								{
 									Type:   "condition1",
 									Status: corev1.ConditionTrue,
 								},
 								{
-									Type:   xpv1.TypeReady,
+									Type:   xpv2.TypeReady,
 									Status: corev1.ConditionTrue,
 								},
 							},
@@ -1742,11 +1742,11 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 			},
 			want: want{
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:   xpv1.TypeReady,
+						Type:   xpv2.TypeReady,
 						Status: corev1.ConditionTrue,
-						Reason: xpv1.ReasonAvailable,
+						Reason: xpv2.ReasonAvailable,
 					},
 				},
 			},
@@ -1763,14 +1763,14 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 				observed: &unstructured.Unstructured{
 					Object: map[string]interface{}{
-						"status": xpv1.ConditionedStatus{
-							Conditions: []xpv1.Condition{
+						"status": xpv2.ConditionedStatus{
+							Conditions: []xpv2.Condition{
 								{
 									Type:   "condition1",
 									Status: corev1.ConditionTrue,
 								},
 								{
-									Type:   xpv1.TypeReady,
+									Type:   xpv2.TypeReady,
 									Status: corev1.ConditionFalse,
 								},
 							},
@@ -1779,11 +1779,11 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 			},
 			want: want{
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:   xpv1.TypeReady,
+						Type:   xpv2.TypeReady,
 						Status: corev1.ConditionFalse,
-						Reason: xpv1.ReasonUnavailable,
+						Reason: xpv2.ReasonUnavailable,
 					},
 				},
 			},
@@ -1807,11 +1807,11 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 			},
 			want: want{
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:   xpv1.TypeReady,
+						Type:   xpv2.TypeReady,
 						Status: corev1.ConditionTrue,
-						Reason: xpv1.ReasonAvailable,
+						Reason: xpv2.ReasonAvailable,
 					},
 				},
 			},
@@ -1833,11 +1833,11 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 			},
 			want: want{
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:    xpv1.TypeReady,
+						Type:    xpv2.TypeReady,
 						Status:  corev1.ConditionFalse,
-						Reason:  xpv1.ReasonUnavailable,
+						Reason:  xpv2.ReasonUnavailable,
 						Message: fmt.Sprintf("%s: %s", errCelQueryFailedToEvalProgram, "no such key: isReady"),
 					},
 				},
@@ -1855,14 +1855,14 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 				observed: &unstructured.Unstructured{
 					Object: map[string]interface{}{
-						"status": xpv1.ConditionedStatus{
-							Conditions: []xpv1.Condition{
+						"status": xpv2.ConditionedStatus{
+							Conditions: []xpv2.Condition{
 								{
 									Type:   "condition1",
 									Status: corev1.ConditionTrue,
 								},
 								{
-									Type:   xpv1.TypeReady,
+									Type:   xpv2.TypeReady,
 									Status: corev1.ConditionFalse,
 								},
 							},
@@ -1871,10 +1871,10 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 			},
 			want: want{
-				conditions: []xpv1.Condition{
+				conditions: []xpv2.Condition{
 					{
-						Type:   xpv1.TypeReady,
-						Reason: xpv1.ReasonAvailable,
+						Type:   xpv2.TypeReady,
+						Reason: xpv2.ReasonAvailable,
 						Status: corev1.ConditionTrue,
 					},
 				},
@@ -1890,9 +1890,9 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
 				t.Fatalf("updateConditionFromObserved(...): -want error, +got error: %s", diff)
 			}
-			if diff := cmp.Diff(tc.want.conditions, tc.args.obj.Status.Conditions, cmpopts.SortSlices(func(a, b xpv1.Condition) bool {
+			if diff := cmp.Diff(tc.want.conditions, tc.args.obj.Status.Conditions, cmpopts.SortSlices(func(a, b xpv2.Condition) bool {
 				return a.Type < b.Type
-			}), cmpopts.IgnoreFields(xpv1.Condition{}, "LastTransitionTime")); diff != "" {
+			}), cmpopts.IgnoreFields(xpv2.Condition{}, "LastTransitionTime")); diff != "" {
 				t.Errorf("updateConditionFromObserved(...): -want result, +got result: %s", diff)
 			}
 		})

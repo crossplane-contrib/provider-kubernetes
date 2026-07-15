@@ -17,10 +17,10 @@ limitations under the License.
 
 package v1alpha1
 
-import xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+import xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 // GetCondition of this ProviderConfig.
-func (p *ProviderConfig) GetCondition(ct xpv1.ConditionType) xpv1.Condition {
+func (p *ProviderConfig) GetCondition(ct xpv2.ConditionType) xpv2.Condition {
 	return p.Status.GetCondition(ct)
 }
 
@@ -30,7 +30,7 @@ func (p *ProviderConfig) GetUsers() int64 {
 }
 
 // SetConditions of this ProviderConfig.
-func (p *ProviderConfig) SetConditions(c ...xpv1.Condition) {
+func (p *ProviderConfig) SetConditions(c ...xpv2.Condition) {
 	p.Status.SetConditions(c...)
 }
 
