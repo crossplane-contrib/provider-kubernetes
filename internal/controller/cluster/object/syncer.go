@@ -58,7 +58,7 @@ func (p *PatchingResourceSyncer) SyncResource(ctx context.Context, obj *v1alpha2
 		v1.LastAppliedConfigAnnotation: string(obj.Spec.ForProvider.Manifest.Raw),
 	})
 
-	if err := p.client.Apply(ctx, desired); err != nil {
+	if err := p.client.Applicator.Apply(ctx, desired); err != nil {
 		return nil, errors.Wrap(CleanErr(err), errApplyObject)
 	}
 
@@ -111,7 +111,7 @@ func (s *SSAResourceSyncer) GetDesiredState(ctx context.Context, obj *v1alpha2.O
 	// to the apiserver, so that we can compare it with the extracted state
 	// to decide whether the object is up-to-date or not.
 	desiredObj := manifest.DeepCopy()
-	if err := s.client.Patch(ctx, desiredObj, client.Apply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(obj.Name)), client.DryRunAll); err != nil {
+	if err := s.client.Patch(ctx, desiredObj, client.Apply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(obj.Name)), client.DryRunAll); err != nil { //nolint:staticcheck // SA1019: keeping client.Apply until controller-runtime's Client.Apply is available on all supported paths
 		return nil, errors.Wrap(CleanErr(err), "cannot dry run SSA")
 	}
 
@@ -134,7 +134,7 @@ func (s *SSAResourceSyncer) SyncResource(ctx context.Context, obj *v1alpha2.Obje
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot upgrade field managers")
 	}
-	if err := s.client.Patch(ctx, desired, client.Apply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(obj.GetName()))); err != nil {
+	if err := s.client.Patch(ctx, desired, client.Apply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(obj.GetName()))); err != nil { //nolint:staticcheck // SA1019: keeping client.Apply until controller-runtime's Client.Apply is available on all supported paths
 		return nil, errors.Wrap(CleanErr(err), errCreateObject)
 	}
 	return desired, nil

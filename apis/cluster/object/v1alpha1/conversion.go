@@ -20,8 +20,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha2"
 )
@@ -34,7 +34,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error {
 	dst.ObjectMeta = src.ObjectMeta
 
 	dst.Status = v1alpha2.ObjectStatus{
-		ResourceStatus: src.Status.ResourceStatus,
+		ManagedResourceStatus: src.Status.ManagedResourceStatus,
 		AtProvider: v1alpha2.ObjectObservation{
 			Manifest: src.Status.AtProvider.Manifest,
 		},
@@ -75,7 +75,7 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error {
 	}
 
 	dst.Spec = v1alpha2.ObjectSpec{
-		ResourceSpec: xpv1.ResourceSpec{
+		ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
 			WriteConnectionSecretToReference: src.GetWriteConnectionSecretToReference(),
 			ProviderConfigReference:          src.GetProviderConfigReference(),
 			DeletionPolicy:                   src.GetDeletionPolicy(),
@@ -93,13 +93,13 @@ func (src *Object) ConvertTo(dstRaw conversion.Hub) error {
 	// handle management policies migration
 	switch src.Spec.ManagementPolicy {
 	case Default, "":
-		dst.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionAll}
+		dst.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionAll}
 	case ObserveCreateUpdate:
-		dst.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionObserve, xpv1.ManagementActionCreate, xpv1.ManagementActionUpdate}
+		dst.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve, xpv2.ManagementActionCreate, xpv2.ManagementActionUpdate}
 	case ObserveDelete:
-		dst.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionObserve, xpv1.ManagementActionDelete}
+		dst.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve, xpv2.ManagementActionDelete}
 	case Observe:
-		dst.Spec.ManagementPolicies = xpv1.ManagementPolicies{xpv1.ManagementActionObserve}
+		dst.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
 	default:
 		return errors.Errorf("unknown management policy: %v", src.Spec.ManagementPolicy)
 	}
@@ -114,7 +114,7 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { //nolint:gocyclo /
 	// copy identical fields
 	dst.ObjectMeta = src.ObjectMeta
 	dst.Status = ObjectStatus{
-		ResourceStatus: src.Status.ResourceStatus,
+		ManagedResourceStatus: src.Status.ManagedResourceStatus,
 		AtProvider: ObjectObservation{
 			Manifest: src.Status.AtProvider.Manifest,
 		},
@@ -179,21 +179,21 @@ func (dst *Object) ConvertFrom(srcRaw conversion.Hub) error { //nolint:gocyclo /
 	}
 
 	// handle management policies migration
-	policySet := sets.New[xpv1.ManagementAction](src.GetManagementPolicies()...)
+	policySet := sets.New[xpv2.ManagementAction](src.GetManagementPolicies()...)
 
 	switch {
-	case policySet.Has(xpv1.ManagementActionAll):
+	case policySet.Has(xpv2.ManagementActionAll):
 		dst.Spec.ManagementPolicy = Default
-	case policySet.HasAll(xpv1.ManagementActionObserve, xpv1.ManagementActionCreate, xpv1.ManagementActionUpdate, xpv1.ManagementActionDelete):
+	case policySet.HasAll(xpv2.ManagementActionObserve, xpv2.ManagementActionCreate, xpv2.ManagementActionUpdate, xpv2.ManagementActionDelete):
 		dst.Spec.ManagementPolicy = Default
-	case policySet.HasAll(xpv1.ManagementActionObserve, xpv1.ManagementActionCreate, xpv1.ManagementActionUpdate) &&
-		!policySet.Has(xpv1.ManagementActionDelete):
+	case policySet.HasAll(xpv2.ManagementActionObserve, xpv2.ManagementActionCreate, xpv2.ManagementActionUpdate) &&
+		!policySet.Has(xpv2.ManagementActionDelete):
 		dst.Spec.ManagementPolicy = ObserveCreateUpdate
-	case policySet.HasAll(xpv1.ManagementActionObserve, xpv1.ManagementActionDelete) &&
-		!policySet.HasAny(xpv1.ManagementActionCreate, xpv1.ManagementActionUpdate):
+	case policySet.HasAll(xpv2.ManagementActionObserve, xpv2.ManagementActionDelete) &&
+		!policySet.HasAny(xpv2.ManagementActionCreate, xpv2.ManagementActionUpdate):
 		dst.Spec.ManagementPolicy = ObserveDelete
-	case policySet.Has(xpv1.ManagementActionObserve) &&
-		!policySet.HasAny(xpv1.ManagementActionCreate, xpv1.ManagementActionUpdate, xpv1.ManagementActionDelete):
+	case policySet.Has(xpv2.ManagementActionObserve) &&
+		!policySet.HasAny(xpv2.ManagementActionCreate, xpv2.ManagementActionUpdate, xpv2.ManagementActionDelete):
 		dst.Spec.ManagementPolicy = Observe
 	default:
 		// NOTE(lsviben): Other combinations of v1alpha2 management policies

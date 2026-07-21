@@ -19,7 +19,7 @@ package v1alpha1
 import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpcommon "github.com/crossplane/crossplane-runtime/v2/apis/common"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // +kubebuilder:object:root=true
@@ -61,7 +61,7 @@ type ObservedObjectCollectionSpec struct {
 	// create, observe, update, and delete this managed resource should be
 	// configured.
 	// +kubebuilder:default={"name": "default", "kind": "ClusterProviderConfig"}
-	ProviderConfigReference xpcommon.ProviderConfigReference `json:"providerConfigRef,omitempty"`
+	ProviderConfigReference xpv2.ProviderConfigReference `json:"providerConfigRef,omitempty"`
 
 	// Template when defined is used for creating Object instances
 	// +optional
@@ -108,7 +108,7 @@ type ObservedObjectTemplateMetadata struct {
 
 // ObservedObjectCollectionStatus represents the observed state of a ObservedObjectCollection
 type ObservedObjectCollectionStatus struct {
-	xpcommon.ResourceStatus `json:",inline"`
+	xpv2.ManagedResourceStatus `json:",inline"`
 
 	// MembershipLabel is the label set on each member of this collection
 	// and can be used for fetching them.

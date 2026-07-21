@@ -37,9 +37,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha2"
 	"github.com/crossplane-contrib/provider-kubernetes/apis/cluster/observedobjectcollection/v1alpha1"
@@ -136,7 +136,7 @@ func TestReconciler(t *testing.T) {
 						return nil
 					},
 					MockPatch: func(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-						if patch != client.Apply {
+						if patch != client.Apply { //nolint:staticcheck // SA1019: match the production Patch call site's use of client.Apply
 							return fmt.Errorf("Expected SSA patch, but got: %v", patch)
 						}
 						u := obj.(*unstructured.Unstructured)
@@ -170,10 +170,10 @@ func TestReconciler(t *testing.T) {
 					},
 					MockStatusUpdate: func(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 						c := obj.(*v1alpha1.ObservedObjectCollection)
-						if cnd := c.Status.GetCondition(xpv1.TypeSynced); cnd.Status != corev1.ConditionTrue {
+						if cnd := c.Status.GetCondition(xpv2.TypeSynced); cnd.Status != corev1.ConditionTrue {
 							panic(fmt.Sprintf("Object sync condition not true: %v", cnd.Message))
 						}
-						if cnd := c.Status.GetCondition(xpv1.TypeReady); cnd.Status != corev1.ConditionTrue {
+						if cnd := c.Status.GetCondition(xpv2.TypeReady); cnd.Status != corev1.ConditionTrue {
 							panic(fmt.Sprintf("Object ready condition not true: %v", cnd.Message))
 						}
 						if v := c.Status.MembershipLabel[membershipLabelKey]; v != collectionName.Name {
@@ -240,7 +240,7 @@ func TestReconciler(t *testing.T) {
 						return nil
 					},
 					MockPatch: func(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-						if patch != client.Apply {
+						if patch != client.Apply { //nolint:staticcheck // SA1019: match the production Patch call site's use of client.Apply
 							return fmt.Errorf("Expected SSA patch, but got: %v", patch)
 						}
 						u := obj.(*unstructured.Unstructured)
@@ -271,10 +271,10 @@ func TestReconciler(t *testing.T) {
 					},
 					MockStatusUpdate: func(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 						c := obj.(*v1alpha1.ObservedObjectCollection)
-						if cnd := c.Status.GetCondition(xpv1.TypeSynced); cnd.Status != corev1.ConditionTrue {
+						if cnd := c.Status.GetCondition(xpv2.TypeSynced); cnd.Status != corev1.ConditionTrue {
 							return fmt.Errorf("Object sync condition not true: %v", cnd.Message)
 						}
-						if cnd := c.Status.GetCondition(xpv1.TypeReady); cnd.Status != corev1.ConditionTrue {
+						if cnd := c.Status.GetCondition(xpv2.TypeReady); cnd.Status != corev1.ConditionTrue {
 							return fmt.Errorf("Object ready condition not true: %v", cnd.Message)
 						}
 						if v := c.Status.MembershipLabel[membershipLabelKey]; v != collectionName.Name {
@@ -320,7 +320,7 @@ func TestReconciler(t *testing.T) {
 					},
 					MockStatusUpdate: func(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 						c := obj.(*v1alpha1.ObservedObjectCollection)
-						if cnd := c.Status.GetCondition(xpv1.TypeSynced); cnd.Status != corev1.ConditionFalse {
+						if cnd := c.Status.GetCondition(xpv2.TypeSynced); cnd.Status != corev1.ConditionFalse {
 							panic(fmt.Sprintf("Object sync condition not true: %v", cnd.Message))
 						}
 
@@ -383,7 +383,7 @@ func TestReconciler(t *testing.T) {
 					},
 					MockStatusUpdate: func(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 						c := obj.(*v1alpha1.ObservedObjectCollection)
-						if cnd := c.Status.GetCondition(xpv1.TypeSynced); cnd.Status != corev1.ConditionFalse {
+						if cnd := c.Status.GetCondition(xpv2.TypeSynced); cnd.Status != corev1.ConditionFalse {
 							panic(fmt.Sprintf("Object sync condition not true: %v", cnd.Message))
 						}
 						return nil

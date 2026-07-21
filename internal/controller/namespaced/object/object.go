@@ -47,7 +47,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/event"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
@@ -58,6 +57,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/v1alpha1"
@@ -161,7 +161,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		managed.WithFinalizer(&objFinalizer{client: mgr.GetClient()}),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithPollIntervalHook(func(mg resource.Managed, pollInterval time.Duration) time.Duration {
-			if mg.GetCondition(xpv1.TypeReady).Status != v1.ConditionTrue {
+			if mg.GetCondition(xpv2.TypeReady).Status != v1.ConditionTrue {
 				// If the resource is not ready, we should poll more frequently not to delay time to readiness.
 				pollInterval = 30 * time.Second
 			}
@@ -171,7 +171,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 			return pollInterval + time.Duration((rand.Float64()-0.5)*2*float64(pollJitter)) //nolint G404 // No need for secure randomness
 		}),
 		managed.WithLogger(l),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
+		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))), //nolint:staticcheck // SA1019: keeping the legacy events API until crossplane-runtime's event package moves to GetEventRecorder
 		managed.WithMetricRecorder(o.MetricOptions.MRMetrics),
 		managed.WithDeterministicExternalName(true),
 	}
@@ -233,7 +233,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 		cb = cb.WatchesRawSource(&i)
 	}
-	reconcilerOptions = append(reconcilerOptions, managed.WithExternalConnecter(conn))
+	reconcilerOptions = append(reconcilerOptions, managed.WithExternalConnector(conn))
 
 	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
 		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
@@ -559,16 +559,16 @@ func (c *external) updateConditionFromObserved(obj *v1alpha1.Object, observed *u
 	}
 
 	if err != nil {
-		obj.SetConditions(xpv1.Unavailable().WithMessage(err.Error()))
+		obj.SetConditions(xpv2.Unavailable().WithMessage(err.Error()))
 		return nil
 	}
 
 	if !ready {
-		obj.SetConditions(xpv1.Unavailable())
+		obj.SetConditions(xpv2.Unavailable())
 		return nil
 	}
 
-	obj.SetConditions(xpv1.Available())
+	obj.SetConditions(xpv2.Available())
 	return nil
 }
 
@@ -593,12 +593,12 @@ func getReferenceInfo(ref v1alpha1.Reference) (string, string, string, string) {
 }
 
 func (c *external) checkDeriveFromObject(observed *unstructured.Unstructured) bool {
-	conditioned := xpv1.ConditionedStatus{}
+	conditioned := xpv2.ConditionedStatus{}
 	if err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned); err != nil {
 		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
 		return false
 	}
-	if status := conditioned.GetCondition(xpv1.TypeReady).Status; status != v1.ConditionTrue {
+	if status := conditioned.GetCondition(xpv2.TypeReady).Status; status != v1.ConditionTrue {
 		c.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", observed)
 		return false
 	}
@@ -606,7 +606,7 @@ func (c *external) checkDeriveFromObject(observed *unstructured.Unstructured) bo
 }
 
 func (c *external) checkAllConditions(observed *unstructured.Unstructured) (allTrue bool) {
-	conditioned := xpv1.ConditionedStatus{}
+	conditioned := xpv2.ConditionedStatus{}
 	err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
 	if err != nil {
 		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
@@ -743,8 +743,8 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 func (c *external) handleObservation(ctx context.Context, obj *v1alpha1.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	isUpToDate := false //nolint:staticcheck
 
-	if !sets.New[xpv1.ManagementAction](obj.GetManagementPolicies()...).
-		HasAny(xpv1.ManagementActionUpdate, xpv1.ManagementActionCreate, xpv1.ManagementActionAll) {
+	if !sets.New[xpv2.ManagementAction](obj.GetManagementPolicies()...).
+		HasAny(xpv2.ManagementActionUpdate, xpv2.ManagementActionCreate, xpv2.ManagementActionAll) {
 		// Treated as up-to-date as we don't update or create the resource
 		isUpToDate = true
 	}
@@ -757,10 +757,10 @@ func (c *external) handleObservation(ctx context.Context, obj *v1alpha1.Object, 
 		c.logger.Debug("Up to date!")
 
 		if p := obj.Spec.Readiness.Policy; p == v1alpha1.ReadinessPolicySuccessfulCreate || p == "" {
-			obj.Status.SetConditions(xpv1.Available())
+			obj.Status.SetConditions(xpv2.Available())
 		}
 
-		cd, err := connectionDetails(ctx, c.client, obj.Spec.ConnectionDetails)
+		cd, err := connectionDetails(ctx, c.client.Client, obj.Spec.ConnectionDetails)
 		if err != nil {
 			return managed.ExternalObservation{}, errors.Wrap(err, errGetConnectionDetails)
 		}

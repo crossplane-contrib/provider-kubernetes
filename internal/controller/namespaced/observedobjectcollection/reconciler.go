@@ -32,8 +32,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	xperrors "github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
@@ -41,6 +39,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/ratelimiter"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	objectv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
 	observedobjectcollectionv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/observedobjectcollection/v1alpha1"
@@ -129,7 +128,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	}
 
 	if meta.IsPaused(c) {
-		c.Status.SetConditions(xpv1.ReconcilePaused())
+		c.Status.SetConditions(xpv2.ReconcilePaused())
 		return ctrl.Result{}, errors.Wrap(r.client.Status().Update(ctx, c), errStatusUpdate)
 	}
 
@@ -157,7 +156,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	clusterClient, _, err := r.clientBuilder.KubeForProviderConfig(ctx, pcSpec)
 	if err != nil {
 		werr := errors.Wrap(err, errBuildKubeForProviderConfig)
-		c.Status.SetConditions(xpv1.ReconcileError(werr))
+		c.Status.SetConditions(xpv2.ReconcileError(werr))
 		_ = r.client.Status().Update(ctx, c)
 		return ctrl.Result{}, werr
 	}
@@ -170,7 +169,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 
 	if err != nil {
 		werr := errors.Wrap(err, "error creating selector")
-		c.Status.SetConditions(xpv1.ReconcileError(werr))
+		c.Status.SetConditions(xpv2.ReconcileError(werr))
 		_ = r.client.Status().Update(ctx, c)
 		return ctrl.Result{}, werr
 	}
@@ -178,7 +177,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	lo := client.ListOptions{LabelSelector: selector, Namespace: c.Spec.ObserveObjects.Namespace}
 	if err := clusterClient.List(ctx, k8sobjects, &lo); err != nil {
 		werr := errors.Wrapf(err, "error fetching objects for GVK %v and options %v", k8sobjects.GetObjectKind().GroupVersionKind(), lo)
-		c.Status.SetConditions(xpv1.ReconcileError(werr))
+		c.Status.SetConditions(xpv2.ReconcileError(werr))
 		_ = r.client.Status().Update(ctx, c)
 		return ctrl.Result{}, werr
 	}
@@ -188,7 +187,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	ol := &objectv1alpha1.ObjectList{}
 	if err := r.client.List(ctx, ol, client.MatchingLabels(ml), client.InNamespace(c.GetNamespace())); err != nil {
 		werr := errors.Wrapf(err, "cannot list members matching labels %v", ml)
-		c.Status.SetConditions(xpv1.ReconcileError(werr))
+		c.Status.SetConditions(xpv2.ReconcileError(werr))
 		_ = r.client.Status().Update(ctx, c)
 		return ctrl.Result{}, werr
 	}
@@ -201,7 +200,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 		name, err := r.observedObjectName(c, &o)
 		if err != nil {
 			werr := errors.Wrapf(err, "error generating name for observed object, matched object: %v", o)
-			c.Status.SetConditions(xpv1.ReconcileError(werr))
+			c.Status.SetConditions(xpv2.ReconcileError(werr))
 			_ = r.client.Status().Update(ctx, c)
 			return ctrl.Result{}, werr
 		}
@@ -210,13 +209,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 		po, err := observedObjectPatch(name, o, c)
 		if err != nil {
 			werr := errors.Wrapf(err, "error generating patch for matched object %v", o)
-			c.Status.SetConditions(xpv1.ReconcileError(werr))
+			c.Status.SetConditions(xpv2.ReconcileError(werr))
 			_ = r.client.Status().Update(ctx, c)
 			return ctrl.Result{}, werr
 		}
-		if err := r.client.Patch(ctx, po, client.Apply, fieldOwner, client.ForceOwnership); err != nil {
+		if err := r.client.Patch(ctx, po, client.Apply, fieldOwner, client.ForceOwnership); err != nil { //nolint:staticcheck // SA1019: keeping client.Apply until controller-runtime's Client.Apply is available on all supported paths
 			werr := errors.Wrap(err, "cannot create observed object")
-			c.Status.SetConditions(xpv1.ReconcileError(werr))
+			c.Status.SetConditions(xpv2.ReconcileError(werr))
 			_ = r.client.Status().Update(ctx, c)
 			return ctrl.Result{}, werr
 		}
@@ -234,12 +233,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 		log.Debug("Removing", "name", o.Name)
 		if err := r.client.Delete(ctx, &ol.Items[i]); err != nil {
 			werr := errors.Wrapf(err, "cannot delete observed object %v", o)
-			c.Status.SetConditions(xpv1.ReconcileError(werr))
+			c.Status.SetConditions(xpv2.ReconcileError(werr))
 			_ = r.client.Status().Update(ctx, c)
 			return ctrl.Result{}, werr
 		}
 	}
-	c.Status.SetConditions(xpv1.ReconcileSuccess(), xpv1.Available())
+	c.Status.SetConditions(xpv2.ReconcileSuccess(), xpv2.Available())
 
 	c.Status.MembershipLabel = ml
 
@@ -285,7 +284,7 @@ func observedObjectPatch(name string, matchedObject unstructured.Unstructured, c
 		Spec: objectv1alpha1.ObjectSpec{
 			ManagedResourceSpec: xpv2.ManagedResourceSpec{
 				ProviderConfigReference: &collection.Spec.ProviderConfigReference,
-				ManagementPolicies:      []xpv1.ManagementAction{xpv1.ManagementActionObserve},
+				ManagementPolicies:      []xpv2.ManagementAction{xpv2.ManagementActionObserve},
 			},
 			ForProvider: objectv1alpha1.ObjectParameters{
 				Manifest: runtime.RawExtension{
