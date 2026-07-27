@@ -14,7 +14,7 @@ require (
 	github.com/crossplane/crossplane-runtime/v2 v2.3.3
 	github.com/crossplane/crossplane-tools v0.0.0-20260715161912-60e57f817ad1
 	github.com/crossplane/crossplane/apis/v2 v2.3.3
-	github.com/google/cel-go v0.26.1
+	github.com/google/cel-go v0.29.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/nebius/gosdk v0.2.28
@@ -115,7 +115,6 @@ require (
 	github.com/prometheus/procfs v0.19.2 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
-	github.com/stoewer/go-strcase v1.3.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
 	go.opentelemetry.io/otel v1.43.0 // indirect
