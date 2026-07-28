@@ -11,8 +11,20 @@ ${KUBECTL} patch objects.kubernetes.crossplane.io foo-service-owner --type='merg
 echo " ✅ Removing a label before switching to SSA."
 
 # ensure the MR gets reconciled (SSA-disabled)
-MR_GENERATION=$(${KUBECTL} get objects.kubernetes.crossplane.io foo-service-owner -o jsonpath='{.metadata.generation}')
-kubectl wait --for=jsonpath='{.status.conditions[?(@.type=="Synced")].observedGeneration}'="$MR_GENERATION" objects.kubernetes.crossplane.io foo-service-owner --timeout=10s
+# Wait for the Object's generation to be observable first: reading it too early
+# (before the MR exists) yields an empty value, which turns the jsonpath wait
+# below into the malformed form --for=jsonpath='{...}'= that kubectl rejects.
+MR_GENERATION=""
+for _ in $(seq 1 30); do
+  MR_GENERATION=$(${KUBECTL} get objects.kubernetes.crossplane.io foo-service-owner -o jsonpath='{.metadata.generation}' 2>/dev/null || echo "")
+  [ -n "$MR_GENERATION" ] && break
+  sleep 2
+done
+if [ -z "$MR_GENERATION" ]; then
+  echo "❌ Timed out waiting for foo-service-owner to report a generation"
+  exit 1
+fi
+${KUBECTL} wait --for=jsonpath='{.status.conditions[?(@.type=="Synced")].observedGeneration}'="$MR_GENERATION" objects.kubernetes.crossplane.io foo-service-owner --timeout=10s
 
 # Validate that provider fails to remove the "unwanted" label from the target k8s object
 # (SSA-disabled)
