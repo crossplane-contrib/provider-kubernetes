@@ -628,7 +628,11 @@ func TestObserve(t *testing.T) {
 				err: errors.Wrap(errors.Wrap(errBoom, errGetObject), errGetConnectionDetails),
 			},
 		},
-		"Observe Only - in sync is up to date": {
+		"Observe Only - no diff capability is up to date": {
+			// With a syncer that cannot compute an update-mode diff (the
+			// client-side apply syncer), an observe-only Object is reported up to
+			// date - we do not emit a spurious diff. GetDesiredState must not be
+			// called for observe-only resources (a nil fn panics if invoked).
 			args: args{
 				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
 					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
@@ -645,9 +649,8 @@ func TestObserve(t *testing.T) {
 					GetObservedStateFn: func(ctx context.Context, obj *objv1alpha1.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 						return current, nil
 					},
-					GetDesiredStateFn: func(ctx context.Context, obj *objv1alpha1.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-						return manifest, nil
-					},
+					// GetDesiredStateFn intentionally nil: observe-only must not
+					// call it.
 				},
 			},
 			want: want{
@@ -657,10 +660,10 @@ func TestObserve(t *testing.T) {
 		},
 		"Observe Only - drift surfaces diff without update": {
 			// An observe-only Object whose external resource has drifted is
-			// reported as not up-to-date, with a populated Diff, so the
-			// divergence is visible even though the reconciler will not act on
-			// it. ConnectionDetails are still published because the resource is
-			// only observed (its "settled" path is unchanged).
+			// reported as not up-to-date, with a populated Diff from the
+			// update-mode differ, so the divergence is visible even though the
+			// reconciler will not act on it. ConnectionDetails are still
+			// published because the resource is only observed.
 			args: args{
 				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
 					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
@@ -675,12 +678,16 @@ func TestObserve(t *testing.T) {
 						}),
 					},
 				},
-				syncer: &fake.ResourceSyncer{
-					GetObservedStateFn: func(ctx context.Context, obj *objv1alpha1.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-						return current, nil
+				syncer: &fake.DiffingResourceSyncer{
+					ResourceSyncer: fake.ResourceSyncer{
+						GetObservedStateFn: func(ctx context.Context, obj *objv1alpha1.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+							return current, nil
+						},
+						// GetDesiredStateFn intentionally nil: observe-only must
+						// not call it.
 					},
-					GetDesiredStateFn: func(ctx context.Context, obj *objv1alpha1.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-						return manifest, nil
+					UpToDateDiffFn: func(ctx context.Context, obj *objv1alpha1.Object, manifest, current *unstructured.Unstructured) (string, error) {
+						return "~ metadata.labels.a-new-label: <none> -> foo", nil
 					},
 				},
 			},
@@ -750,13 +757,10 @@ func TestObserve(t *testing.T) {
 				syncer: &fake.DiffingResourceSyncer{
 					ResourceSyncer: fake.ResourceSyncer{
 						GetObservedStateFn: func(ctx context.Context, obj *objv1alpha1.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-							// Empty extraction, mimicking observe-only ownership:
-							// the coarse comparison would say "not up to date".
 							return &unstructured.Unstructured{}, nil
 						},
-						GetDesiredStateFn: func(ctx context.Context, obj *objv1alpha1.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-							return manifest, nil
-						},
+						// GetDesiredStateFn intentionally nil: observe-only must
+						// not call it.
 					},
 					UpToDateDiffFn: func(ctx context.Context, obj *objv1alpha1.Object, manifest, current *unstructured.Unstructured) (string, error) {
 						// An update would change nothing: clean import.
@@ -768,6 +772,44 @@ func TestObserve(t *testing.T) {
 				out:       managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true, ConnectionDetails: managed.ConnectionDetails{}},
 				err:       nil,
 				wantReady: ptr.To(corev1.ConditionTrue),
+			},
+		},
+		"Observe Only - dry run failure is non-fatal": {
+			// If the update-mode diff cannot be computed - e.g. the SSA dry run
+			// fails for a sparse manifest that omits required fields (see #431) -
+			// the observe must NOT error: the resource stays Synced. UpToDate is
+			// reported False with an explanatory message, since we could not
+			// confirm the resource matches its desired state.
+			args: args{
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource()
+							return nil
+						}),
+					},
+				},
+				syncer: &fake.DiffingResourceSyncer{
+					ResourceSyncer: fake.ResourceSyncer{
+						GetObservedStateFn: func(ctx context.Context, obj *objv1alpha1.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+							return &unstructured.Unstructured{}, nil
+						},
+						// GetDesiredStateFn intentionally nil.
+					},
+					UpToDateDiffFn: func(ctx context.Context, obj *objv1alpha1.Object, manifest, current *unstructured.Unstructured) (string, error) {
+						return "", errBoom
+					},
+				},
+			},
+			want: want{
+				out:              managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false, ConnectionDetails: managed.ConnectionDetails{}},
+				err:              nil,
+				wantDiffNonEmpty: true,
+				wantDiffContains: "unable to determine",
+				wantReady:        ptr.To(corev1.ConditionTrue),
 			},
 		},
 	}
