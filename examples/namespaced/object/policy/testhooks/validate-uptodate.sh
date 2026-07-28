@@ -32,11 +32,13 @@ get_uptodate() {
     -o jsonpath="{.status.conditions[?(@.type=='UpToDate')]$1}"
 }
 
-# wait_uptodate <status> <reason> waits up to ~60s for the UpToDate condition to
-# reach the given status/reason, failing otherwise.
+# wait_uptodate <status> <reason> waits up to ~150s for the UpToDate condition
+# to reach the given status/reason, failing otherwise. The budget comfortably
+# exceeds the provider's default 1m poll interval, since an observe-only Object
+# only re-observes external changes on its poll cycle.
 wait_uptodate() {
   local want_status="$1" want_reason="$2" i status reason
-  for i in $(seq 1 30); do
+  for i in $(seq 1 75); do
     status="$(get_uptodate '.status')"
     reason="$(get_uptodate '.reason')"
     if [ "${status}" == "${want_status}" ] && [ "${reason}" == "${want_reason}" ]; then
@@ -79,6 +81,14 @@ echo "Secret still holds live-value - observe-only did not modify it"
 echo "Step 2: reconcile the live Secret to the desired value (base64 of desired-value)"
 ${KUBECTL} patch secret "${SECRET}" -n "${NS}" \
   --type='merge' -p="{\"data\":{\"sample-key\":\"${DESIRED_B64}\"}}"
+
+# An observe-only Object only re-observes on its poll cycle; nothing watches the
+# external Secret. Nudge an immediate reconcile (as a GitOps controller would by
+# touching the resource) so the transition is observed promptly and
+# deterministically rather than racing the poll interval.
+echo "Step 2a: trigger a reconcile so the change is observed promptly"
+${KUBECTL} annotate object.kubernetes.m.crossplane.io "${OBJECT}" -n "${NS}" \
+  "test.crossplane.io/reconcile-ts=$(date +%s)" --overwrite
 
 echo "Step 3: expect UpToDate=True (ObserveMatched) - an update would now change nothing"
 wait_uptodate "True" "ObserveMatched"
