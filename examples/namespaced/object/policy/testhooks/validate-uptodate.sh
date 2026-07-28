@@ -6,17 +6,17 @@ set -aeuo pipefail
 # https://github.com/crossplane/uptest/tree/e64457e2cce153ada54da686c8bf96143f3f6329?tab=readme-ov-file#hooks
 #
 # Models the import/adoption use case (see observe-uptodate.yaml):
-#   1. A Secret exists with sample-key=live-value, owned by another actor. The
-#      observe-only Object's manifest desires sample-key=desired-value, so an
-#      update (were it allowed) would change that field. UpToDate must be False
-#      (UpdateRestricted) with a message naming the change - and the Secret must
-#      NOT be modified (observe-only).
-#   2. We reconcile the live Secret to sample-key=desired-value. Now an update
-#      would change nothing, so UpToDate must flip to True (ObserveMatched) -
-#      the "safe to adopt" signal.
+#   1. A Secret exists (labels.app=legacy, data.sample-key=live-value), owned by
+#      another actor. The observe-only Object's manifest desires app=adopted and
+#      sample-key=desired-value, so an update (were it allowed) would change both
+#      fields. UpToDate must be False (UpdateRestricted) with a message naming
+#      those changes by key path - the Secret value redacted - and the Secret
+#      must NOT be modified (observe-only).
+#   2. We reconcile the live Secret to match the manifest. Now an update would
+#      change nothing, so UpToDate must flip to True (ObserveMatched) - the
+#      "safe to adopt" signal.
 #
-# Secret values are base64-encoded in the object (and therefore in the diff),
-# so assertions compare against the base64 encodings:
+# Secret data values are base64-encoded; the manifest and patches use:
 #   live-value    -> bGl2ZS12YWx1ZQ==
 #   desired-value -> ZGVzaXJlZC12YWx1ZQ==
 KUBECTL="kubectl"
@@ -54,10 +54,27 @@ wait_uptodate() {
   return 1
 }
 
-echo "Step 1: expect UpToDate=False (UpdateRestricted) - an update would change sample-key"
+# At this point the observed Secret differs from the manifest in two fields, and
+# the Object is observe-only. The UpToDate condition looks like this:
+#
+#   - type: UpToDate
+#     status: "False"
+#     reason: UpdateRestricted
+#     message: |
+#         ~ data.sample-key: <redacted> -> <redacted>
+#         ~ metadata.labels.app: legacy -> adopted
+#
+# The message lists each field an update would change, by its full key path
+# (no line numbers, so it maps directly onto a GitOps manifest regardless of key
+# ordering). Secret data values are redacted - deliberately, and unlike
+# status.atProvider's flag-gated sanitization - because the condition message is
+# far more widely visible than an RBAC-gated read of the Secret. Once the live
+# Secret is reconciled to match the manifest (Step 2), the condition becomes
+# status "True", reason ObserveMatched, with an empty message.
+echo "Step 1: expect UpToDate=False (UpdateRestricted) - an update would change fields"
 wait_uptodate "False" "UpdateRestricted"
 
-echo "Step 1a: the condition message must name the would-be change (base64 of desired-value)"
+echo "Step 1a: the condition message must name the would-be changes by path"
 MESSAGE="$(get_uptodate '.message')"
 if [ -z "${MESSAGE}" ]; then
   echo "Expected a non-empty UpToDate message containing the diff, got empty"
@@ -65,22 +82,34 @@ if [ -z "${MESSAGE}" ]; then
 fi
 echo "UpToDate message (diff):"
 echo "${MESSAGE}"
-if ! echo "${MESSAGE}" | grep -q "${DESIRED_B64}"; then
-  echo "Expected the diff to mention the desired value (base64 ${DESIRED_B64})"
+# The non-sensitive label change is shown in full, by path.
+if ! echo "${MESSAGE}" | grep -q "metadata.labels.app: legacy -> adopted"; then
+  echo "Expected the diff to show the label change 'metadata.labels.app: legacy -> adopted'"
+  exit 1
+fi
+# The Secret data change is shown by path but with its value redacted.
+if ! echo "${MESSAGE}" | grep -q "data.sample-key: <redacted>"; then
+  echo "Expected the diff to show 'data.sample-key: <redacted>'"
+  exit 1
+fi
+# The actual Secret values must never appear in the condition message.
+if echo "${MESSAGE}" | grep -qE "${LIVE_B64}|${DESIRED_B64}"; then
+  echo "Secret value leaked into the UpToDate message; it must be redacted"
   exit 1
 fi
 
 echo "Step 1b: confirm the Secret was NOT modified (observe-only makes no changes)"
 LIVE_VALUE="$(${KUBECTL} get secret "${SECRET}" -n "${NS}" -o jsonpath='{.data.sample-key}')"
-if [ "${LIVE_VALUE}" != "${LIVE_B64}" ]; then
-  echo "Expected live Secret sample-key to remain ${LIVE_B64} (live-value), unchanged by the provider, got '${LIVE_VALUE}'"
+LIVE_LABEL="$(${KUBECTL} get secret "${SECRET}" -n "${NS}" -o jsonpath='{.metadata.labels.app}')"
+if [ "${LIVE_VALUE}" != "${LIVE_B64}" ] || [ "${LIVE_LABEL}" != "legacy" ]; then
+  echo "Expected live Secret unchanged (sample-key=${LIVE_B64}, labels.app=legacy), got sample-key='${LIVE_VALUE}', labels.app='${LIVE_LABEL}'"
   exit 1
 fi
-echo "Secret still holds live-value - observe-only did not modify it"
+echo "Secret still holds its original values - observe-only did not modify it"
 
-echo "Step 2: reconcile the live Secret to the desired value (base64 of desired-value)"
+echo "Step 2: reconcile the live Secret to match the manifest (both fields)"
 ${KUBECTL} patch secret "${SECRET}" -n "${NS}" \
-  --type='merge' -p="{\"data\":{\"sample-key\":\"${DESIRED_B64}\"}}"
+  --type='merge' -p="{\"metadata\":{\"labels\":{\"app\":\"adopted\"}},\"data\":{\"sample-key\":\"${DESIRED_B64}\"}}"
 
 # An observe-only Object only re-observes on its poll cycle; nothing watches the
 # external Secret. Nudge an immediate reconcile (as a GitOps controller would by

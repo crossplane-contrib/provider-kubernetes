@@ -17,23 +17,30 @@
 #   - A Secret is used as the observed resource because uptest's generated
 #     status assertions skip the "secret." KindGroup; a plain ConfigMap would
 #     otherwise be (incorrectly) asserted to have a Ready condition it can never
-#     have.
+#     have. Using a Secret also exercises value redaction in the diff.
 #   - Secret values are given as base64 under `data` (not `stringData`), because
 #     the provider's server-side-apply dry run works against the typed Secret
 #     schema, where `stringData` is a write-only convenience field that does not
 #     round-trip.
 #
-# The seed Secret below is created by chainsaw (an external field manager) with
-# sample-key=live-value (base64 bGl2ZS12YWx1ZQ==), while the Object's manifest
-# desires sample-key=desired-value (base64 ZGVzaXJlZC12YWx1ZQ==) - so the Object
-# begins life UpToDate: False with a diff naming that change. The
-# post-assert-hook then reconciles the live Secret to the desired value and
+# The seed Secret below is created by chainsaw (an external field manager) and
+# differs from the Object's manifest in two ways: a metadata label
+# (app: legacy -> adopted) and a Secret data value (sample-key). The Object
+# therefore begins life UpToDate: False, and the condition message shows both
+# changes by key path - with the Secret value redacted, e.g.:
+#
+#   ~ data.sample-key: <redacted> -> <redacted>
+#   ~ metadata.labels.app: legacy -> adopted
+#
+# The post-assert-hook then reconciles the live Secret to match the manifest and
 # asserts the condition flips to True. See testhooks/validate-uptodate.sh.
 apiVersion: v1
 kind: Secret
 metadata:
   name: observe-uptodate
   namespace: default
+  labels:
+    app: legacy
 data:
   # base64("live-value")
   sample-key: bGl2ZS12YWx1ZQ==
@@ -55,11 +62,16 @@ spec:
       kind: Secret
       metadata:
         namespace: default
+        labels:
+          # Desired label differs from the live Secret's "legacy", so an update
+          # would change metadata.labels.app - a non-sensitive field shown in
+          # full in the diff.
+          app: adopted
       data:
         # Desired value (base64 of "desired-value") differs from the live
-        # Secret's "live-value", so an update (were it allowed) would change
-        # sample-key. The hook later reconciles the live value to this to
-        # demonstrate the True transition.
+        # Secret's "live-value", so an update would change sample-key - a
+        # sensitive field whose value is redacted in the diff. The hook later
+        # reconciles the live values to these to demonstrate the True transition.
         sample-key: ZGVzaXJlZC12YWx1ZQ==
   providerConfigRef:
     kind: ClusterProviderConfig

@@ -87,9 +87,9 @@ func TestUpToDate(t *testing.T) {
 }
 
 func TestUpdateModeDiff(t *testing.T) {
-	// live builds a ConfigMap as it exists on the cluster, including mechanical
+	// cm builds a ConfigMap as it exists on the cluster, including mechanical
 	// metadata and status that must never appear in the diff.
-	live := func(data map[string]interface{}, labels map[string]interface{}) *unstructured.Unstructured {
+	cm := func(data, labels map[string]interface{}) *unstructured.Unstructured {
 		u := &unstructured.Unstructured{Object: map[string]interface{}{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
@@ -112,6 +112,15 @@ func TestUpdateModeDiff(t *testing.T) {
 		}
 		return u
 	}
+	secret := func(data map[string]interface{}) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"type":       "Opaque",
+			"metadata":   map[string]interface{}{"name": "s", "namespace": "default"},
+			"data":       data,
+		}}
+	}
 
 	type args struct {
 		current    *unstructured.Unstructured
@@ -119,15 +128,9 @@ func TestUpdateModeDiff(t *testing.T) {
 	}
 	type want struct {
 		diffIsEmpty bool
-		// diffContains are substrings expected anywhere in the diff.
-		diffContains []string
-		// changedContains are substrings expected on a changed (-/+) line.
-		changedContains []string
-		// changedExcludes are substrings that must NOT appear on any changed
-		// (-/+) line (they may still appear as unchanged context).
-		changedExcludes []string
-		// absent are substrings that must not appear anywhere in the diff
-		// (e.g. fields removed by clean()).
+		// contains are substrings expected anywhere in the diff.
+		contains []string
+		// absent are substrings that must not appear anywhere in the diff.
 		absent []string
 	}
 	cases := map[string]struct {
@@ -137,31 +140,64 @@ func TestUpdateModeDiff(t *testing.T) {
 		"ManifestFieldWouldChange": {
 			// The would-be update changes data.sample-key; other live fields
 			// the manifest does not touch are carried through unchanged by the
-			// SSA dry-run, so they must not appear in the diff.
+			// SSA dry-run, so they must not appear in the diff. Mechanical
+			// metadata and status must never appear.
 			args: args{
-				current: live(map[string]interface{}{
+				current: cm(map[string]interface{}{
 					"sample-key":        "live-external-value",
 					"external-only-key": "external-data",
 				}, map[string]interface{}{"external-label": "keep-me"}),
-				desiredObj: live(map[string]interface{}{
+				desiredObj: cm(map[string]interface{}{
 					"sample-key":        "desired-value",
 					"external-only-key": "external-data",
 				}, map[string]interface{}{"external-label": "keep-me"}),
 			},
 			want: want{
-				diffIsEmpty:     false,
-				changedContains: []string{"sample-key", "desired-value", "live-external-value"},
-				changedExcludes: []string{"external-only-key", "external-label"},
-				absent:          []string{"managedFields", "resourceVersion", "creationTimestamp", "observedGeneration", "12345"},
+				diffIsEmpty: false,
+				contains:    []string{"~ data.sample-key: live-external-value -> desired-value"},
+				absent: []string{
+					"external-only-key", "external-label", // unchanged fields omitted entirely
+					"managedFields", "resourceVersion", "creationTimestamp", "observedGeneration", "12345",
+				},
+			},
+		},
+		"MultipleFieldsChangeAcrossPaths": {
+			// A change to a nested non-data field (metadata.labels) and an added
+			// key are each reported by their full key path.
+			args: args{
+				current: cm(map[string]interface{}{"sample-key": "v"},
+					map[string]interface{}{"env": "prod"}),
+				desiredObj: cm(map[string]interface{}{"sample-key": "v"},
+					map[string]interface{}{"env": "staging", "team": "infra"}),
+			},
+			want: want{
+				diffIsEmpty: false,
+				contains: []string{
+					"~ metadata.labels.env: prod -> staging",
+					"+ metadata.labels.team: infra",
+				},
+			},
+		},
+		"SecretValuesRedacted": {
+			// For a v1 Secret, the changed data key is reported by path, but its
+			// (base64) value must be redacted rather than leaked into the diff.
+			args: args{
+				current:    secret(map[string]interface{}{"password": "bGl2ZQ=="}),
+				desiredObj: secret(map[string]interface{}{"password": "ZGVzaXJlZA=="}),
+			},
+			want: want{
+				diffIsEmpty: false,
+				contains:    []string{"~ data.password: <redacted> -> <redacted>"},
+				absent:      []string{"bGl2ZQ==", "ZGVzaXJlZA=="},
 			},
 		},
 		"OnlyMechanicalMetadataDiffers": {
 			// Two objects that differ only in mechanical metadata / status are
 			// considered to have no meaningful update-mode change.
 			args: args{
-				current: live(map[string]interface{}{"sample-key": "v"}, nil),
+				current: cm(map[string]interface{}{"sample-key": "v"}, nil),
 				desiredObj: func() *unstructured.Unstructured {
-					u := live(map[string]interface{}{"sample-key": "v"}, nil)
+					u := cm(map[string]interface{}{"sample-key": "v"}, nil)
 					_ = unstructured.SetNestedField(u.Object, "99999", "metadata", "resourceVersion")
 					return u
 				}(),
@@ -176,36 +212,14 @@ func TestUpdateModeDiff(t *testing.T) {
 			if gotIsEmpty := got == ""; gotIsEmpty != tc.want.diffIsEmpty {
 				t.Fatalf("UpdateModeDiff(...): want empty=%v, got diff=%q", tc.want.diffIsEmpty, got)
 			}
-
-			// changedLines are the lines cmp.Diff marks as changed (leading
-			// - or + after trimming indentation).
-			var changed []string
-			for _, line := range strings.Split(got, "\n") {
-				t := strings.TrimSpace(line)
-				if strings.HasPrefix(t, "-") || strings.HasPrefix(t, "+") {
-					changed = append(changed, t)
-				}
-			}
-			changedText := strings.Join(changed, "\n")
-
-			for _, s := range tc.want.diffContains {
+			for _, s := range tc.want.contains {
 				if !strings.Contains(got, s) {
 					t.Errorf("UpdateModeDiff(...): want diff to contain %q, got:\n%s", s, got)
 				}
 			}
-			for _, s := range tc.want.changedContains {
-				if !strings.Contains(changedText, s) {
-					t.Errorf("UpdateModeDiff(...): want a changed line containing %q, changed lines:\n%s", s, changedText)
-				}
-			}
-			for _, s := range tc.want.changedExcludes {
-				if strings.Contains(changedText, s) {
-					t.Errorf("UpdateModeDiff(...): want no changed line containing %q, changed lines:\n%s", s, changedText)
-				}
-			}
 			for _, s := range tc.want.absent {
 				if strings.Contains(got, s) {
-					t.Errorf("UpdateModeDiff(...): want diff NOT to contain %q anywhere, got:\n%s", s, got)
+					t.Errorf("UpdateModeDiff(...): want diff NOT to contain %q, got:\n%s", s, got)
 				}
 			}
 		})
