@@ -301,6 +301,13 @@ func TestObserve(t *testing.T) {
 	type want struct {
 		out managed.ExternalObservation
 		err error
+		// wantDiffNonEmpty asserts that out.Diff is populated. The exact diff
+		// text is not asserted (it is compared via IgnoreFields), only whether
+		// a diff is present.
+		wantDiffNonEmpty bool
+		// wantReady, when set, asserts the status of the Object's Ready
+		// condition after Observe returns.
+		wantReady *corev1.ConditionStatus
 	}
 	cases := map[string]struct {
 		args
@@ -374,8 +381,9 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			want: want{
-				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
-				err: nil,
+				out:              managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
+				err:              nil,
+				wantDiffNonEmpty: true,
 			},
 		},
 		"UpToDate": {
@@ -616,7 +624,7 @@ func TestObserve(t *testing.T) {
 				err: errors.Wrap(errors.Wrap(errBoom, errGetObject), errGetConnectionDetails),
 			},
 		},
-		"Observe Only - up to date by default": {
+		"Observe Only - in sync is up to date": {
 			args: args{
 				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
@@ -643,6 +651,42 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"Observe Only - drift surfaces diff without update": {
+			// An observe-only Object whose external resource has drifted is
+			// reported as not up-to-date, with a populated Diff, so the
+			// divergence is visible even though the reconciler will not act on
+			// it. ConnectionDetails are still published because the resource is
+			// only observed (its "settled" path is unchanged).
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource(func(res *unstructured.Unstructured) {
+								res.SetLabels(map[string]string{"a-new-label": "foo"})
+							})
+							return nil
+						}),
+					},
+				},
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return current, nil
+					},
+					GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return manifest, nil
+					},
+				},
+			},
+			want: want{
+				out:              managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false, ConnectionDetails: managed.ConnectionDetails{}},
+				err:              nil,
+				wantDiffNonEmpty: true,
+				wantReady:        ptr.To(corev1.ConditionTrue),
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -657,8 +701,22 @@ func TestObserve(t *testing.T) {
 				t.Fatalf("e.Observe(...): -want error, +got error: %s", diff)
 			}
 
-			if diff := cmp.Diff(tc.want.out, got); diff != "" {
+			if diff := cmp.Diff(tc.want.out, got, cmpopts.IgnoreFields(managed.ExternalObservation{}, "Diff")); diff != "" {
 				t.Fatalf("e.Observe(...): -want out, +got out: %s", diff)
+			}
+
+			if gotNonEmpty := got.Diff != ""; gotNonEmpty != tc.want.wantDiffNonEmpty {
+				t.Fatalf("e.Observe(...): want Diff non-empty=%v, got Diff=%q", tc.want.wantDiffNonEmpty, got.Diff)
+			}
+
+			if tc.want.wantReady != nil {
+				obj, ok := tc.args.mg.(*v1alpha2.Object)
+				if !ok {
+					t.Fatalf("e.Observe(...): want Ready assertion, but managed resource is not a *v1alpha2.Object")
+				}
+				if got := obj.GetCondition(xpv2.TypeReady).Status; got != *tc.want.wantReady {
+					t.Fatalf("e.Observe(...): Ready condition: want status %v, got %v", *tc.want.wantReady, got)
+				}
 			}
 		})
 	}

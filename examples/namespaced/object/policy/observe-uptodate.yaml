@@ -1,0 +1,48 @@
+---
+# This example demonstrates the UpToDate condition for an observe-only Object.
+#
+# The Object below observes a ConfigMap and desires a specific value for
+# data.sample-key. Because the management policy is Observe-only, the provider
+# never creates or updates the ConfigMap - but it now reports whether the
+# observed state matches the desired state via the UpToDate condition:
+#
+#   - observed == desired -> UpToDate: True  (reason: ObserveMatched)
+#   - observed != desired -> UpToDate: False (reason: UpdateRestricted), with
+#     the diff carried in the condition message, and NO change made to the
+#     ConfigMap.
+#
+# The post-assert-hook drives this transition by patching the live ConfigMap
+# out of sync with the desired manifest. See testhooks/validate-uptodate.sh.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: observe-uptodate
+  namespace: default
+data:
+  sample-key: sample-value
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: observe-uptodate
+  namespace: default
+  annotations:
+    uptest.upbound.io/post-assert-hook: testhooks/validate-uptodate.sh
+    uptest.upbound.io/timeout: "120"
+spec:
+  # Observe-only: the provider will not create, update, or delete the ConfigMap.
+  managementPolicies: ["Observe"]
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        namespace: default
+      data:
+        # The desired value. The seed ConfigMap above matches this, so the
+        # Object begins life UpToDate: True. The hook then patches the live
+        # ConfigMap's sample-key to diverge from this value.
+        sample-key: sample-value
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider

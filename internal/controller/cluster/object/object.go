@@ -29,7 +29,6 @@ import (
 	celtypes "github.com/google/cel-go/common/types"
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -740,19 +739,16 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 }
 
 func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
-	isUpToDate := false //nolint:staticcheck
+	observeOnly := !sets.New[xpv2.ManagementAction](obj.GetManagementPolicies()...).
+		HasAny(xpv2.ManagementActionUpdate, xpv2.ManagementActionCreate, xpv2.ManagementActionAll)
 
-	if !sets.New[xpv2.ManagementAction](obj.GetManagementPolicies()...).
-		HasAny(xpv2.ManagementActionUpdate, xpv2.ManagementActionCreate, xpv2.ManagementActionAll) {
-		// Treated as up-to-date as we don't update or create the resource
-		isUpToDate = true
-	}
-	if last != nil && equality.Semantic.DeepEqual(last, desired) {
-		// Mark as up-to-date since last is equal to desired
-		isUpToDate = true
-	}
+	// UpToDate is determined by state comparison alone, so that drift is
+	// surfaced even for observe-only Objects. Readiness and connection detail
+	// publication, however, remain tied to the previous notion of "settled":
+	// the resource is either in sync or only observed.
+	isUpToDate, diff := pcontroller.UpToDate(last, desired)
 
-	if isUpToDate {
+	if isUpToDate || observeOnly {
 		c.logger.Debug("Up to date!")
 
 		if p := obj.Spec.Readiness.Policy; p == v1alpha2.ReadinessPolicySuccessfulCreate || p == "" {
@@ -766,14 +762,16 @@ func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, 
 
 		return managed.ExternalObservation{
 			ResourceExists:    true,
-			ResourceUpToDate:  true,
+			ResourceUpToDate:  isUpToDate,
 			ConnectionDetails: cd,
+			Diff:              diff,
 		}, nil
 	}
 
 	return managed.ExternalObservation{
 		ResourceExists:   true,
-		ResourceUpToDate: false,
+		ResourceUpToDate: isUpToDate,
+		Diff:             diff,
 	}, nil
 }
 
