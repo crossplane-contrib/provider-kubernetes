@@ -14,7 +14,7 @@ metadata:
     # unpauses the MR to ensure it gets reconciled first with CSA.
     crossplane.io/paused: "true"
     uptest.upbound.io/post-assert-hook: testhooks/validate-ssa-migration.sh
-    uptest.upbound.io/timeout: "60"
+    uptest.upbound.io/timeout: "180"
 spec:
   forProvider:
     manifest:
