@@ -400,10 +400,16 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		c.kindObserver.WatchResources(c.rest, obj.Spec.ProviderConfigReference.Name, manifest.GroupVersionKind())
 	}
 
-	current := manifest.DeepCopy()
+	// Fetch the live object into a fresh unstructured carrying only its
+	// identity (GVK + name/namespace). We must NOT seed the Get target with the
+	// manifest's (desired) content: if Get returns a partially-populated object
+	// - e.g. from a not-yet-synced cache - any desired values left behind would
+	// masquerade as observed state and hide real drift.
+	current := &unstructured.Unstructured{}
+	current.SetGroupVersionKind(manifest.GroupVersionKind())
 	err = c.client.Get(ctx, types.NamespacedName{
-		Namespace: current.GetNamespace(),
-		Name:      current.GetName(),
+		Namespace: manifest.GetNamespace(),
+		Name:      manifest.GetName(),
 	}, current)
 
 	if kerrors.IsNotFound(err) {
