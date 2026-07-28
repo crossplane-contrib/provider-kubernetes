@@ -19,6 +19,7 @@ package object
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -1894,6 +1895,91 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				return a.Type < b.Type
 			}), cmpopts.IgnoreFields(xpv2.Condition{}, "LastTransitionTime")); diff != "" {
 				t.Errorf("updateConditionFromObserved(...): -want result, +got result: %s", diff)
+			}
+		})
+	}
+}
+
+func TestSetAtProviderRemovesManagedFields(t *testing.T) {
+	type args struct {
+		obj      *v1alpha2.Object
+		observed *unstructured.Unstructured
+	}
+	type want struct {
+		err              error
+		hasManagedFields bool
+	}
+	cases := map[string]struct {
+		removeManagedFields bool
+		args
+		want
+	}{
+		"ManagedFieldsAreRemovedWhenEnabled": {
+			removeManagedFields: true,
+			args: args{
+				obj: kubernetesObject(),
+				observed: externalResource(func(res *unstructured.Unstructured) {
+					res.SetManagedFields([]metav1.ManagedFieldsEntry{
+						{
+							Manager:   "some-manager",
+							Operation: metav1.ManagedFieldsOperationUpdate,
+						},
+					})
+				}),
+			},
+			want: want{
+				hasManagedFields: false,
+			},
+		},
+		"ManagedFieldsPreservedWhenDisabled": {
+			removeManagedFields: false,
+			args: args{
+				obj: kubernetesObject(),
+				observed: externalResource(func(res *unstructured.Unstructured) {
+					res.SetManagedFields([]metav1.ManagedFieldsEntry{
+						{
+							Manager:   "some-manager",
+							Operation: metav1.ManagedFieldsOperationUpdate,
+						},
+					})
+				}),
+			},
+			want: want{
+				hasManagedFields: true,
+			},
+		},
+		"NoManagedFieldsStillWorks": {
+			removeManagedFields: true,
+			args: args{
+				obj:      kubernetesObject(),
+				observed: externalResource(),
+			},
+			want: want{
+				hasManagedFields: false,
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := &external{
+				logger:              logging.NewNopLogger(),
+				removeManagedFields: tc.removeManagedFields,
+			}
+			gotErr := e.setAtProvider(tc.args.obj, tc.args.observed)
+			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
+				t.Fatalf("setAtProvider(...): -want error, +got error: %s", diff)
+			}
+			// Unmarshal the manifest written to status and check for managedFields
+			var manifest unstructured.Unstructured
+			if err := json.Unmarshal(tc.args.obj.Status.AtProvider.Manifest.Raw, &manifest); err != nil {
+				t.Fatalf("failed to unmarshal manifest from status: %v", err)
+			}
+			gotManagedFields := manifest.GetManagedFields()
+			if tc.want.hasManagedFields && len(gotManagedFields) == 0 {
+				t.Errorf("expected managedFields but got none")
+			}
+			if !tc.want.hasManagedFields && len(gotManagedFields) > 0 {
+				t.Errorf("expected no managedFields but got: %v", gotManagedFields)
 			}
 		})
 	}

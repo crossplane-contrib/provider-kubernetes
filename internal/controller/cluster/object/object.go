@@ -152,7 +152,7 @@ type ResourceSyncer interface {
 }
 
 // Setup adds a controller that reconciles Object managed resources.
-func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitterPercentage uint, legacyCSAFieldManagers []string) error { // nolint:gocyclo // Too many branches due to alpha features, hopefully we can clean them up after we graduate them.
+func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, removeManagedFields bool, pollJitterPercentage uint, legacyCSAFieldManagers []string) error { // nolint:gocyclo // Too many branches due to alpha features, hopefully we can clean them up after we graduate them.
 	name := managed.ControllerName(v1alpha2.ObjectGroupKind)
 	l := o.Logger.WithValues("controller", name)
 
@@ -176,11 +176,12 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 	}
 
 	conn := &connector{
-		logger:          o.Logger,
-		sanitizeSecrets: sanitizeSecrets,
-		kube:            mgr.GetClient(),
-		usage:           resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
-		clientBuilder:   kubeclient.NewIdentityAwareBuilder(mgr.GetClient()),
+		logger:              o.Logger,
+		sanitizeSecrets:     sanitizeSecrets,
+		removeManagedFields: removeManagedFields,
+		kube:                mgr.GetClient(),
+		usage:               resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
+		clientBuilder:       kubeclient.NewIdentityAwareBuilder(mgr.GetClient()),
 	}
 
 	if o.Features.Enabled(features.EnableBetaServerSideApply) {
@@ -255,9 +256,9 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 
 // SetupGated registers a controller setup function that reconciles Object managed resources.
 // The controller setup is initiated after the CRD for Object becomes available.
-func SetupGated(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitterPercentage uint, legacyCSAFieldManagers []string) error {
+func SetupGated(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, removeManagedFields bool, pollJitterPercentage uint, legacyCSAFieldManagers []string) error {
 	o.Gate.Register(func() {
-		if err := Setup(mgr, o, sanitizeSecrets, pollJitterPercentage, legacyCSAFieldManagers); err != nil {
+		if err := Setup(mgr, o, sanitizeSecrets, removeManagedFields, pollJitterPercentage, legacyCSAFieldManagers); err != nil {
 			mgr.GetLogger().Error(err, "unable to setup reconciler", "gvk", v1alpha2.ObjectGroupVersionKind.String())
 		}
 	}, v1alpha2.ObjectGroupVersionKind)
@@ -265,12 +266,13 @@ func SetupGated(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, po
 }
 
 type connector struct {
-	kube            client.Client
-	usage           legacyTracker
-	logger          logging.Logger
-	sanitizeSecrets bool
-	kindObserver    KindObserver
-	ssaEnabled      bool
+	kube                client.Client
+	usage               legacyTracker
+	logger              logging.Logger
+	sanitizeSecrets     bool
+	removeManagedFields bool
+	kindObserver        KindObserver
+	ssaEnabled          bool
 
 	clientBuilder kubeclient.Builder
 
@@ -306,9 +308,10 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 			Client:     k,
 			Applicator: resource.NewAPIPatchingApplicator(k),
 		},
-		rest:            rc,
-		localClient:     c.kube,
-		sanitizeSecrets: c.sanitizeSecrets,
+		rest:                rc,
+		localClient:         c.kube,
+		sanitizeSecrets:     c.sanitizeSecrets,
+		removeManagedFields: c.removeManagedFields,
 
 		kindObserver: c.kindObserver,
 		syncer: &PatchingResourceSyncer{
@@ -357,7 +360,8 @@ type external struct {
 	syncer       ResourceSyncer
 	kindObserver KindObserver
 
-	sanitizeSecrets bool
+	sanitizeSecrets     bool
+	removeManagedFields bool
 
 	// for cleaning-up the desired state cache of MR from
 	// state cache manager, when MR gets deleted
@@ -518,6 +522,9 @@ func (c *external) setAtProvider(obj *v1alpha2.Object, observed *unstructured.Un
 
 	// sanitize/mutate only the copied object
 	sObserved := observed.DeepCopy()
+	if c.removeManagedFields {
+		sObserved.SetManagedFields(nil)
+	}
 	if c.sanitizeSecrets {
 		if observed.GetKind() == "Secret" && observed.GetAPIVersion() == "v1" {
 			data := map[string][]byte{"redacted": []byte(nil)}
