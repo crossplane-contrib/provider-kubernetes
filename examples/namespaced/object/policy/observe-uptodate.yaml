@@ -1,25 +1,42 @@
 ---
-# This example demonstrates the UpToDate condition for an observe-only Object.
+# This example demonstrates the UpToDate condition for an observe-only Object,
+# modelling the import/adoption use case: a resource that already exists in the
+# cluster (managed by some other actor) is observed by an Object whose manifest
+# describes the desired state we intend to adopt it into.
 #
-# The Object below observes a ConfigMap and desires a specific value for
-# data.sample-key. Because the management policy is Observe-only, the provider
-# never creates or updates the ConfigMap - but it now reports whether the
-# observed state matches the desired state via the UpToDate condition:
+# Because the management policy is Observe-only, the provider never creates,
+# updates, or deletes the Secret. The UpToDate condition instead answers the
+# operator's question: "when I switch this Object to update mode, what actually
+# changes on the live resource?"
 #
-#   - observed == desired -> UpToDate: True  (reason: ObserveMatched)
-#   - observed != desired -> UpToDate: False (reason: UpdateRestricted), with
-#     the diff carried in the condition message, and NO change made to the
-#     ConfigMap.
+#   - an update would change nothing -> UpToDate: True  (ObserveMatched)
+#   - an update would change fields   -> UpToDate: False (UpdateRestricted),
+#     with a field-level diff in the condition message and NO change made.
 #
-# The post-assert-hook drives this transition by patching the live ConfigMap
-# out of sync with the desired manifest. See testhooks/validate-uptodate.sh.
+# Notes on the choices here:
+#   - A Secret is used as the observed resource because uptest's generated
+#     status assertions skip the "secret." KindGroup; a plain ConfigMap would
+#     otherwise be (incorrectly) asserted to have a Ready condition it can never
+#     have.
+#   - Secret values are given as base64 under `data` (not `stringData`), because
+#     the provider's server-side-apply dry run works against the typed Secret
+#     schema, where `stringData` is a write-only convenience field that does not
+#     round-trip.
+#
+# The seed Secret below is created by chainsaw (an external field manager) with
+# sample-key=live-value (base64 bGl2ZS12YWx1ZQ==), while the Object's manifest
+# desires sample-key=desired-value (base64 ZGVzaXJlZC12YWx1ZQ==) - so the Object
+# begins life UpToDate: False with a diff naming that change. The
+# post-assert-hook then reconciles the live Secret to the desired value and
+# asserts the condition flips to True. See testhooks/validate-uptodate.sh.
 apiVersion: v1
-kind: ConfigMap
+kind: Secret
 metadata:
   name: observe-uptodate
   namespace: default
 data:
-  sample-key: sample-value
+  # base64("live-value")
+  sample-key: bGl2ZS12YWx1ZQ==
 ---
 apiVersion: kubernetes.m.crossplane.io/v1alpha1
 kind: Object
@@ -28,21 +45,22 @@ metadata:
   namespace: default
   annotations:
     uptest.upbound.io/post-assert-hook: testhooks/validate-uptodate.sh
-    uptest.upbound.io/timeout: "120"
+    uptest.upbound.io/timeout: "180"
 spec:
-  # Observe-only: the provider will not create, update, or delete the ConfigMap.
+  # Observe-only: the provider will not create, update, or delete the Secret.
   managementPolicies: ["Observe"]
   forProvider:
     manifest:
       apiVersion: v1
-      kind: ConfigMap
+      kind: Secret
       metadata:
         namespace: default
       data:
-        # The desired value. The seed ConfigMap above matches this, so the
-        # Object begins life UpToDate: True. The hook then patches the live
-        # ConfigMap's sample-key to diverge from this value.
-        sample-key: sample-value
+        # Desired value (base64 of "desired-value") differs from the live
+        # Secret's "live-value", so an update (were it allowed) would change
+        # sample-key. The hook later reconciles the live value to this to
+        # demonstrate the True transition.
+        sample-key: ZGVzaXJlZC12YWx1ZQ==
   providerConfigRef:
     kind: ClusterProviderConfig
     name: kubernetes-provider

@@ -150,6 +150,19 @@ type ResourceSyncer interface {
 	SyncResource(ctx context.Context, obj *v1alpha2.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error)
 }
 
+// An UpToDateDiffer can compute a human-readable diff describing what applying
+// the object's manifest in update mode would change on the live resource,
+// independent of current field ownership. It is an optional capability: only
+// syncers that can compute such a diff (i.e. the server-side apply syncer)
+// implement it. Syncers that do not implement it fall back to the coarser diff
+// derived from the observed/desired comparison.
+type UpToDateDiffer interface {
+	// UpToDateDiff returns a diff of what an update-mode apply of the manifest
+	// would change on current. It returns an empty string when there is no
+	// meaningful change.
+	UpToDateDiff(ctx context.Context, obj *v1alpha2.Object, manifest, current *unstructured.Unstructured) (string, error)
+}
+
 // Setup adds a controller that reconciles Object managed resources.
 func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJitterPercentage uint, legacyCSAFieldManagers []string) error { // nolint:gocyclo // Too many branches due to alpha features, hopefully we can clean them up after we graduate them.
 	name := managed.ControllerName(v1alpha2.ObjectGroupKind)
@@ -421,7 +434,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetDesiredState)
 	}
 
-	return c.handleObservation(ctx, obj, observedState, desiredState)
+	return c.handleObservation(ctx, obj, observedState, desiredState, manifest, current)
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
@@ -738,7 +751,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 	return nil
 }
 
-func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
+func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, last, desired, manifest, current *unstructured.Unstructured) (managed.ExternalObservation, error) {
 	observeOnly := !sets.New[xpv2.ManagementAction](obj.GetManagementPolicies()...).
 		HasAny(xpv2.ManagementActionUpdate, xpv2.ManagementActionCreate, xpv2.ManagementActionAll)
 
@@ -747,6 +760,33 @@ func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, 
 	// publication, however, remain tied to the previous notion of "settled":
 	// the resource is either in sync or only observed.
 	isUpToDate, diff := pcontroller.UpToDate(last, desired)
+
+	// Prefer a diff that shows what an update-mode apply would actually change
+	// on the live object - independent of current field ownership - when the
+	// syncer can compute one (the server-side apply syncer can). This is the
+	// meaningful answer for an operator validating an import: "when I switch to
+	// update mode, what changes?".
+	if differ, ok := c.syncer.(UpToDateDiffer); ok {
+		if d, err := differ.UpToDateDiff(ctx, obj, manifest, current); err != nil {
+			c.logger.Debug("Cannot compute update-mode diff for UpToDate condition", "error", err)
+		} else if observeOnly {
+			// In observe mode the provider owns no fields, so the extracted
+			// observed/desired comparison cannot tell whether the live object
+			// actually matches the manifest. The update-mode diff is the
+			// authoritative signal here: an empty diff means an update would
+			// change nothing, i.e. the resource is up-to-date. This is safe
+			// because the reconciler never issues an Update in observe mode, so
+			// it does not affect when Update fires; it only makes the UpToDate
+			// condition report a truthful "would applying change anything?".
+			isUpToDate = d == ""
+			diff = d
+		} else if !isUpToDate && d != "" {
+			// In create/update modes keep the existing up-to-date decision
+			// (which governs whether Update is called) and only enrich the diff
+			// message with the update-mode diff.
+			diff = d
+		}
+	}
 
 	if isUpToDate || observeOnly {
 		c.logger.Debug("Up to date!")

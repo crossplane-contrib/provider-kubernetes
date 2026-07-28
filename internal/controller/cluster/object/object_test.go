@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -305,6 +306,8 @@ func TestObserve(t *testing.T) {
 		// text is not asserted (it is compared via IgnoreFields), only whether
 		// a diff is present.
 		wantDiffNonEmpty bool
+		// wantDiffContains, when set, asserts out.Diff contains the substring.
+		wantDiffContains string
 		// wantReady, when set, asserts the status of the Object's Ready
 		// condition after Observe returns.
 		wantReady *corev1.ConditionStatus
@@ -687,6 +690,85 @@ func TestObserve(t *testing.T) {
 				wantReady:        ptr.To(corev1.ConditionTrue),
 			},
 		},
+		"Drift diff prefers the syncer's update-mode diff": {
+			// When the syncer implements UpToDateDiffer (as the SSA syncer
+			// does), the drift diff reported on the condition is the
+			// update-mode diff - what an update would change on the live object
+			// - rather than the coarse observed/desired comparison.
+			args: args{
+				mg: kubernetesObject(),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource(func(res *unstructured.Unstructured) {
+								res.SetLabels(map[string]string{"a-new-label": "foo"})
+							})
+							return nil
+						}),
+					},
+				},
+				syncer: &fake.DiffingResourceSyncer{
+					ResourceSyncer: fake.ResourceSyncer{
+						GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+							return current, nil
+						},
+						GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+							return manifest, nil
+						},
+					},
+					UpToDateDiffFn: func(ctx context.Context, obj *v1alpha2.Object, manifest, current *unstructured.Unstructured) (string, error) {
+						return "UPDATE-MODE-DIFF-SENTINEL", nil
+					},
+				},
+			},
+			want: want{
+				out:              managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
+				err:              nil,
+				wantDiffNonEmpty: true,
+				wantDiffContains: "UPDATE-MODE-DIFF-SENTINEL",
+			},
+		},
+		"Observe Only - clean import is up to date via update-mode diff": {
+			// In observe mode the provider owns no fields, so the extracted
+			// comparison cannot confirm a match. When the update-mode differ
+			// reports an empty diff (an update would change nothing), the
+			// resource is up-to-date - the "safe to adopt" signal an operator
+			// validating an import needs.
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource()
+							return nil
+						}),
+					},
+				},
+				syncer: &fake.DiffingResourceSyncer{
+					ResourceSyncer: fake.ResourceSyncer{
+						GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+							// Empty extraction, mimicking observe-only ownership:
+							// the coarse comparison would say "not up to date".
+							return &unstructured.Unstructured{}, nil
+						},
+						GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+							return manifest, nil
+						},
+					},
+					UpToDateDiffFn: func(ctx context.Context, obj *v1alpha2.Object, manifest, current *unstructured.Unstructured) (string, error) {
+						// An update would change nothing: clean import.
+						return "", nil
+					},
+				},
+			},
+			want: want{
+				out:       managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true, ConnectionDetails: managed.ConnectionDetails{}},
+				err:       nil,
+				wantReady: ptr.To(corev1.ConditionTrue),
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -707,6 +789,10 @@ func TestObserve(t *testing.T) {
 
 			if gotNonEmpty := got.Diff != ""; gotNonEmpty != tc.want.wantDiffNonEmpty {
 				t.Fatalf("e.Observe(...): want Diff non-empty=%v, got Diff=%q", tc.want.wantDiffNonEmpty, got.Diff)
+			}
+
+			if tc.want.wantDiffContains != "" && !strings.Contains(got.Diff, tc.want.wantDiffContains) {
+				t.Fatalf("e.Observe(...): want Diff to contain %q, got Diff=%q", tc.want.wantDiffContains, got.Diff)
 			}
 
 			if tc.want.wantReady != nil {

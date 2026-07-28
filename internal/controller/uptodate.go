@@ -24,15 +24,6 @@ import (
 )
 
 // UpToDate reports whether the observed state (last) of an Object's external
-// resource matches the desired state, along with a diff describing any
-// divergence.
-//
-// observeOnly indicates that the Object's management policies do not permit
-// create or update actions (i.e. the resource is only observed). It is
-// accepted so that callers in both the cluster-scoped and namespaced-scoped
-// controllers share a single decision, without this package depending on
-// either Object API version.
-// UpToDate reports whether the observed state (last) of an Object's external
 // resource matches the desired state, and, when it does not, a diff describing
 // the divergence.
 //
@@ -57,4 +48,55 @@ func UpToDate(last, desired *unstructured.Unstructured) (isUpToDate bool, diff s
 		return true, ""
 	}
 	return false, cmp.Diff(last, desired)
+}
+
+// noiseFields are object fields that are managed by the API server or are
+// otherwise mechanical, and therefore not meaningful "changes" when reporting
+// what an update would do to a resource.
+var noiseFields = [][]string{
+	{"metadata", "managedFields"},
+	{"metadata", "resourceVersion"},
+	{"metadata", "uid"},
+	{"metadata", "creationTimestamp"},
+	{"metadata", "generation"},
+	{"status"},
+}
+
+// UpdateModeDiff reports what would change on a live object (current) if the
+// Object's manifest were applied in update mode. desiredObj is the result of a
+// server-side apply dry run of the manifest as the provider field owner (with
+// ForceOwnership) - i.e. exactly what the live object would become after an
+// update-mode apply. The returned string is a cmp.Diff of the two, with
+// server-managed and other mechanical fields removed so that only meaningful
+// changes are shown.
+//
+// Because both objects have passed through server-side defaulting, defaulted
+// values cancel out (see kubernetes/kubernetes#115563), and because a
+// server-side apply leaves fields the manifest does not reference untouched,
+// the diff contains exactly the fields the manifest would change - regardless
+// of which field manager currently owns them. This answers the operator's
+// question: "when I switch this Object to update mode, what actually changes?"
+//
+// It returns "" if either object is nil or if there is no meaningful
+// difference.
+func UpdateModeDiff(current, desiredObj *unstructured.Unstructured) string {
+	if current == nil || desiredObj == nil {
+		return ""
+	}
+	c := clean(current)
+	d := clean(desiredObj)
+	if equality.Semantic.DeepEqual(c, d) {
+		return ""
+	}
+	return cmp.Diff(c, d)
+}
+
+// clean returns a deep copy of the object with server-managed and mechanical
+// fields removed, so they do not appear as spurious changes in a diff.
+func clean(u *unstructured.Unstructured) *unstructured.Unstructured {
+	out := u.DeepCopy()
+	for _, f := range noiseFields {
+		unstructured.RemoveNestedField(out.Object, f...)
+	}
+	return out
 }

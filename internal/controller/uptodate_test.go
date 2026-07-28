@@ -85,3 +85,129 @@ func TestUpToDate(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateModeDiff(t *testing.T) {
+	// live builds a ConfigMap as it exists on the cluster, including mechanical
+	// metadata and status that must never appear in the diff.
+	live := func(data map[string]interface{}, labels map[string]interface{}) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":              "cm",
+				"namespace":         "default",
+				"resourceVersion":   "12345",
+				"uid":               "abc-123",
+				"creationTimestamp": "2026-07-28T00:00:00Z",
+				"generation":        int64(7),
+				"managedFields": []interface{}{
+					map[string]interface{}{"manager": "external-actor", "operation": "Apply"},
+				},
+			},
+			"data":   data,
+			"status": map[string]interface{}{"observedGeneration": int64(7)},
+		}}
+		if labels != nil {
+			_ = unstructured.SetNestedMap(u.Object, labels, "metadata", "labels")
+		}
+		return u
+	}
+
+	type args struct {
+		current    *unstructured.Unstructured
+		desiredObj *unstructured.Unstructured
+	}
+	type want struct {
+		diffIsEmpty bool
+		// diffContains are substrings expected anywhere in the diff.
+		diffContains []string
+		// changedContains are substrings expected on a changed (-/+) line.
+		changedContains []string
+		// changedExcludes are substrings that must NOT appear on any changed
+		// (-/+) line (they may still appear as unchanged context).
+		changedExcludes []string
+		// absent are substrings that must not appear anywhere in the diff
+		// (e.g. fields removed by clean()).
+		absent []string
+	}
+	cases := map[string]struct {
+		args args
+		want want
+	}{
+		"ManifestFieldWouldChange": {
+			// The would-be update changes data.sample-key; other live fields
+			// the manifest does not touch are carried through unchanged by the
+			// SSA dry-run, so they must not appear in the diff.
+			args: args{
+				current: live(map[string]interface{}{
+					"sample-key":        "live-external-value",
+					"external-only-key": "external-data",
+				}, map[string]interface{}{"external-label": "keep-me"}),
+				desiredObj: live(map[string]interface{}{
+					"sample-key":        "desired-value",
+					"external-only-key": "external-data",
+				}, map[string]interface{}{"external-label": "keep-me"}),
+			},
+			want: want{
+				diffIsEmpty:     false,
+				changedContains: []string{"sample-key", "desired-value", "live-external-value"},
+				changedExcludes: []string{"external-only-key", "external-label"},
+				absent:          []string{"managedFields", "resourceVersion", "creationTimestamp", "observedGeneration", "12345"},
+			},
+		},
+		"OnlyMechanicalMetadataDiffers": {
+			// Two objects that differ only in mechanical metadata / status are
+			// considered to have no meaningful update-mode change.
+			args: args{
+				current: live(map[string]interface{}{"sample-key": "v"}, nil),
+				desiredObj: func() *unstructured.Unstructured {
+					u := live(map[string]interface{}{"sample-key": "v"}, nil)
+					_ = unstructured.SetNestedField(u.Object, "99999", "metadata", "resourceVersion")
+					return u
+				}(),
+			},
+			want: want{diffIsEmpty: true},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := UpdateModeDiff(tc.args.current, tc.args.desiredObj)
+			if gotIsEmpty := got == ""; gotIsEmpty != tc.want.diffIsEmpty {
+				t.Fatalf("UpdateModeDiff(...): want empty=%v, got diff=%q", tc.want.diffIsEmpty, got)
+			}
+
+			// changedLines are the lines cmp.Diff marks as changed (leading
+			// - or + after trimming indentation).
+			var changed []string
+			for _, line := range strings.Split(got, "\n") {
+				t := strings.TrimSpace(line)
+				if strings.HasPrefix(t, "-") || strings.HasPrefix(t, "+") {
+					changed = append(changed, t)
+				}
+			}
+			changedText := strings.Join(changed, "\n")
+
+			for _, s := range tc.want.diffContains {
+				if !strings.Contains(got, s) {
+					t.Errorf("UpdateModeDiff(...): want diff to contain %q, got:\n%s", s, got)
+				}
+			}
+			for _, s := range tc.want.changedContains {
+				if !strings.Contains(changedText, s) {
+					t.Errorf("UpdateModeDiff(...): want a changed line containing %q, changed lines:\n%s", s, changedText)
+				}
+			}
+			for _, s := range tc.want.changedExcludes {
+				if strings.Contains(changedText, s) {
+					t.Errorf("UpdateModeDiff(...): want no changed line containing %q, changed lines:\n%s", s, changedText)
+				}
+			}
+			for _, s := range tc.want.absent {
+				if strings.Contains(got, s) {
+					t.Errorf("UpdateModeDiff(...): want diff NOT to contain %q anywhere, got:\n%s", s, got)
+				}
+			}
+		})
+	}
+}
