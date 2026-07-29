@@ -145,7 +145,11 @@ func sensitiveValuePath(u *unstructured.Unstructured) func(path []string) bool {
 		return func([]string) bool { return false }
 	}
 	return func(path []string) bool {
-		return len(path) >= 2 && (path[0] == "data" || path[0] == "stringData")
+		// Redact at or below the data/stringData maps. Using len >= 1 (rather
+		// than requiring a specific key) ensures that when the whole data map is
+		// added or removed - reported at path ["data"] - its rendered value
+		// (every secret key) is redacted, not just per-key changes.
+		return len(path) >= 1 && (path[0] == "data" || path[0] == "stringData")
 	}
 }
 

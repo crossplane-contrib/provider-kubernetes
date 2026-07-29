@@ -191,6 +191,39 @@ func TestUpdateModeDiff(t *testing.T) {
 				absent:      []string{"bGl2ZQ==", "ZGVzaXJlZA=="},
 			},
 		},
+		"SecretDataAddedWholesaleRedacted": {
+			// The desired Secret adds data the live object lacks. The diff
+			// reports the change at the data-map level (path ["data"]); the
+			// values must still be redacted, not leaked wholesale.
+			args: args{
+				current: &unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+					"metadata": map[string]interface{}{"name": "s", "namespace": "default"},
+				}},
+				desiredObj: secret(map[string]interface{}{"password": "ZGVzaXJlZA=="}),
+			},
+			want: want{
+				diffIsEmpty: false,
+				contains:    []string{"data"},
+				absent:      []string{"ZGVzaXJlZA=="},
+			},
+		},
+		"SecretDataRemovedWholesaleRedacted": {
+			// The desired Secret drops data the live object has. The removed
+			// value must be redacted, not leaked.
+			args: args{
+				current: secret(map[string]interface{}{"password": "bGl2ZQ=="}),
+				desiredObj: &unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+					"metadata": map[string]interface{}{"name": "s", "namespace": "default"},
+				}},
+			},
+			want: want{
+				diffIsEmpty: false,
+				contains:    []string{"data"},
+				absent:      []string{"bGl2ZQ=="},
+			},
+		},
 		"OnlyMechanicalMetadataDiffers": {
 			// Two objects that differ only in mechanical metadata / status are
 			// considered to have no meaningful update-mode change.
