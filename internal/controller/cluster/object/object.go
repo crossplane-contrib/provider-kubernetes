@@ -770,62 +770,7 @@ func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, 
 	observeOnly := !sets.New[xpv2.ManagementAction](obj.GetManagementPolicies()...).
 		HasAny(xpv2.ManagementActionUpdate, xpv2.ManagementActionCreate, xpv2.ManagementActionAll)
 
-	var isUpToDate bool
-	var diff string
-
-	switch {
-	case observeOnly:
-		// For an observe-only Object the provider owns no fields, so the
-		// extracted observed/desired comparison cannot tell whether the live
-		// object matches the manifest. Instead we ask the syncer what an
-		// update-mode apply would change (a server-side apply dry run):
-		//   - no change  -> up to date (ObserveMatched)
-		//   - a change   -> not up to date, with the diff as the message
-		// This is safe because the reconciler never issues an Update in observe
-		// mode; it only makes the UpToDate condition report a truthful "would
-		// applying the manifest change anything?".
-		//
-		// Crucially, we do NOT call GetDesiredState here. Its dry run can fail
-		// for sparse manifests that omit or null required fields (see #431), and
-		// for observe-only resources we never use its result. If the update-mode
-		// diff itself cannot be computed (same class of failure), we treat the
-		// resource as not up to date with an explanatory message, but do NOT
-		// fail the observe - the resource stays Synced.
-		differ, ok := c.syncer.(UpToDateDiffer)
-		switch {
-		case !ok:
-			// No diff capability (e.g. the client-side apply syncer): we cannot
-			// compute drift for an observe-only resource, so treat it as
-			// up to date rather than emit a spurious diff.
-			isUpToDate = true
-		default:
-			d, err := differ.UpToDateDiff(ctx, obj, manifest, current)
-			switch {
-			case err != nil:
-				c.logger.Debug("Cannot compute update-mode diff for UpToDate condition", "error", err)
-				isUpToDate = false
-				diff = fmt.Sprintf("unable to determine drift: %s", err)
-			default:
-				isUpToDate = d == ""
-				diff = d
-			}
-		}
-
-	default:
-		// Create/update modes keep the existing extracted comparison, which
-		// governs whether Update is called. We only enrich the diff message
-		// with the update-mode diff when the resource has drifted.
-		isUpToDate, diff = pcontroller.UpToDate(last, desired)
-		if !isUpToDate {
-			if differ, ok := c.syncer.(UpToDateDiffer); ok {
-				if d, err := differ.UpToDateDiff(ctx, obj, manifest, current); err != nil {
-					c.logger.Debug("Cannot compute update-mode diff for UpToDate condition", "error", err)
-				} else if d != "" {
-					diff = d
-				}
-			}
-		}
-	}
+	isUpToDate, diff := c.upToDate(ctx, obj, last, desired, manifest, current, observeOnly)
 
 	if isUpToDate || observeOnly {
 		c.logger.Debug("Up to date!")
@@ -852,6 +797,52 @@ func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, 
 		ResourceUpToDate: isUpToDate,
 		Diff:             diff,
 	}, nil
+}
+
+// upToDate determines whether the Object is up to date and, when it is not, a
+// diff describing what an update would change.
+//
+// For observe-only Objects the provider owns no fields, so the extracted
+// observed/desired comparison cannot tell whether the live object matches the
+// manifest. Instead we ask the syncer what an update-mode apply would change (a
+// server-side apply dry run): no change means up to date, a change means not up
+// to date with the diff as the message. We do NOT call GetDesiredState for
+// observe-only Objects - its dry run can fail for sparse manifests that omit or
+// null required fields (see #431), and we never use its result. If the
+// update-mode diff itself cannot be computed (same class of failure) we report
+// not up to date with an explanatory message, but the caller does not fail the
+// observe, so the resource stays Synced.
+//
+// In create/update modes the existing extracted comparison governs the decision
+// (and thus whether Update is called); the update-mode diff, if available, only
+// enriches the message when the resource has drifted.
+func (c *external) upToDate(ctx context.Context, obj *v1alpha2.Object, last, desired, manifest, current *unstructured.Unstructured, observeOnly bool) (bool, string) {
+	differ, canDiff := c.syncer.(UpToDateDiffer)
+
+	if observeOnly {
+		if !canDiff {
+			// No diff capability (e.g. the client-side apply syncer): we cannot
+			// compute drift for an observe-only resource, so treat it as up to
+			// date rather than emit a spurious diff.
+			return true, ""
+		}
+		d, err := differ.UpToDateDiff(ctx, obj, manifest, current)
+		if err != nil {
+			c.logger.Debug("Cannot compute update-mode diff for UpToDate condition", "error", err)
+			return false, fmt.Sprintf("unable to determine drift: %s", err)
+		}
+		return d == "", d
+	}
+
+	isUpToDate, diff := pcontroller.UpToDate(last, desired)
+	if !isUpToDate && canDiff {
+		if d, err := differ.UpToDateDiff(ctx, obj, manifest, current); err != nil {
+			c.logger.Debug("Cannot compute update-mode diff for UpToDate condition", "error", err)
+		} else if d != "" {
+			diff = d
+		}
+	}
+	return isUpToDate, diff
 }
 
 type objFinalizer struct {

@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/google/go-cmp/cmp"
-
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -65,15 +64,17 @@ func UpToDate(last, desired *unstructured.Unstructured) (isUpToDate bool, diff s
 	return false, cmp.Diff(last, desired)
 }
 
+const metadataField = "metadata"
+
 // noiseFields are object fields that are managed by the API server or are
 // otherwise mechanical, and therefore not meaningful "changes" when reporting
 // what an update would do to a resource.
 var noiseFields = [][]string{
-	{"metadata", "managedFields"},
-	{"metadata", "resourceVersion"},
-	{"metadata", "uid"},
-	{"metadata", "creationTimestamp"},
-	{"metadata", "generation"},
+	{metadataField, "managedFields"},
+	{metadataField, "resourceVersion"},
+	{metadataField, "uid"},
+	{metadataField, "creationTimestamp"},
+	{metadataField, "generation"},
 	{"status"},
 }
 
