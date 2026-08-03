@@ -27,6 +27,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	celtypes "github.com/google/cel-go/common/types"
+	"github.com/google/go-cmp/cmp"
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -777,6 +778,8 @@ func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, 
 			ConnectionDetails: cd,
 		}, nil
 	}
+
+	c.logger.Debug("Not up to date", "diff", cmp.Diff(last, desired))
 
 	return managed.ExternalObservation{
 		ResourceExists:   true,
