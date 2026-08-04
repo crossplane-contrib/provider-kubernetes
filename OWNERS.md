@@ -19,3 +19,4 @@ guidelines and responsibilities for the steering committee and maintainers.
 * Alper Ulucinar <alper@upbound.io> ([ulucinar](https://github.com/ulucinar))
 * Erhan Cagirici <erhan@upbound.io> ([erhancagirici](https://github.com/erhancagirici))
 * Bob Haddleton <bob.haddleton@nokia.com> ([bobh66](https://github.com/bobh66))
+* Jonasz Łasut-Balcerzak <jonasz@upbound.io> ([jonasz-lasut](https://github.com/jonasz-lasut))
