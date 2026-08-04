@@ -176,11 +176,13 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		managed.WithDeterministicExternalName(true),
 	}
 
+	usage := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{})
+
 	conn := &connector{
 		logger:          o.Logger,
 		sanitizeSecrets: sanitizeSecrets,
 		kube:            mgr.GetClient(),
-		usage:           resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
+		usage:           usage,
 		clientBuilder:   kubeclient.NewIdentityAwareBuilder(mgr.GetClient()),
 	}
 
@@ -234,6 +236,12 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		cb = cb.WatchesRawSource(&i)
 	}
 	reconcilerOptions = append(reconcilerOptions, managed.WithExternalConnector(conn))
+
+	// Release the ProviderConfigUsage once the Object has finished deleting, so
+	// the ProviderConfig it references cannot be garbage collected while the
+	// Object still needs to connect. This must be the same tracker the connector
+	// records the usage with.
+	reconcilerOptions = append(reconcilerOptions, managed.WithProviderConfigUsageCleaner(usage))
 
 	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
 		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
