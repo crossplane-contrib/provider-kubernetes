@@ -50,11 +50,14 @@ type ProviderCredentials struct {
 }
 
 // Identity used to authenticate.
+// +kubebuilder:validation:XValidation:rule="!has(self.impersonateServiceAccount) || self.type == 'GoogleApplicationCredentials'",message="impersonateServiceAccount is only valid when type is GoogleApplicationCredentials"
 type Identity struct {
 	// Type of identity.
 	Type IdentityType `json:"type"`
 
-	// ImpersonateServiceAccount is the email address of the Google Service Account to impersonate.
+	// ImpersonateServiceAccount configures optional impersonation of a Google
+	// service account: the email address of the service account to impersonate
+	// plus an optional delegation chain.
 	// This is only valid when the identity type is GoogleApplicationCredentials.
 	// +optional
 	ImpersonateServiceAccount *ImpersonateServiceAccountConfig `json:"impersonateServiceAccount,omitempty"`
@@ -65,6 +68,7 @@ type Identity struct {
 // ImpersonateServiceAccountConfig contains the configuration for impersonating a service account.
 type ImpersonateServiceAccountConfig struct {
 	// Name of the service account to impersonate.
+	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
 	// Delegates is an optional chain of service accounts used to reach the

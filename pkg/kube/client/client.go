@@ -59,6 +59,11 @@ const (
 	errParseProxyURL             = "cannot parse proxy URL from kubeconfig"
 )
 
+// gkeWrapRESTConfig is an indirection over gke.WrapRESTConfig so that tests
+// can verify the identity-to-impersonation wiring without reaching Google
+// APIs.
+var gkeWrapRESTConfig = gke.WrapRESTConfig
+
 // A Builder creates Kubernetes clients and REST configs for a given provider
 // config.
 type Builder interface {
@@ -308,7 +313,7 @@ func (b *IdentityAwareBuilder) identityInjector(ctx context.Context, id *kconfig
 		switch id.Source { //nolint:exhaustive
 		case xpv2.CredentialsSourceInjectedIdentity:
 			return func(ctx context.Context, rc *rest.Config) error {
-				return errors.Wrap(gke.WrapRESTConfig(ctx, rc, nil, impersonation, gke.DefaultScopes...), errInjectGoogleCredentials)
+				return errors.Wrap(gkeWrapRESTConfig(ctx, rc, nil, impersonation, gke.DefaultScopes...), errInjectGoogleCredentials)
 			}, nil
 		default:
 			creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
@@ -317,7 +322,7 @@ func (b *IdentityAwareBuilder) identityInjector(ctx context.Context, id *kconfig
 			}
 			digestWrite(digest, creds)
 			return func(ctx context.Context, rc *rest.Config) error {
-				return errors.Wrap(gke.WrapRESTConfig(ctx, rc, creds, impersonation, gke.DefaultScopes...), errInjectGoogleCredentials)
+				return errors.Wrap(gkeWrapRESTConfig(ctx, rc, creds, impersonation, gke.DefaultScopes...), errInjectGoogleCredentials)
 			}, nil
 		}
 	case kconfig.IdentityTypeAzureServicePrincipalCredentials, kconfig.IdentityTypeAzureWorkloadIdentityCredentials:
