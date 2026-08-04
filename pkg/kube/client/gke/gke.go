@@ -37,9 +37,16 @@ var DefaultScopes []string = []string{
 // construction can be exercised in unit tests without reaching out to the
 // metadata server or the IAM Credentials API.
 var (
-	defaultTokenSource         = google.DefaultTokenSource
-	credentialsFromJSON        = google.CredentialsFromJSON
-	newImpersonatedTokenSource = impersonate.CredentialsTokenSource
+	defaultTokenSource  = google.DefaultTokenSource
+	credentialsFromJSON = google.CredentialsFromJSON //nolint:staticcheck // SA1019: caller supplies credentials via a trusted Kubernetes Secret; no drop-in replacement supports all accepted credential types
+	// newImpersonatedTokenSource exchanges the base token source for one that
+	// impersonates the target service account. The base token source is passed
+	// explicitly (rather than via opaque client options) so that tests can
+	// assert the configured credentials - not Application Default Credentials -
+	// sign the impersonation request.
+	newImpersonatedTokenSource = func(ctx context.Context, config impersonate.CredentialsConfig, base oauth2.TokenSource) (oauth2.TokenSource, error) {
+		return impersonate.CredentialsTokenSource(ctx, config, option.WithTokenSource(base))
+	}
 )
 
 // Impersonation configures optional GCP service account impersonation.
@@ -58,11 +65,12 @@ type Impersonation struct {
 // WrapRESTConfig configures the supplied REST config to use OAuth2 bearer
 // tokens fetched using the supplied Google Application Credentials.
 //
-// When impersonation is non-nil and its TargetPrincipal is set, the base
-// credentials built from the supplied credentials (or the injected identity)
-// are used to impersonate the target service account (optionally through a
-// delegation chain), and the impersonated token source is what ultimately
-// signs requests.
+// When impersonation is non-nil, the base credentials built from the supplied
+// credentials (or the injected identity) are used to impersonate the target
+// service account (optionally through a delegation chain), and the
+// impersonated token source is what ultimately signs requests. An empty
+// TargetPrincipal is an error: an explicit request to impersonate must never
+// silently fall back to the base identity.
 func WrapRESTConfig(ctx context.Context, rc *rest.Config, credentials []byte, impersonation *Impersonation, scopes ...string) error {
 	// TODO(turkenh): Use token.ReuseSourceStore to cache token sources and
 	// avoid token regeneration on every reconciliation loop.
@@ -94,18 +102,20 @@ func WrapRESTConfig(ctx context.Context, rc *rest.Config, credentials []byte, im
 		ts = oauth2.StaticTokenSource(&t)
 	}
 
-	if impersonation != nil && impersonation.TargetPrincipal != "" {
-		// Exchange the base credentials for a token that impersonates the
-		// target service account. The base token source is passed explicitly so
-		// that the configured credentials sign the impersonation request rather
-		// than falling back to Application Default Credentials.
+	if impersonation != nil {
+		// Impersonation was requested: fail closed on an empty target rather
+		// than silently proceeding with the (potentially more privileged) base
+		// identity.
+		if impersonation.TargetPrincipal == "" {
+			return errors.New("impersonation requested with an empty target service account")
+		}
 		its, err := newImpersonatedTokenSource(ctx,
 			impersonate.CredentialsConfig{
 				TargetPrincipal: impersonation.TargetPrincipal,
 				Scopes:          scopes,
 				Delegates:       impersonation.Delegates,
 			},
-			option.WithTokenSource(ts),
+			ts,
 		)
 		if err != nil {
 			return errors.Wrap(err, "cannot create impersonated token source")

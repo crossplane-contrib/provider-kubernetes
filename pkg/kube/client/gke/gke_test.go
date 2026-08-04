@@ -24,7 +24,6 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/impersonate"
-	"google.golang.org/api/option"
 	"k8s.io/client-go/rest"
 )
 
@@ -39,7 +38,7 @@ func staticSource(token string) oauth2.TokenSource {
 func stubHelpers(t *testing.T,
 	def func(context.Context, ...string) (oauth2.TokenSource, error),
 	fromJSON func(context.Context, []byte, ...string) (*google.Credentials, error),
-	imp func(context.Context, impersonate.CredentialsConfig, ...option.ClientOption) (oauth2.TokenSource, error),
+	imp func(context.Context, impersonate.CredentialsConfig, oauth2.TokenSource) (oauth2.TokenSource, error),
 ) {
 	t.Helper()
 	origDef, origJSON, origImp := defaultTokenSource, credentialsFromJSON, newImpersonatedTokenSource
@@ -154,7 +153,7 @@ func TestWrapRESTConfigJSONCredentials(t *testing.T) {
 func TestWrapRESTConfigImpersonation(t *testing.T) {
 	t.Run("not requested when nil", func(t *testing.T) {
 		called := false
-		stubHelpers(t, nil, nil, func(_ context.Context, _ impersonate.CredentialsConfig, _ ...option.ClientOption) (oauth2.TokenSource, error) {
+		stubHelpers(t, nil, nil, func(_ context.Context, _ impersonate.CredentialsConfig, _ oauth2.TokenSource) (oauth2.TokenSource, error) {
 			called = true
 			return staticSource("impersonated"), nil
 		})
@@ -168,19 +167,23 @@ func TestWrapRESTConfigImpersonation(t *testing.T) {
 		}
 	})
 
-	t.Run("not requested when target principal is empty", func(t *testing.T) {
+	t.Run("fails closed on an empty target principal", func(t *testing.T) {
 		called := false
-		stubHelpers(t, nil, nil, func(_ context.Context, _ impersonate.CredentialsConfig, _ ...option.ClientOption) (oauth2.TokenSource, error) {
+		stubHelpers(t, nil, nil, func(_ context.Context, _ impersonate.CredentialsConfig, _ oauth2.TokenSource) (oauth2.TokenSource, error) {
 			called = true
 			return staticSource("impersonated"), nil
 		})
 
 		rc := &rest.Config{}
-		if err := WrapRESTConfig(context.Background(), rc, []byte("ya29.token"), &Impersonation{}); err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		err := WrapRESTConfig(context.Background(), rc, []byte("ya29.token"), &Impersonation{})
+		if err == nil || !strings.Contains(err.Error(), "empty target service account") {
+			t.Fatalf("expected an empty-target error, got: %v", err)
 		}
 		if called {
 			t.Fatal("impersonation must not be attempted with an empty target principal")
+		}
+		if rc.WrapTransport != nil {
+			t.Fatal("transport must not be wired with the base identity when impersonation was requested but invalid")
 		}
 	})
 
@@ -188,11 +191,11 @@ func TestWrapRESTConfigImpersonation(t *testing.T) {
 		const sa = "target@project.iam.gserviceaccount.com"
 		var (
 			gotConfig impersonate.CredentialsConfig
-			gotOpts   []option.ClientOption
+			gotBase   oauth2.TokenSource
 		)
-		stubHelpers(t, nil, nil, func(_ context.Context, cfg impersonate.CredentialsConfig, opts ...option.ClientOption) (oauth2.TokenSource, error) {
+		stubHelpers(t, nil, nil, func(_ context.Context, cfg impersonate.CredentialsConfig, base oauth2.TokenSource) (oauth2.TokenSource, error) {
 			gotConfig = cfg
-			gotOpts = opts
+			gotBase = base
 			return staticSource("impersonated"), nil
 		})
 
@@ -207,14 +210,27 @@ func TestWrapRESTConfigImpersonation(t *testing.T) {
 			t.Fatalf("expected scopes %v to be forwarded, got %v", DefaultScopes, gotConfig.Scopes)
 		}
 		// The regression guard for the original bug: the base token source
-		// built from the supplied credentials must be threaded through as a
-		// client option so that impersonation is signed by the configured
-		// credentials rather than Application Default Credentials.
-		if len(gotOpts) == 0 {
-			t.Fatal("expected the base token source to be passed as a client option")
+		// handed to the impersonation exchange must be the one built from the
+		// supplied credentials - not Application Default Credentials. Assert
+		// it yields the sentinel access token the credentials were built from.
+		if gotBase == nil {
+			t.Fatal("expected the base token source to be passed to the impersonation exchange")
 		}
-		if src := transportSource(t, rc); src == nil {
-			t.Fatal("expected a non-nil token source on the transport")
+		baseTok, err := gotBase.Token()
+		if err != nil {
+			t.Fatalf("unexpected error from base token source: %v", err)
+		}
+		if baseTok.AccessToken != "ya29.token" {
+			t.Fatalf("impersonation must be signed by the configured credentials; base source yielded %q", baseTok.AccessToken)
+		}
+		// The transport must sign requests with the impersonated token, not
+		// the base one.
+		finalTok, err := transportSource(t, rc).Token()
+		if err != nil {
+			t.Fatalf("unexpected error from transport token source: %v", err)
+		}
+		if finalTok.AccessToken != "impersonated" {
+			t.Fatalf("transport must use the impersonated token source, got token %q", finalTok.AccessToken)
 		}
 	})
 
@@ -225,7 +241,7 @@ func TestWrapRESTConfigImpersonation(t *testing.T) {
 			"second@project.iam.gserviceaccount.com",
 		}
 		var gotConfig impersonate.CredentialsConfig
-		stubHelpers(t, nil, nil, func(_ context.Context, cfg impersonate.CredentialsConfig, _ ...option.ClientOption) (oauth2.TokenSource, error) {
+		stubHelpers(t, nil, nil, func(_ context.Context, cfg impersonate.CredentialsConfig, _ oauth2.TokenSource) (oauth2.TokenSource, error) {
 			gotConfig = cfg
 			return staticSource("impersonated"), nil
 		})
@@ -240,7 +256,7 @@ func TestWrapRESTConfigImpersonation(t *testing.T) {
 	})
 
 	t.Run("failure is wrapped", func(t *testing.T) {
-		stubHelpers(t, nil, nil, func(_ context.Context, _ impersonate.CredentialsConfig, _ ...option.ClientOption) (oauth2.TokenSource, error) {
+		stubHelpers(t, nil, nil, func(_ context.Context, _ impersonate.CredentialsConfig, _ oauth2.TokenSource) (oauth2.TokenSource, error) {
 			return nil, errors.New("iam denied")
 		})
 
