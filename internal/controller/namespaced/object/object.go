@@ -767,9 +767,17 @@ func (c *external) handleObservation(ctx context.Context, obj *v1alpha1.Object, 
 			obj.Status.SetConditions(xpv2.Available())
 		}
 
-		cd, err := connectionDetails(ctx, c.client.Client, obj.Spec.ConnectionDetails)
-		if err != nil {
-			return managed.ExternalObservation{}, errors.Wrap(err, errGetConnectionDetails)
+		var cd managed.ConnectionDetails
+		if !meta.WasDeleted(obj) {
+			// Connection details are not collected while the object is being
+			// deleted: a broken connection detail reference would block the
+			// deletion path, and the connection secret is owner-referenced to
+			// the Object, so it is garbage collected with it anyway.
+			var err error
+			cd, err = connectionDetails(ctx, c.client.Client, obj.Spec.ConnectionDetails)
+			if err != nil {
+				return managed.ExternalObservation{}, errors.Wrap(err, errGetConnectionDetails)
+			}
 		}
 
 		return managed.ExternalObservation{

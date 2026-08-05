@@ -617,6 +617,53 @@ func TestObserve(t *testing.T) {
 				err: errors.Wrap(errors.Wrap(errBoom, errGetObject), errGetConnectionDetails),
 			},
 		},
+		"SkipConnectionDetailsIfObjectWasDeleted": {
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.ObjectMeta.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+					obj.Spec.ConnectionDetails = []v1alpha2.ConnectionDetail{
+						{
+							ObjectReference: corev1.ObjectReference{
+								Kind:       "Secret",
+								Namespace:  testNamespace,
+								Name:       testSecretName,
+								APIVersion: "v1",
+								FieldPath:  "data.db-password",
+							},
+							ToConnectionSecretKey: "password",
+						},
+					}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+							switch key.Name {
+							case externalResourceName:
+								*obj.(*unstructured.Unstructured) = *externalResource()
+							case testSecretName:
+								return errBoom
+							}
+							return nil
+						},
+					},
+				},
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return current, nil
+					},
+					GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return manifest, nil
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
 		"Observe Only - up to date by default": {
 			args: args{
 				mg: kubernetesObject(func(obj *v1alpha2.Object) {
