@@ -28,6 +28,37 @@ spec:
   package: xpkg.crossplane.io/crossplane-contrib/provider-kubernetes:v1.0.0
 ```
 
+## Known limitations
+
+### Write-only fields cannot be reconciled
+
+Some Kubernetes fields are "write-only": the API server accepts them but
+transforms or drops them on write, so they never appear when the resource is
+read back. The canonical example is `Secret.stringData`, which the API server
+merges into `data` without ever storing `stringData` itself.
+
+The provider cannot correctly reconcile such fields in an `Object` manifest
+(see the analysis in
+[#420](https://github.com/crossplane-contrib/provider-kubernetes/issues/420)):
+
+- With server-side apply (the default since v1.2.0), drift detection compares
+  the fields owned by the provider's field manager on the observed resource
+  against the result of a dry-run apply of the manifest. A write-only field
+  appears in neither, so changing e.g. `stringData` in the manifest after
+  creation produces no diff and is never applied to the cluster. The provider
+  has no way of knowing that `data` is the server-side transformation of
+  `stringData`.
+- If the provider's field manager owns *only* fields that are absent from the
+  observed resource — a `Secret` whose manifest sets only `stringData`
+  ([#420](https://github.com/crossplane-contrib/provider-kubernetes/issues/420)),
+  or one created with an empty `data`
+  ([#418](https://github.com/crossplane-contrib/provider-kubernetes/issues/418)) —
+  the managed-fields extraction fails with `ExtractInto ... expected map, got
+  <nil>` and the `Object` gets stuck with `Synced: False` in `ReconcileError`.
+
+Prefer round-trippable fields in `Object` manifests: for `Secret`s, set
+base64-encoded values in `data` instead of using `stringData`.
+
 ## Developing locally
 
 See the header of [`go.mod`](./go.mod) for the minimum supported version of Go.
