@@ -15,6 +15,8 @@ package client
 
 import (
 	"context"
+	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -47,6 +49,7 @@ const (
 	errInjectAWSCredentials      = "failed to wrap REST client with AWS credentials"
 	errExtractNebiusCredentials  = "failed to extract Nebius service account credentials"
 	errInjectNebiusCredentials   = "failed to wrap REST client with Nebius service account credentials"
+	errParseProxyURL             = "cannot parse proxy URL from kubeconfig"
 )
 
 // A Builder creates Kubernetes clients and REST configs for a given provider
@@ -255,6 +258,14 @@ func fromAPIConfig(c *api.Config) (*rest.Config, error) {
 			KeyData:    user.ClientKeyData,
 			CAData:     cluster.CertificateAuthorityData,
 		},
+	}
+
+	if cluster.ProxyURL != "" {
+		proxyURL, err := url.Parse(cluster.ProxyURL)
+		if err != nil {
+			return nil, errors.Wrap(err, errParseProxyURL)
+		}
+		config.Proxy = http.ProxyURL(proxyURL)
 	}
 
 	// NOTE(tnthornton): these values match the burst and QPS values in kubectl.
