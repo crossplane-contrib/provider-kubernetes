@@ -74,6 +74,7 @@ import (
 const (
 	webhookTLSCertDirEnvVar = "WEBHOOK_TLS_CERT_DIR"
 	tlsServerCertDirEnvVar  = "TLS_SERVER_CERTS_DIR"
+	certsDirEnvVar          = "CERTS_DIR"
 	tlsServerCertDir        = "/tls/server"
 )
 
@@ -109,6 +110,14 @@ func main() {
 		// Additional legacy field managers to upgrade to Server-side apply field manager
 		legacyCSAFieldManagers = app.Flag("legacy-csa-field-managers", "Additional legacy client-side apply Kubernetes field manager names for upgrading to SSA field manager").Default().Strings()
 		enableSecretCache      = app.Flag("enable-secret-cache", "Enable caching of Secret objects. When true, Secrets are served from the informer cache instead of direct API calls. This reduces API server load but increases memory usage.").Default("true").Envar("ENABLE_SECRET_CACHE").Bool()
+
+		certsDirSet = false
+		// we record whether the command-line option "--certs-dir" was supplied
+		// in the registered PreAction for the flag.
+		certsDir = app.Flag("certs-dir", "The directory that contains the server key and certificate. Set to an empty string to disable the conversion webhook, e.g. when running out-of-cluster without TLS certificates.").Default(tlsServerCertDir).Envar(certsDirEnvVar).PreAction(func(_ *kingpin.ParseContext) error {
+			certsDirSet = true
+			return nil
+		}).String()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
@@ -136,15 +145,25 @@ func main() {
 	cfg, err := ctrl.GetConfig()
 	kingpin.FatalIfError(err, "Cannot get API server rest config")
 
-	// Get the TLS certs directory from the environment variable if set
+	// Get the TLS certs directory from the environment variables set by
+	// Crossplane if they're available.
 	// In older XP versions we used WEBHOOK_TLS_CERT_DIR, in newer versions
-	// we use TLS_SERVER_CERTS_DIR. If neither are set, use the default.
-	var certDir string
-	certDir = os.Getenv(webhookTLSCertDirEnvVar)
-	if certDir == "" {
-		certDir = os.Getenv(tlsServerCertDirEnvVar)
-		if certDir == "" {
-			certDir = tlsServerCertDir
+	// we use TLS_SERVER_CERTS_DIR. If an explicit certs dir is not supplied
+	// via the command-line options, then these environment variables are used
+	// instead.
+	if !certsDirSet {
+		// backwards-compatibility concerns
+		xpCertsDir := os.Getenv(certsDirEnvVar)
+		if xpCertsDir == "" {
+			xpCertsDir = os.Getenv(tlsServerCertDirEnvVar)
+		}
+		if xpCertsDir == "" {
+			xpCertsDir = os.Getenv(webhookTLSCertDirEnvVar)
+		}
+		// we probably don't need this condition but just to be on the
+		// safe side, if we are missing any kingpin machinery details...
+		if xpCertsDir != "" {
+			*certsDir = xpCertsDir
 		}
 	}
 
@@ -193,13 +212,12 @@ func main() {
 		LeaseDuration:              func() *time.Duration { d := 60 * time.Second; return &d }(),
 		RenewDeadline:              func() *time.Duration { d := 50 * time.Second; return &d }(),
 		WebhookServer: webhook.NewServer(webhook.Options{
-			CertDir: certDir,
+			CertDir: *certsDir,
 			Port:    *webhookPort,
 		}),
 		HealthProbeBindAddress: *healthProbeBindAddress,
 	})
 	kingpin.FatalIfError(err, "Cannot create controller manager")
-	kingpin.FatalIfError(mgr.AddReadyzCheck("webhook", mgr.GetWebhookServer().StartedChecker()), "Cannot add webhook server readyz checker to controller manager")
 
 	// The manager client reads through informers that only start with the
 	// manager, so the startup listing goes straight to the API server.
@@ -209,6 +227,10 @@ func main() {
 	cacheSize, err := clientCacheSize(sizingCtx, log, sizingClient)
 	cancelSizing()
 	kingpin.FatalIfError(err, "Cannot calculate the client cache size")
+
+	if len(*certsDir) > 0 {
+		kingpin.FatalIfError(mgr.AddReadyzCheck("webhook", mgr.GetWebhookServer().StartedChecker()), "Cannot add webhook server readyz checker to controller manager")
+	}
 
 	mm := managed.NewMRMetricRecorder()
 	sm := statemetrics.NewMRStateMetrics()
@@ -275,11 +297,13 @@ func main() {
 		o.ChangeLogOptions = &clo
 	}
 
-	// NOTE(lsviben): We are registering the conversion webhook with v1alpha1
-	// Object. As far as I can see and based on some tests, it doesn't matter
-	// which version we use here. Leaving it as v1alpha1 as it will be easy to
-	// notice and remove when we drop support for v1alpha1.
-	kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr, &objectv1alpha1cluster.Object{}).Complete(), "Cannot create Object webhook") //nolint:staticcheck // registering conversion webhook for deprecated api
+	if len(*certsDir) > 0 {
+		// NOTE(lsviben): We are registering the conversion webhook with v1alpha1
+		// Object. As far as I can see and based on some tests, it doesn't matter
+		// which version we use here. Leaving it as v1alpha1 as it will be easy to
+		// notice and remove when we drop support for v1alpha1.
+		kingpin.FatalIfError(ctrl.NewWebhookManagedBy(mgr, &objectv1alpha1cluster.Object{}).Complete(), "Cannot create Object webhook") //nolint:staticcheck // registering conversion webhook for deprecated api
+	}
 	precheckCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	canSafeStart, err := canWatchCRD(precheckCtx, mgr)
