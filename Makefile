@@ -119,10 +119,17 @@ build.init: $(CROSSPLANE_CLI)
 # This is for running out-of-cluster locally, and is for convenience. Running
 # this make target will print out the command which was used. For more control,
 # try running the binary directly with different arguments.
-run: $(KUBECTL) generate
+# The objects CRD ships a partial conversion-webhook stanza that only the
+# Crossplane package manager can complete at install time, so it is stripped
+# before applying, and the provider runs with an empty --certs-dir, which
+# disables the conversion webhook so that no TLS certificates are needed.
+# See #343 and #249.
+run: $(KUBECTL) $(YQ) generate
 	@$(INFO) Running Crossplane locally out-of-cluster . . .
-	@$(KUBECTL) apply -f package/crds/ -R
-	go run cmd/provider/main.go -d
+	@for crd in package/crds/*.yaml; do \
+		$(YQ) 'del(.spec.conversion)' "$$crd" | $(KUBECTL) apply -f - || exit 1; \
+	done
+	go run cmd/provider/main.go -d --certs-dir=""
 
 manifests:
 	@$(INFO) Deprecated. Run make generate instead.
