@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/google/cel-go/cel"
 	celtypes "github.com/google/cel-go/common/types"
 	"github.com/pkg/errors"
@@ -375,7 +376,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Observing", "resource", obj)
+	c.logger.Debug("Observing", "resource", loggable(obj))
 
 	if !meta.WasDeleted(obj) {
 		// If the object is not being deleted, we need to resolve references
@@ -436,7 +437,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Creating", "resource", obj)
+	c.logger.Debug("Creating", "resource", loggable(obj))
 
 	res, err := parseManifest(obj)
 	if err != nil {
@@ -456,7 +457,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotKubernetesObject)
 	}
 
-	c.logger.Debug("Updating", "resource", obj)
+	c.logger.Debug("Updating", "resource", loggable(obj))
 
 	res, err := parseManifest(obj)
 	if err != nil {
@@ -482,7 +483,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.Ext
 		PropagationPolicy: &propagationPolicy,
 	}
 
-	c.logger.Debug("Deleting", "resource", obj, "propagationPolicy", obj.Spec.ForProvider.DeletionPropagationPolicy)
+	c.logger.Debug("Deleting", "resource", loggable(obj), "propagationPolicy", obj.Spec.ForProvider.DeletionPropagationPolicy)
 
 	res, err := parseManifest(obj)
 	if err != nil {
@@ -518,6 +519,76 @@ func parseManifest(obj *v1alpha1.Object) (*unstructured.Unstructured, error) {
 	return r, nil
 }
 
+// loggable wraps an Object for debug logging so that Secret data is redacted
+// lazily, only when the log line is actually emitted.
+func loggable(obj *v1alpha1.Object) logr.Marshaler {
+	return loggableObject{obj: obj}
+}
+
+type loggableObject struct {
+	obj *v1alpha1.Object
+}
+
+// MarshalLog implements logr.Marshaler. It returns a copy of the Object with
+// the data and stringData of a wrapped v1 Secret manifest redacted in both
+// the desired manifest and the observed state, so that secret values do not
+// end up in provider logs. The deeper handling of secret values persisted in
+// the managed resource itself is tracked in #223.
+func (l loggableObject) MarshalLog() any {
+	spec, specRedacted := redactSecretManifest(l.obj.Spec.ForProvider.Manifest.Raw)
+	status, statusRedacted := redactSecretManifest(l.obj.Status.AtProvider.Manifest.Raw)
+	if !specRedacted && !statusRedacted {
+		return l.obj
+	}
+	logged := l.obj.DeepCopy()
+	logged.Spec.ForProvider.Manifest.Raw = spec
+	logged.Status.AtProvider.Manifest.Raw = status
+	return logged
+}
+
+// isSecret returns whether the given object is a v1 Secret.
+func isSecret(u *unstructured.Unstructured) bool {
+	return u.GetAPIVersion() == "v1" && u.GetKind() == "Secret"
+}
+
+// redactField replaces the contents of the named top-level field with a
+// redaction marker.
+func redactField(u *unstructured.Unstructured, field string) error {
+	data := map[string][]byte{"redacted": []byte(nil)}
+	return fieldpath.Pave(u.Object).SetValue(field, data)
+}
+
+// redactSecretManifest replaces the data and stringData contents of a raw
+// v1 Secret manifest with a redaction marker. Non-Secret manifests and
+// unparseable payloads are returned unchanged.
+func redactSecretManifest(raw []byte) ([]byte, bool) {
+	u := &unstructured.Unstructured{}
+	if err := json.Unmarshal(raw, u); err != nil || !isSecret(u) {
+		return raw, false
+	}
+	redacted := false
+	for _, field := range []string{"data", "stringData"} {
+		if _, ok := u.Object[field]; ok {
+			if err := redactField(u, field); err != nil {
+				// prefer dropping the manifest from the log line over
+				// leaking secret data
+				return nil, true
+			}
+			redacted = true
+		}
+	}
+	if !redacted {
+		return raw, false
+	}
+	out, err := u.MarshalJSON()
+	if err != nil {
+		// should not happen for an object that was just unmarshalled; prefer
+		// dropping the manifest from the log line over leaking secret data
+		return nil, true
+	}
+	return out, true
+}
+
 func (c *external) setAtProvider(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
 	var err error
 
@@ -526,12 +597,9 @@ func (c *external) setAtProvider(obj *v1alpha1.Object, observed *unstructured.Un
 	if c.removeManagedFields {
 		sObserved.SetManagedFields(nil)
 	}
-	if c.sanitizeSecrets {
-		if observed.GetKind() == "Secret" && observed.GetAPIVersion() == "v1" {
-			data := map[string][]byte{"redacted": []byte(nil)}
-			if err = fieldpath.Pave(sObserved.Object).SetValue("data", data); err != nil {
-				return errors.Wrap(err, errSanitizeSecretData)
-			}
+	if c.sanitizeSecrets && isSecret(sObserved) {
+		if err = redactField(sObserved, "data"); err != nil {
+			return errors.Wrap(err, errSanitizeSecretData)
 		}
 	}
 
