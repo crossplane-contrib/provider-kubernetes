@@ -28,6 +28,27 @@ spec:
   package: xpkg.crossplane.io/crossplane-contrib/provider-kubernetes:v1.0.0
 ```
 
+## Kubernetes compatibility
+
+The provider interacts with two kinds of clusters: the control plane it runs
+on (where Crossplane and the `Object` managed resources live) and the target
+clusters referenced by its `ProviderConfig`s (where the wrapped objects are
+applied), which may be the control plane itself.
+
+Each release is built against the [`k8s.io/client-go`](https://github.com/kubernetes/client-go)
+version pinned in that release's [`go.mod`](./go.mod) — for example `v0.35.x`
+corresponds to Kubernetes 1.35. Per the client-go
+[compatibility matrix](https://github.com/kubernetes/client-go#compatibility-matrix)
+and the Kubernetes [version skew policy](https://kubernetes.io/releases/version-skew-policy/),
+that client version is supported against the same Kubernetes minor version,
+one minor older, and one minor newer.
+
+In practice the provider is not very sensitive to the exact server version:
+it manages arbitrary objects generically, using unstructured types,
+server-side apply, and each target cluster's own discovery and OpenAPI data.
+Clusters outside the official skew therefore usually work, but only the
+client-go range above is tested and supported.
+
 ## Developing locally
 
 See the header of [`go.mod`](./go.mod) for the minimum supported version of Go.
