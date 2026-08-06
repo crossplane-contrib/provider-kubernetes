@@ -35,6 +35,7 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -257,7 +258,22 @@ func main() {
 		kingpin.FatalIfError(controllerCluster.Setup(mgr, o, po), "Cannot setup cluster-scoped controller")
 		kingpin.FatalIfError(controllerNamespaced.Setup(mgr, o, po), "Cannot setup namespaced controller")
 	}
+
+	// Setup health probes
+	kingpin.FatalIfError(setupHealthProbes(mgr), "Cannot setup health probes")
+
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")
+}
+
+// setupHealthProbes sets up the health and readiness probes.
+func setupHealthProbes(mgr ctrl.Manager) error {
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		return errors.Wrap(err, "cannot add readiness probe")
+	}
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		return errors.Wrap(err, "cannot add liveness probe")
+	}
+	return nil
 }
 
 // UseISO8601 sets the logger to use ISO8601 timestamp format
