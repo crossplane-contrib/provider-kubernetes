@@ -137,6 +137,30 @@ spec:
                     required:
                     - path
                     type: object
+                  impersonateServiceAccount:
+                    description: |-
+                      ImpersonateServiceAccount configures optional impersonation of a Google
+                      service account: the email address of the service account to impersonate
+                      plus an optional delegation chain.
+                      This is only valid when the identity type is GoogleApplicationCredentials.
+                    properties:
+                      delegates:
+                        description: |-
+                          Delegates is an optional chain of service accounts used to reach the
+                          impersonated service account. Each service account must be granted
+                          roles/iam.serviceAccountTokenCreator on the next one in the chain, with
+                          the last delegate having it on the service account referenced by Name.
+                          The base identity must have that role on the first delegate.
+                        items:
+                          type: string
+                        type: array
+                      name:
+                        description: Name of the service account to impersonate.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
                   secretRef:
                     description: |-
                       A SecretRef is a reference to a secret key that contains the credentials
@@ -179,6 +203,9 @@ spec:
                 - source
                 - type
                 type: object
+                x-kubernetes-validations:
+                - message: impersonateServiceAccount is only valid when type is GoogleApplicationCredentials
+                  rule: '!has(self.impersonateServiceAccount) || self.type == ''GoogleApplicationCredentials'''
             required:
             - credentials
             type: object

@@ -49,6 +49,11 @@ const (
 	errInjectNebiusCredentials   = "failed to wrap REST client with Nebius service account credentials"
 )
 
+// gkeWrapRESTConfig is an indirection over gke.WrapRESTConfig so that tests
+// can verify the identity-to-impersonation wiring without reaching Google
+// APIs.
+var gkeWrapRESTConfig = gke.WrapRESTConfig
+
 // A Builder creates Kubernetes clients and REST configs for a given provider
 // config.
 type Builder interface {
@@ -127,9 +132,16 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 	if id := pc.Identity; id != nil {
 		switch id.Type {
 		case kconfig.IdentityTypeGoogleApplicationCredentials:
+			var impersonation *gke.Impersonation
+			if id.ImpersonateServiceAccount != nil {
+				impersonation = &gke.Impersonation{
+					TargetPrincipal: id.ImpersonateServiceAccount.Name,
+					Delegates:       id.ImpersonateServiceAccount.Delegates,
+				}
+			}
 			switch id.Source { //nolint:exhaustive
 			case xpv2.CredentialsSourceInjectedIdentity:
-				if err := gke.WrapRESTConfig(ctx, rc, nil, gke.DefaultScopes...); err != nil {
+				if err := gkeWrapRESTConfig(ctx, rc, nil, impersonation, gke.DefaultScopes...); err != nil {
 					return nil, errors.Wrap(err, errInjectGoogleCredentials)
 				}
 			default:
@@ -138,7 +150,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 					return nil, errors.Wrap(err, errExtractGoogleCredentials)
 				}
 
-				if err := gke.WrapRESTConfig(ctx, rc, creds, gke.DefaultScopes...); err != nil {
+				if err := gkeWrapRESTConfig(ctx, rc, creds, impersonation, gke.DefaultScopes...); err != nil {
 					return nil, errors.Wrap(err, errInjectGoogleCredentials)
 				}
 			}

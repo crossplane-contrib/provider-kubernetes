@@ -50,11 +50,34 @@ type ProviderCredentials struct {
 }
 
 // Identity used to authenticate.
+// +kubebuilder:validation:XValidation:rule="!has(self.impersonateServiceAccount) || self.type == 'GoogleApplicationCredentials'",message="impersonateServiceAccount is only valid when type is GoogleApplicationCredentials"
 type Identity struct {
 	// Type of identity.
 	Type IdentityType `json:"type"`
 
+	// ImpersonateServiceAccount configures optional impersonation of a Google
+	// service account: the email address of the service account to impersonate
+	// plus an optional delegation chain.
+	// This is only valid when the identity type is GoogleApplicationCredentials.
+	// +optional
+	ImpersonateServiceAccount *ImpersonateServiceAccountConfig `json:"impersonateServiceAccount,omitempty"`
+
 	ProviderCredentials `json:",inline"`
+}
+
+// ImpersonateServiceAccountConfig contains the configuration for impersonating a service account.
+type ImpersonateServiceAccountConfig struct {
+	// Name of the service account to impersonate.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Delegates is an optional chain of service accounts used to reach the
+	// impersonated service account. Each service account must be granted
+	// roles/iam.serviceAccountTokenCreator on the next one in the chain, with
+	// the last delegate having it on the service account referenced by Name.
+	// The base identity must have that role on the first delegate.
+	// +optional
+	Delegates []string `json:"delegates,omitempty"`
 }
 
 // A ProviderConfigSpec defines the desired state of a ProviderConfig.
