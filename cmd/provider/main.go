@@ -35,9 +35,11 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	changelogsv1alpha1 "github.com/crossplane/crossplane-runtime/v2/apis/changelogs/proto/v1alpha1"
@@ -88,6 +90,8 @@ func main() {
 		leaderElection          = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
 		maxReconcileRate        = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("100").Int()
 		sanitizeSecrets         = app.Flag("sanitize-secrets", "when enabled, redacts Secret data from Object status").Default("false").Envar("SANITIZE_SECRETS").Bool()
+		webhookPort             = app.Flag("webhook-port", "The port the webhook server listens on.").Default("9443").Envar("WEBHOOK_PORT").Int()
+		metricsBindAddress      = app.Flag("metrics-bind-address", "The address the metrics server listens on").Default(":8080").Envar("METRICS_BIND_ADDRESS").String()
 		healthProbeBindAddress  = app.Flag("health-probe-bind-addr", "The address the health/readiness probe server listens on").Default(":8081").Envar("HEALTH_PROBE_BIND_ADDRESS").String()
 		changelogsSocketPath    = app.Flag("changelogs-socket-path", "Path for changelogs socket (if enabled)").Default("/var/run/changelogs/changelogs.sock").Envar("CHANGELOGS_SOCKET_PATH").String()
 
@@ -143,6 +147,10 @@ func main() {
 			DefaultTransform: cache.TransformStripManagedFields(),
 		},
 
+		Metrics: metricsserver.Options{
+			BindAddress: *metricsBindAddress,
+		},
+
 		// controller-runtime uses both ConfigMaps and Leases for leader
 		// election by default. Leases expire after 15 seconds, with a
 		// 10 second renewal deadline. We've observed leader loss due to
@@ -157,6 +165,7 @@ func main() {
 		RenewDeadline:              func() *time.Duration { d := 50 * time.Second; return &d }(),
 		WebhookServer: webhook.NewServer(webhook.Options{
 			CertDir: certDir,
+			Port:    *webhookPort,
 		}),
 		HealthProbeBindAddress: *healthProbeBindAddress,
 	})
@@ -249,7 +258,22 @@ func main() {
 		kingpin.FatalIfError(controllerCluster.Setup(mgr, o, po), "Cannot setup cluster-scoped controller")
 		kingpin.FatalIfError(controllerNamespaced.Setup(mgr, o, po), "Cannot setup namespaced controller")
 	}
+
+	// Setup health probes
+	kingpin.FatalIfError(setupHealthProbes(mgr), "Cannot setup health probes")
+
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")
+}
+
+// setupHealthProbes sets up the health and readiness probes.
+func setupHealthProbes(mgr ctrl.Manager) error {
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		return errors.Wrap(err, "cannot add readiness probe")
+	}
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		return errors.Wrap(err, "cannot add liveness probe")
+	}
+	return nil
 }
 
 // UseISO8601 sets the logger to use ISO8601 timestamp format
