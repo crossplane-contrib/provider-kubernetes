@@ -1,0 +1,78 @@
+---
+# This example demonstrates the UpToDate condition for an observe-only Object,
+# modelling the import/adoption use case: a resource that already exists in the
+# cluster (managed by some other actor) is observed by an Object whose manifest
+# describes the desired state we intend to adopt it into.
+#
+# Because the management policy is Observe-only, the provider never creates,
+# updates, or deletes the Secret. The UpToDate condition instead answers the
+# operator's question: "when I switch this Object to update mode, what actually
+# changes on the live resource?"
+#
+#   - an update would change nothing -> UpToDate: True  (ObserveMatched)
+#   - an update would change fields   -> UpToDate: False (UpdateRestricted),
+#     with a field-level diff in the condition message and NO change made.
+#
+# Notes on the choices here:
+#   - A Secret is used as the observed resource because uptest's generated
+#     status assertions skip the "secret." KindGroup; a plain ConfigMap would
+#     otherwise be (incorrectly) asserted to have a Ready condition it can never
+#     have. Using a Secret also exercises value redaction in the diff.
+#   - Secret values are given as base64 under `data` (not `stringData`), because
+#     the provider's server-side-apply dry run works against the typed Secret
+#     schema, where `stringData` is a write-only convenience field that does not
+#     round-trip.
+#
+# The seed Secret below is created by chainsaw (an external field manager) and
+# differs from the Object's manifest in two ways: a metadata label
+# (app: legacy -> adopted) and a Secret data value (sample-key). The Object
+# therefore begins life UpToDate: False, and the condition message shows both
+# changes by key path - with the Secret value redacted, e.g.:
+#
+#   ~ data.sample-key: <redacted> -> <redacted>
+#   ~ metadata.labels.app: legacy -> adopted
+#
+# The post-assert-hook then reconciles the live Secret to match the manifest and
+# asserts the condition flips to True. See testhooks/validate-uptodate.sh.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: observe-uptodate
+  namespace: default
+  labels:
+    app: legacy
+data:
+  # base64("live-value")
+  sample-key: bGl2ZS12YWx1ZQ==
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: observe-uptodate
+  namespace: default
+  annotations:
+    uptest.upbound.io/post-assert-hook: testhooks/validate-uptodate.sh
+    uptest.upbound.io/timeout: "180"
+spec:
+  # Observe-only: the provider will not create, update, or delete the Secret.
+  managementPolicies: ["Observe"]
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        namespace: default
+        labels:
+          # Desired label differs from the live Secret's "legacy", so an update
+          # would change metadata.labels.app - a non-sensitive field shown in
+          # full in the diff.
+          app: adopted
+      data:
+        # Desired value (base64 of "desired-value") differs from the live
+        # Secret's "live-value", so an update would change sample-key - a
+        # sensitive field whose value is redacted in the diff. The hook later
+        # reconciles the live values to these to demonstrate the True transition.
+        sample-key: ZGVzaXJlZC12YWx1ZQ==
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider

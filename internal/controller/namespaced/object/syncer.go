@@ -18,6 +18,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
+	pcontroller "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/ssa/cache/state"
 )
 
@@ -125,6 +126,23 @@ func (s *SSAResourceSyncer) GetDesiredState(ctx context.Context, obj *v1alpha1.O
 	// in error case, is set to nil, effectively invalidating the entry
 	desiredStateCache.SetStateFor(obj, desired)
 	return desired, errors.Wrap(err, "cannot extract SSA")
+}
+
+// UpToDateDiff returns a diff describing what a server-side apply of the
+// manifest in update mode would change on the live object (current),
+// independent of current field ownership. It performs a dry-run apply as the
+// provider field owner with ForceOwnership - exactly what SyncResource would do
+// - and diffs the result against the live object, so the diff reflects the real
+// would-be changes an operator would see when switching to update mode.
+func (s *SSAResourceSyncer) UpToDateDiff(ctx context.Context, obj *v1alpha1.Object, manifest, current *unstructured.Unstructured) (string, error) {
+	if current == nil || manifest == nil {
+		return "", nil
+	}
+	desiredObj := manifest.DeepCopy()
+	if err := s.client.Patch(ctx, desiredObj, client.Apply, client.ForceOwnership, client.FieldOwner(ssaFieldOwner(obj.Name)), client.DryRunAll); err != nil { //nolint:staticcheck // SA1019: keeping client.Apply until controller-runtime's Client.Apply is available on all supported paths
+		return "", errors.Wrap(CleanErr(err), "cannot dry run SSA for up-to-date diff")
+	}
+	return pcontroller.UpdateModeDiff(current, desiredObj), nil
 }
 
 // SyncResource syncs the supplied object by using server-side apply to apply.

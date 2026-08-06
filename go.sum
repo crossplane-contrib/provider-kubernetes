@@ -37,6 +37,8 @@ github.com/AzureAD/microsoft-authentication-library-for-go v1.2.2 h1:XHOnouVk1mx
 github.com/AzureAD/microsoft-authentication-library-for-go v1.2.2/go.mod h1:wP83P5OoQ5p6ip3ScPr0BAq0BvuPAvacpEuSzyouqAI=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
+github.com/Sanyaku/crossplane-runtime/v2 v2.0.0-20260508182025-384d7ae96d57 h1:e58X/ldRUo+3Xmy4eNKOgyCrOMcNLtQoP8NQesna7W8=
+github.com/Sanyaku/crossplane-runtime/v2 v2.0.0-20260508182025-384d7ae96d57/go.mod h1:Ka1RUeGewtYwI1GdNYNdJKnocTWbueDkqbRrcqDCA2M=
 github.com/alecthomas/kingpin/v2 v2.4.0 h1:f48lwail6p8zpO1bC4TxtqACaGqHYA22qkHjHpqDjYY=
 github.com/alecthomas/kingpin/v2 v2.4.0/go.mod h1:0gyi0zQnjuFk8xrkNKamJoyUo382HRL7ATRpFZCw6tE=
 github.com/alecthomas/units v0.0.0-20240927000941-0f3dac36c52b h1:mimo19zliBX/vSQ6PWWSL9lK8qwHozUj03+zLoEB8O0=
@@ -84,8 +86,6 @@ github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XL
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
 github.com/crossplane/crossplane-runtime v1.15.1 h1:g1h75tNYOQT152IUNxs8ZgSsRFQKrZN9z69KefMujXs=
 github.com/crossplane/crossplane-runtime v1.15.1/go.mod h1:kRcJjJQmBFrR2n/KhwL8wYS7xNfq3D8eK4JliEScOHI=
-github.com/crossplane/crossplane-runtime/v2 v2.3.3 h1:seIYf6pk7dLhXd7uSh/N9rVB8IdbCthy3LB6TSn91OI=
-github.com/crossplane/crossplane-runtime/v2 v2.3.3/go.mod h1:UBxoZEXVZz9Ql2W5u5ssFE+egQ21BYqGGc2F3dozUvI=
 github.com/crossplane/crossplane-tools v0.0.0-20260715161912-60e57f817ad1 h1:8//14K4ULQABVOE8Oq2oYKLhJRr1u6Qs5TaqF6CA9Jg=
 github.com/crossplane/crossplane-tools v0.0.0-20260715161912-60e57f817ad1/go.mod h1:8etxwmP4cZwJDwen4+PQlnc1tggltAhEfyyigmdHulQ=
 github.com/crossplane/crossplane/apis/v2 v2.3.3 h1:nNc2N5rycYUThpcuYvN3oFpIZQFp011oxafLlnyY0r4=

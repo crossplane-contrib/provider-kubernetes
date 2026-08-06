@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -302,6 +303,15 @@ func TestObserve(t *testing.T) {
 	type want struct {
 		out managed.ExternalObservation
 		err error
+		// wantDiffNonEmpty asserts that out.Diff is populated. The exact diff
+		// text is not asserted (it is compared via IgnoreFields), only whether
+		// a diff is present.
+		wantDiffNonEmpty bool
+		// wantDiffContains, when set, asserts out.Diff contains the substring.
+		wantDiffContains string
+		// wantReady, when set, asserts the status of the Object's Ready
+		// condition after Observe returns.
+		wantReady *corev1.ConditionStatus
 	}
 	cases := map[string]struct {
 		args
@@ -375,8 +385,9 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			want: want{
-				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
-				err: nil,
+				out:              managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
+				err:              nil,
+				wantDiffNonEmpty: true,
 			},
 		},
 		"UpToDate": {
@@ -617,7 +628,11 @@ func TestObserve(t *testing.T) {
 				err: errors.Wrap(errors.Wrap(errBoom, errGetObject), errGetConnectionDetails),
 			},
 		},
-		"Observe Only - up to date by default": {
+		"Observe Only - no diff capability is up to date": {
+			// With a syncer that cannot compute an update-mode diff (the
+			// client-side apply syncer), an observe-only Object is reported up to
+			// date - we do not emit a spurious diff. GetDesiredState must not be
+			// called for observe-only resources (a nil fn panics if invoked).
 			args: args{
 				mg: kubernetesObject(func(obj *v1alpha2.Object) {
 					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
@@ -634,14 +649,168 @@ func TestObserve(t *testing.T) {
 					GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 						return current, nil
 					},
-					GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-						return manifest, nil
-					},
+					// GetDesiredStateFn intentionally nil: observe-only must not
+					// call it.
 				},
 			},
 			want: want{
 				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true, ConnectionDetails: managed.ConnectionDetails{}},
 				err: nil,
+			},
+		},
+		"Observe Only - drift surfaces diff without update": {
+			// An observe-only Object whose external resource has drifted is
+			// reported as not up-to-date, with a populated Diff from the
+			// update-mode differ, so the divergence is visible even though the
+			// reconciler will not act on it. ConnectionDetails are still
+			// published because the resource is only observed.
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource(func(res *unstructured.Unstructured) {
+								res.SetLabels(map[string]string{"a-new-label": "foo"})
+							})
+							return nil
+						}),
+					},
+				},
+				syncer: &fake.DiffingResourceSyncer{
+					ResourceSyncer: fake.ResourceSyncer{
+						GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+							return current, nil
+						},
+						// GetDesiredStateFn intentionally nil: observe-only must
+						// not call it.
+					},
+					UpToDateDiffFn: func(ctx context.Context, obj *v1alpha2.Object, manifest, current *unstructured.Unstructured) (string, error) {
+						return "~ metadata.labels.a-new-label: <none> -> foo", nil
+					},
+				},
+			},
+			want: want{
+				out:              managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false, ConnectionDetails: managed.ConnectionDetails{}},
+				err:              nil,
+				wantDiffNonEmpty: true,
+				wantReady:        ptr.To(corev1.ConditionTrue),
+			},
+		},
+		"Drift diff prefers the syncer's update-mode diff": {
+			// When the syncer implements UpToDateDiffer (as the SSA syncer
+			// does), the drift diff reported on the condition is the
+			// update-mode diff - what an update would change on the live object
+			// - rather than the coarse observed/desired comparison.
+			args: args{
+				mg: kubernetesObject(),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource(func(res *unstructured.Unstructured) {
+								res.SetLabels(map[string]string{"a-new-label": "foo"})
+							})
+							return nil
+						}),
+					},
+				},
+				syncer: &fake.DiffingResourceSyncer{
+					ResourceSyncer: fake.ResourceSyncer{
+						GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+							return current, nil
+						},
+						GetDesiredStateFn: func(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+							return manifest, nil
+						},
+					},
+					UpToDateDiffFn: func(ctx context.Context, obj *v1alpha2.Object, manifest, current *unstructured.Unstructured) (string, error) {
+						return "UPDATE-MODE-DIFF-SENTINEL", nil
+					},
+				},
+			},
+			want: want{
+				out:              managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
+				err:              nil,
+				wantDiffNonEmpty: true,
+				wantDiffContains: "UPDATE-MODE-DIFF-SENTINEL",
+			},
+		},
+		"Observe Only - clean import is up to date via update-mode diff": {
+			// In observe mode the provider owns no fields, so the extracted
+			// comparison cannot confirm a match. When the update-mode differ
+			// reports an empty diff (an update would change nothing), the
+			// resource is up-to-date - the "safe to adopt" signal an operator
+			// validating an import needs.
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource()
+							return nil
+						}),
+					},
+				},
+				syncer: &fake.DiffingResourceSyncer{
+					ResourceSyncer: fake.ResourceSyncer{
+						GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+							return &unstructured.Unstructured{}, nil
+						},
+						// GetDesiredStateFn intentionally nil: observe-only must
+						// not call it.
+					},
+					UpToDateDiffFn: func(ctx context.Context, obj *v1alpha2.Object, manifest, current *unstructured.Unstructured) (string, error) {
+						// An update would change nothing: clean import.
+						return "", nil
+					},
+				},
+			},
+			want: want{
+				out:       managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true, ConnectionDetails: managed.ConnectionDetails{}},
+				err:       nil,
+				wantReady: ptr.To(corev1.ConditionTrue),
+			},
+		},
+		"Observe Only - dry run failure is non-fatal": {
+			// If the update-mode diff cannot be computed - e.g. the SSA dry run
+			// fails for a sparse manifest that omits required fields (see #431) -
+			// the observe must NOT error: the resource stays Synced. UpToDate is
+			// reported False with an explanatory message, since we could not
+			// confirm the resource matches its desired state.
+			args: args{
+				mg: kubernetesObject(func(obj *v1alpha2.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource()
+							return nil
+						}),
+					},
+				},
+				syncer: &fake.DiffingResourceSyncer{
+					ResourceSyncer: fake.ResourceSyncer{
+						GetObservedStateFn: func(ctx context.Context, obj *v1alpha2.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+							return &unstructured.Unstructured{}, nil
+						},
+						// GetDesiredStateFn intentionally nil: observe-only must
+						// not call it (a nil fn panics if invoked).
+					},
+					UpToDateDiffFn: func(ctx context.Context, obj *v1alpha2.Object, manifest, current *unstructured.Unstructured) (string, error) {
+						return "", errBoom
+					},
+				},
+			},
+			want: want{
+				out:              managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false, ConnectionDetails: managed.ConnectionDetails{}},
+				err:              nil,
+				wantDiffNonEmpty: true,
+				wantDiffContains: "unable to determine",
+				wantReady:        ptr.To(corev1.ConditionTrue),
 			},
 		},
 	}
@@ -658,8 +827,26 @@ func TestObserve(t *testing.T) {
 				t.Fatalf("e.Observe(...): -want error, +got error: %s", diff)
 			}
 
-			if diff := cmp.Diff(tc.want.out, got); diff != "" {
+			if diff := cmp.Diff(tc.want.out, got, cmpopts.IgnoreFields(managed.ExternalObservation{}, "Diff")); diff != "" {
 				t.Fatalf("e.Observe(...): -want out, +got out: %s", diff)
+			}
+
+			if gotNonEmpty := got.Diff != ""; gotNonEmpty != tc.want.wantDiffNonEmpty {
+				t.Fatalf("e.Observe(...): want Diff non-empty=%v, got Diff=%q", tc.want.wantDiffNonEmpty, got.Diff)
+			}
+
+			if tc.want.wantDiffContains != "" && !strings.Contains(got.Diff, tc.want.wantDiffContains) {
+				t.Fatalf("e.Observe(...): want Diff to contain %q, got Diff=%q", tc.want.wantDiffContains, got.Diff)
+			}
+
+			if tc.want.wantReady != nil {
+				obj, ok := tc.args.mg.(*v1alpha2.Object)
+				if !ok {
+					t.Fatalf("e.Observe(...): want Ready assertion, but managed resource is not a *v1alpha2.Object")
+				}
+				if got := obj.GetCondition(xpv2.TypeReady).Status; got != *tc.want.wantReady {
+					t.Fatalf("e.Observe(...): Ready condition: want status %v, got %v", *tc.want.wantReady, got)
+				}
 			}
 		})
 	}

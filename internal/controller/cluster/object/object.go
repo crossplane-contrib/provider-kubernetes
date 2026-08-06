@@ -29,7 +29,6 @@ import (
 	celtypes "github.com/google/cel-go/common/types"
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -149,6 +148,19 @@ type ResourceSyncer interface {
 	GetDesiredState(ctx context.Context, obj *v1alpha2.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error)
 	// SyncResource syncs the desired state of the object manifest to the Kube API.
 	SyncResource(ctx context.Context, obj *v1alpha2.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error)
+}
+
+// An UpToDateDiffer can compute a human-readable diff describing what applying
+// the object's manifest in update mode would change on the live resource,
+// independent of current field ownership. It is an optional capability: only
+// syncers that can compute such a diff (i.e. the server-side apply syncer)
+// implement it. Syncers that do not implement it fall back to the coarser diff
+// derived from the observed/desired comparison.
+type UpToDateDiffer interface {
+	// UpToDateDiff returns a diff of what an update-mode apply of the manifest
+	// would change on current. It returns an empty string when there is no
+	// meaningful change.
+	UpToDateDiff(ctx context.Context, obj *v1alpha2.Object, manifest, current *unstructured.Unstructured) (string, error)
 }
 
 // Setup adds a controller that reconciles Object managed resources.
@@ -392,10 +404,16 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		c.kindObserver.WatchResources(c.rest, obj.Spec.ProviderConfigReference.Name, manifest.GroupVersionKind())
 	}
 
-	current := manifest.DeepCopy()
+	// Fetch the live object into a fresh unstructured carrying only its
+	// identity (GVK + name/namespace). We must NOT seed the Get target with the
+	// manifest's (desired) content: if Get returns a partially-populated object
+	// - e.g. from a not-yet-synced cache - any desired values left behind would
+	// masquerade as observed state and hide real drift.
+	current := &unstructured.Unstructured{}
+	current.SetGroupVersionKind(manifest.GroupVersionKind())
 	err = c.client.Get(ctx, types.NamespacedName{
-		Namespace: current.GetNamespace(),
-		Name:      current.GetName(),
+		Namespace: manifest.GetNamespace(),
+		Name:      manifest.GetName(),
 	}, current)
 
 	if kerrors.IsNotFound(err) {
@@ -421,12 +439,21 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObservedState)
 	}
 
+	// Compute the desired state only when the management policy actually manages
+	// the resource. For observe-only Objects we never use it, and its dry-run
+	// server-side apply can fail for sparse manifests that omit or null required
+	// fields (see #431) - so calling it there would break observe-only resources
+	// for no benefit. Observe-only up-to-date-ness is derived in handleObservation
+	// from an update-mode diff instead.
 	var desiredState *unstructured.Unstructured
-	if desiredState, err = c.syncer.GetDesiredState(ctx, obj, manifest); err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errGetDesiredState)
+	if manages := sets.New[xpv2.ManagementAction](obj.GetManagementPolicies()...).
+		HasAny(xpv2.ManagementActionUpdate, xpv2.ManagementActionCreate, xpv2.ManagementActionAll); manages {
+		if desiredState, err = c.syncer.GetDesiredState(ctx, obj, manifest); err != nil {
+			return managed.ExternalObservation{}, errors.Wrap(err, errGetDesiredState)
+		}
 	}
 
-	return c.handleObservation(ctx, obj, observedState, desiredState)
+	return c.handleObservation(ctx, obj, observedState, desiredState, manifest, current)
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
@@ -746,20 +773,13 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha2.Object)
 	return nil
 }
 
-func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {
-	isUpToDate := false //nolint:staticcheck
+func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, last, desired, manifest, current *unstructured.Unstructured) (managed.ExternalObservation, error) {
+	observeOnly := !sets.New[xpv2.ManagementAction](obj.GetManagementPolicies()...).
+		HasAny(xpv2.ManagementActionUpdate, xpv2.ManagementActionCreate, xpv2.ManagementActionAll)
 
-	if !sets.New[xpv2.ManagementAction](obj.GetManagementPolicies()...).
-		HasAny(xpv2.ManagementActionUpdate, xpv2.ManagementActionCreate, xpv2.ManagementActionAll) {
-		// Treated as up-to-date as we don't update or create the resource
-		isUpToDate = true
-	}
-	if last != nil && equality.Semantic.DeepEqual(last, desired) {
-		// Mark as up-to-date since last is equal to desired
-		isUpToDate = true
-	}
+	isUpToDate, diff := c.upToDate(ctx, obj, last, desired, manifest, current, observeOnly)
 
-	if isUpToDate {
+	if isUpToDate || observeOnly {
 		c.logger.Debug("Up to date!")
 
 		if p := obj.Spec.Readiness.Policy; p == v1alpha2.ReadinessPolicySuccessfulCreate || p == "" {
@@ -773,15 +793,63 @@ func (c *external) handleObservation(ctx context.Context, obj *v1alpha2.Object, 
 
 		return managed.ExternalObservation{
 			ResourceExists:    true,
-			ResourceUpToDate:  true,
+			ResourceUpToDate:  isUpToDate,
 			ConnectionDetails: cd,
+			Diff:              diff,
 		}, nil
 	}
 
 	return managed.ExternalObservation{
 		ResourceExists:   true,
-		ResourceUpToDate: false,
+		ResourceUpToDate: isUpToDate,
+		Diff:             diff,
 	}, nil
+}
+
+// upToDate determines whether the Object is up to date and, when it is not, a
+// diff describing what an update would change.
+//
+// For observe-only Objects the provider owns no fields, so the extracted
+// observed/desired comparison cannot tell whether the live object matches the
+// manifest. Instead we ask the syncer what an update-mode apply would change (a
+// server-side apply dry run): no change means up to date, a change means not up
+// to date with the diff as the message. We do NOT call GetDesiredState for
+// observe-only Objects - its dry run can fail for sparse manifests that omit or
+// null required fields (see #431), and we never use its result. If the
+// update-mode diff itself cannot be computed (same class of failure) we report
+// not up to date with an explanatory message, but the caller does not fail the
+// observe, so the resource stays Synced.
+//
+// In create/update modes the existing extracted comparison governs the decision
+// (and thus whether Update is called); the update-mode diff, if available, only
+// enriches the message when the resource has drifted.
+func (c *external) upToDate(ctx context.Context, obj *v1alpha2.Object, last, desired, manifest, current *unstructured.Unstructured, observeOnly bool) (bool, string) {
+	differ, canDiff := c.syncer.(UpToDateDiffer)
+
+	if observeOnly {
+		if !canDiff {
+			// No diff capability (e.g. the client-side apply syncer): we cannot
+			// compute drift for an observe-only resource, so treat it as up to
+			// date rather than emit a spurious diff.
+			return true, ""
+		}
+		d, err := differ.UpToDateDiff(ctx, obj, manifest, current)
+		if err != nil {
+			c.logger.Debug("Cannot compute update-mode diff for UpToDate condition", "error", err)
+			return false, fmt.Sprintf("unable to determine drift: %s", err)
+		}
+		return d == "", d
+	}
+
+	isUpToDate, diff := pcontroller.UpToDate(last, desired)
+	if !isUpToDate && canDiff {
+		if d, err := differ.UpToDateDiff(ctx, obj, manifest, current); err != nil {
+			c.logger.Debug("Cannot compute update-mode diff for UpToDate condition", "error", err)
+		} else if d != "" {
+			diff = d
+		}
+	}
+	return isUpToDate, diff
 }
 
 type objFinalizer struct {
