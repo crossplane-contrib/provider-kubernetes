@@ -15,11 +15,15 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"hash"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/pkg/errors"
+	"golang.org/x/sync/singleflight"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
@@ -72,6 +76,8 @@ type IdentityAwareBuilder struct {
 	local       client.Client
 	store       *token.ReuseSourceStore
 	nebiusStore *nebius.SDKStore
+	clients     *clientCache
+	building    singleflight.Group
 }
 
 // NewIdentityAwareBuilder returns a new IdentityAwareBuilder.
@@ -80,25 +86,62 @@ func NewIdentityAwareBuilder(local client.Client) *IdentityAwareBuilder {
 		local:       local,
 		store:       token.NewReuseSourceStore(),
 		nebiusStore: nebius.NewSDKStore(),
+		clients:     newClientCache(defaultClientCacheSize),
 	}
 }
 
 // KubeForProviderConfig returns the kube client and *rest.config for the given
-// provider config.
+// provider config. Clients are cached by a digest of the credential material
+// that produced them: constructing a client is expensive because its
+// RESTMapper primes itself via aggregated discovery (the whole API surface,
+// multi-megabyte on CRD-heavy clusters), and this method is called on every
+// reconcile. A credential change yields a new digest and thus a fresh client;
+// token refresh happens inside the cached transports and needs no rebuild.
 func (b *IdentityAwareBuilder) KubeForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (client.Client, *rest.Config, error) {
-	rc, err := b.restForProviderConfig(ctx, pc)
+	digest := sha256.New()
+	rc, err := b.restForProviderConfig(ctx, pc, digest)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "cannot get REST config for provider")
 	}
-	k, err := client.New(rc, client.Options{})
+	key := hex.EncodeToString(digest.Sum(nil))
+	if cached, ok := b.clients.get(key); ok {
+		return cached.kube, cached.rc, nil
+	}
+	// singleflight collapses the thundering herd of concurrent reconciles
+	// racing to build the same client on a cold cache (e.g. provider start).
+	v, err, _ := b.building.Do(key, func() (any, error) {
+		if cached, ok := b.clients.get(key); ok {
+			return cached, nil
+		}
+		k, err := client.New(rc, client.Options{})
+		if err != nil {
+			return nil, err
+		}
+		cached := cachedClient{kube: k, rc: rc}
+		b.clients.put(key, cached)
+		return cached, nil
+	})
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "cannot create Kubernetes client for provider")
 	}
-	return k, rc, nil
+	cached := v.(cachedClient)
+	return cached.kube, cached.rc, nil
 }
 
-// restForProviderConfig returns the *rest.config for the given provider config.
-func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (*rest.Config, error) { // nolint:gocyclo
+// digestWrite feeds a piece of client-defining material into the cache-key
+// digest, NUL-delimited so adjacent fields cannot alias.
+func digestWrite(d hash.Hash, material ...[]byte) {
+	for _, m := range material {
+		d.Write(m)
+		d.Write([]byte{0})
+	}
+}
+
+// restForProviderConfig returns the *rest.config for the given provider
+// config. Every input that shapes the resulting config (credential source,
+// extracted credential bytes, identity type and credentials) is also written
+// to digest, which callers use as the client cache key.
+func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec, digest hash.Hash) (*rest.Config, error) { // nolint:gocyclo
 	var (
 		rc  *rest.Config
 		err error
@@ -111,11 +154,13 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 		if err != nil {
 			return nil, errors.Wrap(err, errCreateRestConfig)
 		}
+		digestWrite(digest, []byte(cd.Source))
 	default:
 		kc, err := resource.CommonCredentialExtractor(ctx, cd.Source, b.local, cd.CommonCredentialSelectors)
 		if err != nil {
 			return nil, errors.Wrap(err, errGetCreds)
 		}
+		digestWrite(digest, []byte(cd.Source), kc)
 
 		ac, err = clientcmd.Load(kc)
 		if err != nil {
@@ -128,6 +173,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 	}
 
 	if id := pc.Identity; id != nil {
+		digestWrite(digest, []byte(id.Type), []byte(id.Source))
 		switch id.Type {
 		case kconfig.IdentityTypeGoogleApplicationCredentials:
 			switch id.Source { //nolint:exhaustive
@@ -140,6 +186,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 				if err != nil {
 					return nil, errors.Wrap(err, errExtractGoogleCredentials)
 				}
+				digestWrite(digest, creds)
 
 				if err := gke.WrapRESTConfig(ctx, rc, creds, gke.DefaultScopes...); err != nil {
 					return nil, errors.Wrap(err, errInjectGoogleCredentials)
@@ -155,6 +202,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 				if err != nil {
 					return nil, errors.Wrap(err, errExtractAzureCredentials)
 				}
+				digestWrite(digest, creds)
 
 				if err := azure.WrapRESTConfig(ctx, rc, creds, id.Type); err != nil {
 					return nil, errors.Wrap(err, errInjectAzureCredentials)
@@ -170,6 +218,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 				if err != nil {
 					return nil, errors.Wrap(err, errExtractUpboundCredentials)
 				}
+				digestWrite(digest, staticToken)
 
 				// We trim the token to remove any leading/trailing whitespace
 				// which may have been added especially when stringData field
@@ -190,6 +239,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 						clusterName = ctxConfig.Cluster
 					}
 				}
+				digestWrite(digest, []byte(clusterName))
 				// AWS Web Identity credentials use the default AWS credentials chain
 				// which includes IRSA (IAM Roles for Service Accounts) via environment variables:
 				// AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE, AWS_REGION
@@ -210,6 +260,7 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 				if err != nil {
 					return nil, errors.Wrap(err, errExtractNebiusCredentials)
 				}
+				digestWrite(digest, creds)
 				if err := nebius.WrapRESTConfig(ctx, rc, creds, b.nebiusStore); err != nil {
 					return nil, errors.Wrap(err, errInjectNebiusCredentials)
 				}
