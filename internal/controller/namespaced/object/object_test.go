@@ -380,6 +380,32 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"NotUpToDateNoObservedState": {
+			args: args{
+				mg: kubernetesObject(),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource()
+							return nil
+						}),
+					},
+				},
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *objv1alpha1.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						// e.g. no last-applied-configuration annotation yet.
+						return nil, nil
+					},
+					GetDesiredStateFn: func(ctx context.Context, obj *objv1alpha1.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return manifest, nil
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
+				err: nil,
+			},
+		},
 		"UpToDate": {
 			args: args{
 				mg: kubernetesObject(),
