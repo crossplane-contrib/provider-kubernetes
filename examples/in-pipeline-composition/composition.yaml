@@ -1,0 +1,294 @@
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: argocdclusters.example.crossplane.io
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1alpha1
+    kind: ArgocdCluster
+  mode: Pipeline
+  pipeline:
+  - functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources:
+      - base:
+          apiVersion: compute.gcp.crossplane.io/v1beta1
+          kind: Network
+          spec:
+            forProvider:
+              autoCreateSubnetworks: false
+              routingConfig:
+                routingMode: REGIONAL
+        name: resource-0
+      - base:
+          apiVersion: container.gcp.crossplane.io/v1beta1
+          kind: GKECluster
+          spec:
+            forProvider:
+              addonsConfig:
+                kubernetesDashboard:
+                  disabled: true
+                networkPolicyConfig:
+                  disabled: false
+              databaseEncryption:
+                state: DECRYPTED
+              defaultMaxPodsConstraint:
+                maxPodsPerNode: 110
+              description: Host Cluster instance of basic tier
+              initialClusterVersion: "1.18"
+              ipAllocationPolicy:
+                createSubnetwork: true
+                useIpAliases: true
+              legacyAbac:
+                enabled: false
+              location: us-central1
+              locations:
+              - us-central1-a
+              - us-central1-f
+              loggingService: logging.googleapis.com/kubernetes
+              masterAuth:
+                username: admin
+              monitoringService: monitoring.googleapis.com/kubernetes
+              networkPolicy:
+                enabled: true
+              networkSelector:
+                matchControllerRef: true
+              podSecurityPolicyConfig:
+                enabled: false
+              verticalPodAutoscaling:
+                enabled: true
+            writeConnectionSecretToRef:
+              namespace: crossplane-system
+        connectionDetails:
+        - fromConnectionSecretKey: kubeconfig
+          name: kubeconfig
+          type: FromConnectionSecretKey
+        name: resource-1
+        patches:
+        - fromFieldPath: metadata.name
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+          transforms:
+          - string:
+              fmt: hc-%s
+              type: Format
+            type: string
+          type: FromCompositeFieldPath
+        - fromFieldPath: metadata.labels
+          toFieldPath: metadata.labels
+          type: FromCompositeFieldPath
+        - fromFieldPath: metadata.annotations[crossplane.io/external-name]
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+          type: FromCompositeFieldPath
+        - fromFieldPath: metadata.uid
+          toFieldPath: spec.writeConnectionSecretToRef.name
+          transforms:
+          - string:
+              fmt: '%s-gkecluster'
+              type: Format
+            type: string
+          type: FromCompositeFieldPath
+      - base:
+          apiVersion: container.gcp.crossplane.io/v1alpha1
+          kind: NodePool
+          spec:
+            forProvider:
+              autoscaling:
+                enabled: true
+                maxNodeCount: 10
+                minNodeCount: 1
+              clusterSelector:
+                matchControllerRef: true
+              config:
+                diskSizeGb: 100
+                diskType: pd-standard
+                imageType: COS
+                machineType: n1-standard-4
+                metadata:
+                  disable-legacy-endpoints: "true"
+                oauthScopes:
+                - https://www.googleapis.com/auth/devstorage.read_only
+                - https://www.googleapis.com/auth/logging.write
+                - https://www.googleapis.com/auth/monitoring
+                - https://www.googleapis.com/auth/servicecontrol
+                - https://www.googleapis.com/auth/service.management.readonly
+                - https://www.googleapis.com/auth/trace.append
+                - https://www.googleapis.com/auth/cloud-platform
+                preemptible: false
+                serviceAccount: default
+                shieldedInstanceConfig:
+                  enableIntegrityMonitoring: true
+                  enableSecureBoot: true
+              initialNodeCount: 1
+              locations:
+              - us-central1-a
+              - us-central1-f
+              management:
+                autoRepair: true
+                autoUpgrade: true
+              maxPodsConstraint:
+                maxPodsPerNode: 110
+              version: "1.18"
+        name: resource-2
+      - base:
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: ProviderConfig
+          spec:
+            credentials:
+              secretRef:
+                key: kubeconfig
+                namespace: crossplane-system
+              source: Secret
+        name: resource-3
+        patches:
+        - fromFieldPath: metadata.name
+          toFieldPath: metadata.name
+          type: FromCompositeFieldPath
+        - fromFieldPath: metadata.uid
+          toFieldPath: spec.credentials.secretRef.name
+          transforms:
+          - string:
+              fmt: '%s-gkecluster'
+              type: Format
+            type: string
+          type: FromCompositeFieldPath
+        readinessChecks:
+        - type: None
+      - base:
+          apiVersion: helm.crossplane.io/v1beta1
+          kind: Release
+          metadata:
+            annotations:
+              crossplane.io/external-name: argocd
+          spec:
+            connectionDetails:
+            - apiVersion: v1
+              fieldPath: status.loadBalancer.ingress[0].ip
+              kind: Service
+              name: argocd-server
+              namespace: argocd
+              toConnectionSecretKey: argocd-ip
+            - apiVersion: v1
+              fieldPath: data.password
+              kind: Secret
+              name: argocd-initial-admin-secret
+              namespace: argocd
+              skipPartOfReleaseCheck: true
+              toConnectionSecretKey: argocd-password
+            forProvider:
+              chart:
+                name: argo-cd
+                repository: https://argoproj.github.io/argo-helm
+                version: 3.8.2
+              namespace: argocd
+              values:
+                server:
+                  service:
+                    type: LoadBalancer
+            writeConnectionSecretToRef:
+              namespace: crossplane-system
+        connectionDetails:
+        - fromConnectionSecretKey: argocd-ip
+          name: argocd-ip
+          type: FromConnectionSecretKey
+        - fromConnectionSecretKey: argocd-password
+          name: argocd-password
+          type: FromConnectionSecretKey
+        name: resource-4
+        patches:
+        - fromFieldPath: metadata.uid
+          toFieldPath: spec.writeConnectionSecretToRef.name
+          transforms:
+          - string:
+              fmt: '%s-argocd'
+              type: Format
+            type: string
+          type: FromCompositeFieldPath
+      - base:
+          apiVersion: kubernetes.crossplane.io/v1beta1
+          kind: ProviderConfig
+          spec:
+            credentials:
+              secretRef:
+                key: kubeconfig
+                namespace: crossplane-system
+              source: Secret
+        name: resource-5
+        patches:
+        - fromFieldPath: metadata.name
+          toFieldPath: metadata.name
+          type: FromCompositeFieldPath
+        - fromFieldPath: metadata.uid
+          toFieldPath: spec.credentials.secretRef.name
+          transforms:
+          - string:
+              fmt: '%s-gkecluster'
+              type: Format
+            type: string
+          type: FromCompositeFieldPath
+        readinessChecks:
+        - type: None
+      - base:
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          spec:
+            connectionDetails:
+            - apiVersion: v1
+              fieldPath: spec.clusterIP
+              kind: Service
+              name: guestbook-ui
+              namespace: argocd
+              toConnectionSecretKey: host
+            - apiVersion: v1
+              fieldPath: spec.ports[0].port
+              kind: Service
+              name: guestbook-ui
+              namespace: argocd
+              toConnectionSecretKey: port
+            forProvider:
+              manifest:
+                apiVersion: argoproj.io/v1alpha1
+                kind: Application
+                metadata:
+                  name: guestbook
+                  namespace: argocd
+                spec:
+                  destination:
+                    namespace: argocd
+                    server: https://kubernetes.default.svc
+                  project: default
+                  syncPolicy:
+                    automated: {}
+            writeConnectionSecretToRef:
+              namespace: crossplane-system
+        connectionDetails:
+        - fromConnectionSecretKey: host
+          name: host
+          type: FromConnectionSecretKey
+        - fromConnectionSecretKey: port
+          name: port
+          type: FromConnectionSecretKey
+        name: resource-6
+        patches:
+        - fromFieldPath: metadata.name
+          toFieldPath: spec.providerConfigRef.name
+          type: FromCompositeFieldPath
+        - fromFieldPath: spec.repoURL
+          toFieldPath: spec.forProvider.manifest.spec.source.repoURL
+          type: FromCompositeFieldPath
+        - fromFieldPath: spec.path
+          toFieldPath: spec.forProvider.manifest.spec.source.path
+          type: FromCompositeFieldPath
+        - fromFieldPath: metadata.uid
+          toFieldPath: spec.writeConnectionSecretToRef.name
+          transforms:
+          - string:
+              fmt: '%s-guestbook'
+              type: Format
+            type: string
+          type: FromCompositeFieldPath
+    step: patch-and-transform
+  writeConnectionSecretsToNamespace: crossplane-system
