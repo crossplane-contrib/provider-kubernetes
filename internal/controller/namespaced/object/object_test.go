@@ -2032,3 +2032,95 @@ func TestSetAtProviderRemovesManagedFields(t *testing.T) {
 		})
 	}
 }
+
+func TestLoggableRedactsSecretData(t *testing.T) {
+	secretManifest := []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"creds"},"data":{"password":"c2VjcmV0"},"stringData":{"user":"admin"}}`)
+	redactedManifest := []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"creds"},"data":{"redacted":null},"stringData":{"redacted":null}}`)
+	secretWithoutData := []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"creds"}}`)
+	configMapManifest := []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cm"},"data":{"key":"value"}}`)
+	invalidManifest := []byte(`{not json`)
+
+	normalize := func(raw []byte) interface{} {
+		var v interface{}
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return string(raw)
+		}
+		return v
+	}
+
+	type args struct {
+		obj *objv1alpha1.Object
+	}
+	type want struct {
+		spec   []byte
+		status []byte
+	}
+	cases := map[string]struct {
+		args args
+		want want
+	}{
+		"SecretDataAndStringDataRedacted": {
+			args: args{
+				obj: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = secretManifest
+					obj.Status.AtProvider.Manifest.Raw = secretManifest
+				}),
+			},
+			want: want{
+				spec:   redactedManifest,
+				status: redactedManifest,
+			},
+		},
+		"SecretWithoutDataUntouched": {
+			args: args{
+				obj: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = secretWithoutData
+				}),
+			},
+			want: want{
+				spec: secretWithoutData,
+			},
+		},
+		"NonSecretManifestUntouched": {
+			args: args{
+				obj: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapManifest
+				}),
+			},
+			want: want{
+				spec: configMapManifest,
+			},
+		},
+		"UnparseableManifestUntouched": {
+			args: args{
+				obj: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = invalidManifest
+				}),
+			},
+			want: want{
+				spec: invalidManifest,
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			specBefore := string(tc.args.obj.Spec.ForProvider.Manifest.Raw)
+
+			got, ok := loggable(tc.args.obj).MarshalLog().(*objv1alpha1.Object)
+			if !ok {
+				t.Fatalf("MarshalLog() did not return an Object")
+			}
+
+			if diff := cmp.Diff(normalize(tc.want.spec), normalize(got.Spec.ForProvider.Manifest.Raw)); diff != "" {
+				t.Errorf("spec manifest: -want +got\n%s", diff)
+			}
+			if diff := cmp.Diff(normalize(tc.want.status), normalize(got.Status.AtProvider.Manifest.Raw)); diff != "" {
+				t.Errorf("status manifest: -want +got\n%s", diff)
+			}
+			if diff := cmp.Diff(specBefore, string(tc.args.obj.Spec.ForProvider.Manifest.Raw)); diff != "" {
+				t.Errorf("original Object was mutated: -want +got\n%s", diff)
+			}
+		})
+	}
+}
