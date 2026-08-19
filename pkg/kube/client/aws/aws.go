@@ -61,7 +61,6 @@ func WrapRESTConfig(ctx context.Context, rc *rest.Config, clusterNameFromKubecon
 
 	// Create a token source that generates EKS tokens on demand
 	tokenSource := &eksTokenSource{
-		ctx:       ctx,
 		stsClient: stsClient,
 		clusterID: clusterName,
 	}
@@ -105,9 +104,13 @@ func extractClusterNameFromARN(arnString string) (string, error) {
 	return parts[len(parts)-1], nil
 }
 
+// tokenSource issues an EKS bearer token for the request carrying ctx.
+type tokenSource interface {
+	Token(ctx context.Context) (string, error)
+}
+
 // eksTokenSource generates EKS authentication tokens using AWS STS
 type eksTokenSource struct {
-	ctx       context.Context
 	stsClient *sts.Client
 	clusterID string
 }
@@ -115,8 +118,11 @@ type eksTokenSource struct {
 // Token generates an EKS authentication token
 // This replicates the behavior of `aws eks get-token` command
 // The STS client uses credentials from the AWS default credentials chain,
-// which includes assumed role credentials from Web Identity/IRSA
-func (s *eksTokenSource) Token() (string, error) {
+// which includes assumed role credentials from Web Identity/IRSA.
+// ctx is the context of the request being authenticated: the wrapped REST
+// config outlives the reconcile that built it (cached clients, long-lived
+// informers), so the token source must not hold on to a context of its own.
+func (s *eksTokenSource) Token(ctx context.Context) (string, error) {
 	// Create a presigned request for GetCallerIdentity
 	// This is what EKS uses for authentication
 	// Default expiration is 15 minutes (900 seconds) which is what EKS expects
@@ -124,7 +130,7 @@ func (s *eksTokenSource) Token() (string, error) {
 
 	// Create presigned request with cluster ID and expiration headers
 	// This matches the provider-aws implementation exactly
-	presignedReq, err := presigner.PresignGetCallerIdentity(s.ctx,
+	presignedReq, err := presigner.PresignGetCallerIdentity(ctx,
 		&sts.GetCallerIdentityInput{},
 		func(po *sts.PresignOptions) {
 			po.ClientOptions = []func(*sts.Options){
@@ -146,13 +152,13 @@ func (s *eksTokenSource) Token() (string, error) {
 
 // bearerAuthRoundTripper injects a bearer token into HTTP requests
 type bearerAuthRoundTripper struct {
-	source *eksTokenSource
+	source tokenSource
 	rt     http.RoundTripper
 }
 
 // RoundTrip implements http.RoundTripper
 func (b *bearerAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	token, err := b.source.Token()
+	token, err := b.source.Token(req.Context())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get EKS token")
 	}
