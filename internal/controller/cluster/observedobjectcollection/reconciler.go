@@ -66,7 +66,7 @@ type Reconciler struct {
 }
 
 // Setup adds a controller that reconciles ObservedObjectCollection resources.
-func Setup(mgr ctrl.Manager, o controller.Options, pollJitter time.Duration) error {
+func Setup(mgr ctrl.Manager, o controller.Options, clientBuilder kubeclient.Builder, pollJitter time.Duration) error {
 	name := managed.ControllerName(v1alpha1.ObservedObjectCollectionGroupKind)
 
 	r := &Reconciler{
@@ -75,7 +75,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, pollJitter time.Duration) err
 		pollInterval: func() time.Duration {
 			return o.PollInterval + +time.Duration((rand.Float64()-0.5)*2*float64(pollJitter)) //nolint
 		},
-		clientBuilder:      kubeclient.NewIdentityAwareBuilder(mgr.GetClient()),
+		clientBuilder:      clientBuilder,
 		observedObjectName: observedObjectName,
 	}
 
@@ -89,9 +89,9 @@ func Setup(mgr ctrl.Manager, o controller.Options, pollJitter time.Duration) err
 // SetupGated registers a controller setup function that reconciles
 // ObservedObjectCollection managed resources. The controller setup is
 // initiated after the CRD for ObservedObjectCollection becomes available.
-func SetupGated(mgr ctrl.Manager, o controller.Options, pollJitter time.Duration) error {
+func SetupGated(mgr ctrl.Manager, o controller.Options, clientBuilder kubeclient.Builder, pollJitter time.Duration) error {
 	o.Gate.Register(func() {
-		if err := Setup(mgr, o, pollJitter); err != nil {
+		if err := Setup(mgr, o, clientBuilder, pollJitter); err != nil {
 			mgr.GetLogger().Error(err, "unable to setup reconciler", "gvk", v1alpha1.ObservedObjectCollectionGroupVersionKind.String())
 		}
 	}, v1alpha1.ObservedObjectCollectionGroupVersionKind)
