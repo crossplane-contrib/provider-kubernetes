@@ -238,10 +238,6 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 	reconcilerOptions = append(reconcilerOptions, managed.WithExternalConnector(conn))
 
 	// Release the ProviderConfigUsage once the Object has finished deleting, so
-	// the ProviderConfig it references cannot be garbage collected while the
-	// Object still needs to connect. This must be the same tracker the connector
-	// records the usage with.
-	reconcilerOptions = append(reconcilerOptions, managed.WithProviderConfigUsageCleaner(usage))
 
 	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
 		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
@@ -256,8 +252,11 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, pollJit
 		return err
 	}
 
+	// usage is the same tracker the connector records the usage with, so the
+	// ProviderConfigUsage is created and released by the same pair of operations.
 	return cb.Complete(ratelimiter.NewReconciler(name, managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.ObjectGroupVersionKind),
+		usage,
 		reconcilerOptions...,
 	), o.GlobalRateLimiter))
 }
