@@ -163,11 +163,12 @@ func (s *SSAResourceSyncer) needSSAFieldManagerUpgrade(accessor metav1.Object) b
 }
 
 func isFinalizersOnlyManagedFieldsEntry(mfe metav1.ManagedFieldsEntry) bool {
-	if mfe.FieldsV1 == nil || len(mfe.FieldsV1.Raw) == 0 {
+	raw := mfe.FieldsV1.GetRawBytes()
+	if len(raw) == 0 {
 		return false
 	}
 	fields := map[string]any{}
-	if err := json.Unmarshal(mfe.FieldsV1.Raw, &fields); err != nil {
+	if err := json.Unmarshal(raw, &fields); err != nil {
 		return false
 	}
 	if len(fields) != 1 {
