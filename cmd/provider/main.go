@@ -30,11 +30,15 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	authv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -79,6 +83,7 @@ func init() {
 	}
 }
 
+//nolint:gocyclo // main wires up flags, scheme, manager, and controllers in one place; the crossplane-runtime v2.4.0 secret-cache flag pushed this over the default threshold.
 func main() {
 	var (
 		app                     = kingpin.New(filepath.Base(os.Args[0]), "Template support for Crossplane.").DefaultEnvars()
@@ -102,6 +107,7 @@ func main() {
 		removeManagedFields      = app.Flag("remove-managed-fields", "Remove metadata.managedFields from status.atProvider.manifest.").Default("false").Envar("REMOVE_MANAGED_FIELDS").Bool()
 		// Additional legacy field managers to upgrade to Server-side apply field manager
 		legacyCSAFieldManagers = app.Flag("legacy-csa-field-managers", "Additional legacy client-side apply Kubernetes field manager names for upgrading to SSA field manager").Default().Strings()
+		enableSecretCache      = app.Flag("enable-secret-cache", "Enable caching of Secret objects. When true, Secrets are served from the informer cache instead of direct API calls. This reduces API server load but increases memory usage.").Default("true").Envar("ENABLE_SECRET_CACHE").Bool()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
@@ -141,10 +147,32 @@ func main() {
 		}
 	}
 
+	var clientOpts client.Options
+	if !*enableSecretCache {
+		clientOpts = client.Options{
+			Cache: &client.CacheOptions{
+				DisableFor: []client.Object{&corev1.Secret{}},
+			},
+		}
+	}
+
+	scheme := runtime.NewScheme()
+	kingpin.FatalIfError(clientgoscheme.AddToScheme(scheme), "Cannot add client-go scheme")
+	kingpin.FatalIfError(apiscluster.AddToScheme(scheme), "Cannot add Template APIs to scheme")
+	kingpin.FatalIfError(apisnamespaced.AddToScheme(scheme), "Cannot add Template APIs to scheme")
+	kingpin.FatalIfError(apiextensionsv1.AddToScheme(scheme), "Cannot register k8s apiextensions APIs to scheme")
+
 	mgr, err := ctrl.NewManager(ratelimiter.LimitRESTConfig(cfg, *maxReconcileRate), ctrl.Options{
+		Scheme: scheme,
+		Client: clientOpts,
 		Cache: cache.Options{
 			SyncPeriod:       syncInterval,
 			DefaultTransform: cache.TransformStripManagedFields(),
+			ByObject: map[client.Object]cache.ByObject{
+				&apiextensionsv1.CustomResourceDefinition{}: {
+					Transform: customresourcesgate.TransformStripCRDSchema,
+				},
+			},
 		},
 
 		Metrics: metricsserver.Options{
@@ -183,9 +211,6 @@ func main() {
 		MRStateMetrics:          sm,
 	}
 
-	kingpin.FatalIfError(apiscluster.AddToScheme(mgr.GetScheme()), "Cannot add Template APIs to scheme")
-	kingpin.FatalIfError(apisnamespaced.AddToScheme(mgr.GetScheme()), "Cannot add Template APIs to scheme")
-	kingpin.FatalIfError(apiextensionsv1.AddToScheme(mgr.GetScheme()), "Cannot register k8s apiextensions APIs to scheme")
 	o := controller.Options{
 		Logger:                  log,
 		MaxConcurrentReconciles: *maxReconcileRate,
