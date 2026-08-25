@@ -73,8 +73,6 @@ func managedFieldsEntry(manager, subresource, raw string) metav1.ManagedFieldsEn
 		Operation:   metav1.ManagedFieldsOperationUpdate,
 		Subresource: subresource,
 		FieldsType:  "FieldsV1",
-		FieldsV1: &metav1.FieldsV1{
-			Raw: []byte(raw),
-		},
+		FieldsV1:    metav1.NewFieldsV1(raw),
 	}
 }
