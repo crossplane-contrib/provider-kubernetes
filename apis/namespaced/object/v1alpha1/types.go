@@ -85,7 +85,7 @@ type ObjectParameters struct {
 	// +optional
 	// +kubebuilder:validation:Enum=Orphan;Background;Foreground
 	// +kubebuilder:default=Background
-	DeletionPropagationPolicy metav1.DeletionPropagation `json:"deletionPropagationPolicy"`
+	DeletionPropagationPolicy metav1.DeletionPropagation `json:"deletionPropagationPolicy,omitempty"`
 }
 
 // ObjectObservation are the observable fields of a Object.
