@@ -149,6 +149,11 @@ func TestReconciler(t *testing.T) {
 						if s := sets.New[string]("col-foo0", "col-foo1"); !s.Has(u.GetName()) {
 							return fmt.Errorf("Expecting one of %v, but got %v", s.UnsortedList(), u.GetName())
 						}
+						// Regression test for https://github.com/crossplane-contrib/provider-kubernetes/issues/555:
+						// deletionPropagationPolicy should not be set by ObservedObjectCollection
+						if p, found, _ := unstructured.NestedString(u.Object, "spec", "forProvider", "deletionPropagationPolicy"); found {
+							return fmt.Errorf("Expected deletionPropagationPolicy to be nil, but got: %q", p)
+						}
 						manifest, found, err := unstructured.NestedMap(u.Object, "spec", "forProvider", "manifest")
 						if err != nil {
 							return err
@@ -249,6 +254,11 @@ func TestReconciler(t *testing.T) {
 						}
 						if s := sets.New[string]("col-foo0", "col-foo1"); !s.Has(u.GetName()) {
 							return fmt.Errorf("Expecting one of %v, but got %v", s.UnsortedList(), u.GetName())
+						}
+						// Regression test for https://github.com/crossplane-contrib/provider-kubernetes/issues/555:
+						// deletionPropagationPolicy should not be set by ObservedObjectCollection
+						if p, found, _ := unstructured.NestedString(u.Object, "spec", "forProvider", "deletionPropagationPolicy"); found {
+							return fmt.Errorf("Expected deletionPropagationPolicy to be nil, but got: %q", p)
 						}
 						manifest, found, err := unstructured.NestedMap(u.Object, "spec", "forProvider", "manifest")
 						if err != nil {
