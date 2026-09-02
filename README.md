@@ -46,7 +46,12 @@ headroom for credentials that rotate, never below 8. The result is logged at
 startup. The provider does not start if its ProviderConfigs cannot be listed.
 
 The bound is fixed for the lifetime of the process, so ProviderConfigs created
-after startup share the headroom until the next restart.
+after startup share the headroom until the next restart. The cache reports
+`provider_kubernetes_client_cache_size` (the bound),
+`provider_kubernetes_client_cache_entries` (clients currently cached) and
+`provider_kubernetes_client_cache_events_total` with an `event` label of
+`hit`, `miss` or `evict`; a sustained eviction rate means the credential sets
+in use no longer fit the bound.
 
 Client-side rate limiting is disabled for these clients. A cached client is
 shared by every concurrent reconcile of its credential set, so client-go's

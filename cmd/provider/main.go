@@ -212,9 +212,11 @@ func main() {
 
 	mm := managed.NewMRMetricRecorder()
 	sm := statemetrics.NewMRStateMetrics()
+	cm := kubeclient.NewClientCacheMetrics("provider_kubernetes")
 
 	metrics.Registry.MustRegister(mm)
 	metrics.Registry.MustRegister(sm)
+	metrics.Registry.MustRegister(cm)
 
 	mo := controller.MetricOptions{
 		PollStateMetricInterval: *pollStateMetricInterval,
@@ -238,7 +240,8 @@ func main() {
 		PollJitterPercentage: *pollJitterPercentage,
 		ClientBuilder: kubeclient.NewIdentityAwareBuilder(mgr.GetClient(),
 			kubeclient.WithLogger(log),
-			kubeclient.WithClientCacheSize(cacheSize)),
+			kubeclient.WithClientCacheSize(cacheSize),
+			kubeclient.WithClientCacheMetrics(cm)),
 	}
 
 	if *enableManagementPolicies {

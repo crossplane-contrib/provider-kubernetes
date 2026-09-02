@@ -89,6 +89,7 @@ type IdentityAwareBuilder struct {
 	// material that produced them, see KubeForProviderConfig.
 	clients   *lru.Cache
 	cacheSize int
+	metrics   *ClientCacheMetrics
 	building  singleflight.Group
 	newClient func(rc *rest.Config) (client.Client, error)
 }
@@ -126,6 +127,7 @@ func NewIdentityAwareBuilder(local client.Client, opts ...BuilderOption) *Identi
 		store:       token.NewReuseSourceStore(),
 		nebiusStore: nebius.NewSDKStore(),
 		cacheSize:   DefaultClientCacheSize,
+		metrics:     NewClientCacheMetrics(""),
 		newClient: func(rc *rest.Config) (client.Client, error) {
 			return client.New(rc, client.Options{})
 		},
@@ -133,9 +135,13 @@ func NewIdentityAwareBuilder(local client.Client, opts ...BuilderOption) *Identi
 	for _, o := range opts {
 		o(b)
 	}
+	// The cache holds its lock while it runs this callback, so it must not
+	// read the cache back; the entries gauge is refreshed after each Add.
 	b.clients = lru.NewWithEvictionFunc(b.cacheSize, func(lru.Key, any) {
+		b.metrics.event(cacheEventEvict)
 		b.log.Debug("Evicted least recently used target cluster client", "cacheSize", b.cacheSize)
 	})
+	b.metrics.size.Set(float64(b.cacheSize))
 	return b
 }
 
@@ -153,9 +159,11 @@ func (b *IdentityAwareBuilder) KubeForProviderConfig(ctx context.Context, pc kco
 		return nil, nil, errors.Wrap(err, "cannot get REST config for provider")
 	}
 	if v, ok := b.clients.Get(r.key); ok {
+		b.metrics.event(cacheEventHit)
 		cached := v.(cachedClient)
 		return cached.kube, rest.CopyConfig(cached.rc), nil
 	}
+	b.metrics.event(cacheEventMiss)
 	// singleflight collapses the thundering herd of concurrent reconciles
 	// racing to build the same client on a cold cache (e.g. provider start).
 	v, err, _ := b.building.Do(r.key, func() (any, error) {
@@ -177,6 +185,7 @@ func (b *IdentityAwareBuilder) KubeForProviderConfig(ctx context.Context, pc kco
 		}
 		cached := cachedClient{kube: k, rc: r.rc}
 		b.clients.Add(r.key, cached)
+		b.metrics.entries.Set(float64(b.clients.Len()))
 		b.log.Debug("Built target cluster client", "cachedClients", b.clients.Len(), "cacheSize", b.cacheSize)
 		return cached, nil
 	})
