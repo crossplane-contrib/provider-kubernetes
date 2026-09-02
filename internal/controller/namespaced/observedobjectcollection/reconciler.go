@@ -49,6 +49,7 @@ import (
 )
 
 const (
+	errNilClientBuilder           = "a client builder is required"
 	errGetProviderConfig          = "cannot get provider config"
 	errBuildKubeForProviderConfig = "cannot build kube client for provider config"
 	errStatusUpdate               = "cannot update status"
@@ -68,6 +69,9 @@ type Reconciler struct {
 
 // Setup adds a controller that reconciles ObservedObjectCollection resources.
 func Setup(mgr ctrl.Manager, o controller.Options, clientBuilder kubeclient.Builder, pollJitter time.Duration) error {
+	if clientBuilder == nil {
+		return errors.New(errNilClientBuilder)
+	}
 	name := managed.ControllerName(observedobjectcollectionv1alpha1.ObservedObjectCollectionGroupKind)
 
 	r := &Reconciler{
@@ -91,6 +95,9 @@ func Setup(mgr ctrl.Manager, o controller.Options, clientBuilder kubeclient.Buil
 // ObservedObjectCollection managed resources. The controller setup is
 // initiated after the CRD for ObservedObjectCollection becomes available.
 func SetupGated(mgr ctrl.Manager, o controller.Options, clientBuilder kubeclient.Builder, pollJitter time.Duration) error {
+	if clientBuilder == nil {
+		return errors.New(errNilClientBuilder)
+	}
 	o.Gate.Register(func() {
 		if err := Setup(mgr, o, clientBuilder, pollJitter); err != nil {
 			mgr.GetLogger().Error(err, "unable to setup reconciler", "gvk", observedobjectcollectionv1alpha1.ObservedObjectCollectionGroupVersionKind.String())

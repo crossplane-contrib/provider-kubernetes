@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -106,6 +107,7 @@ func main() {
 		// Additional legacy field managers to upgrade to Server-side apply field manager
 		legacyCSAFieldManagers = app.Flag("legacy-csa-field-managers", "Additional legacy client-side apply Kubernetes field manager names for upgrading to SSA field manager").Default().Strings()
 	)
+	app.Validate(func(*kingpin.Application) error { return validateClientCacheSize(*clientCacheSize) })
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
 	zl := zap.New(zap.UseDevMode(*debug), UseISO8601())
@@ -312,4 +314,13 @@ func canWatchCRD(ctx context.Context, mgr manager.Manager) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// validateClientCacheSize rejects flag values that do not fit the builder's
+// int bound instead of letting the conversion wrap around.
+func validateClientCacheSize(size uint) error {
+	if size > math.MaxInt {
+		return errors.Errorf("--client-cache-size must not exceed %d", math.MaxInt)
+	}
+	return nil
 }

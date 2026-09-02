@@ -111,10 +111,10 @@ func WithLogger(l logging.Logger) BuilderOption {
 
 // WithClientCacheSize bounds the number of cached target cluster clients, one
 // per distinct credential set; the least recently used client is evicted
-// beyond the bound. A size of 0 removes the bound.
+// beyond the bound. A size of 0 or less removes the bound.
 func WithClientCacheSize(size int) BuilderOption {
 	return func(b *IdentityAwareBuilder) {
-		b.cacheSize = size
+		b.cacheSize = max(size, 0)
 	}
 }
 

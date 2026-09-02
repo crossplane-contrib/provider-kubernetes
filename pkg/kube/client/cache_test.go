@@ -185,6 +185,17 @@ func TestKubeForProviderConfigCaching(t *testing.T) {
 			},
 			want: want{clients: []int{0, 1, 2}},
 		},
+		"NegativeSizeCachesWithoutBound": {
+			args: args{
+				cacheSize: -1,
+				calls: []kconfig.ProviderConfigSpec{
+					pcSpec("kubeconfig-a", ""),
+					pcSpec("kubeconfig-b", ""),
+					pcSpec("kubeconfig-a", ""),
+				},
+			},
+			want: want{clients: []int{0, 1, 0}},
+		},
 	}
 
 	for name, tc := range cases {
