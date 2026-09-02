@@ -17,10 +17,16 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )
+
+// clientCacheKeyWorkers bounds the number of provider configs whose keys
+// ClientCacheSizeFor derives at once, and with it the credential reads in
+// flight against the local cluster.
+const clientCacheKeyWorkers = 16
 
 // ClientCacheSizing is the outcome of ClientCacheSizeFor.
 type ClientCacheSizing struct {
@@ -41,27 +47,43 @@ type ClientCacheSizing struct {
 // one entry per distinct credential set plus a tenth of headroom, rounded up,
 // for sets whose credentials rotate (the client built from the old
 // credentials occupies an entry until it ages out), and never below
-// DefaultClientCacheSize. Keys are derived by a builder over local, exactly as
-// KubeForProviderConfig derives them, so configs that share credential
-// material count once. A config whose key cannot be derived is counted as a
-// credential set of its own, so the estimate errs high; an expired context is
-// the only error, since a partial derivation would not be a bound at all.
+// DefaultClientCacheSize. Keys are derived by
+// a builder over local, exactly as KubeForProviderConfig derives them, so
+// configs that share credential material count once; up to
+// clientCacheKeyWorkers configs are derived at a time. A config whose key
+// cannot be derived is counted as a credential set of its own, so the estimate
+// errs high; an expired context is the only error, since a partial derivation
+// would not be a bound at all.
 func ClientCacheSizeFor(ctx context.Context, local client.Client, pcs []kconfig.ProviderConfigSpec) (ClientCacheSizing, error) {
 	b := NewIdentityAwareBuilder(local)
-	keys := make(map[string]struct{}, len(pcs))
-	s := ClientCacheSizing{}
-	for _, pc := range pcs {
-		key, err := b.ClientCacheKey(ctx, pc)
-		if err != nil {
-			if ctx.Err() != nil {
-				return ClientCacheSizing{}, errors.Wrap(err, "cannot derive client cache keys")
+	// An empty key marks a config whose key could not be derived.
+	keys := make([]string, len(pcs))
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(clientCacheKeyWorkers)
+	for i, pc := range pcs {
+		g.Go(func() error {
+			key, err := b.ClientCacheKey(ctx, pc)
+			if err != nil && ctx.Err() != nil {
+				return errors.Wrap(err, "cannot derive client cache keys")
 			}
+			keys[i] = key
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return ClientCacheSizing{}, err
+	}
+
+	distinct := make(map[string]struct{}, len(keys))
+	s := ClientCacheSizing{}
+	for _, key := range keys {
+		if key == "" {
 			s.Unresolved++
 			continue
 		}
-		keys[key] = struct{}{}
+		distinct[key] = struct{}{}
 	}
-	s.CredentialSets = len(keys)
+	s.CredentialSets = len(distinct)
 	s.Size = clientCacheSizeFor(s.CredentialSets + s.Unresolved)
 	return s, nil
 }

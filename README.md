@@ -43,7 +43,8 @@ each one the way the client builder does (so ProviderConfigs sharing a
 kubeconfig count once, and every in-cluster ProviderConfig counts as one), and
 bounds the cache at the number of distinct credential sets plus ten percent of
 headroom for credentials that rotate, never below 8. The result is logged at
-startup. The provider does not start if its ProviderConfigs cannot be listed.
+startup. The provider does not start if its ProviderConfigs and their
+credentials cannot be read within 300 seconds.
 
 The bound is fixed for the lifetime of the process, so ProviderConfigs created
 after startup share the headroom until the next restart. The cache reports

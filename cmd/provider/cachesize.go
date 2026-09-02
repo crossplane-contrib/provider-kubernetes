@@ -32,9 +32,10 @@ import (
 	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )
 
-// clientCacheSizeTimeout bounds the startup listing that sizes the target
-// cluster client cache.
-const clientCacheSizeTimeout = 30 * time.Second
+// clientCacheSizeTimeout bounds the startup listing and credential reads that
+// size the target cluster client cache; the provider does not start without a
+// size, since a partial count would not be a bound.
+const clientCacheSizeTimeout = 300 * time.Second
 
 // clientCacheSize returns the bound of the target cluster client cache,
 // derived from the ProviderConfigs kube lists and the credentials they

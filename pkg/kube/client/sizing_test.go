@@ -16,7 +16,9 @@ package client
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,6 +41,27 @@ func distinctSpecs(n int) ([]kconfig.ProviderConfigSpec, map[string]map[string][
 	return specs, secrets
 }
 
+// gatedLocalClient serves the Secrets only once clientCacheKeyWorkers reads
+// are in flight, so that a sequential derivation never completes.
+func gatedLocalClient(secrets map[string]map[string][]byte) client.Client {
+	var inFlight atomic.Int32
+	released := make(chan struct{})
+	serve := secretLocalClient(secrets).(*test.MockClient).MockGet
+	return &test.MockClient{
+		MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+			if inFlight.Add(1) == clientCacheKeyWorkers {
+				close(released)
+			}
+			select {
+			case <-released:
+				return serve(ctx, key, obj)
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+	}
+}
+
 func TestClientCacheSizeFor(t *testing.T) {
 	type args struct {
 		ctx   context.Context
@@ -51,8 +74,11 @@ func TestClientCacheSizeFor(t *testing.T) {
 	}
 
 	tenSpecs, tenSecrets := distinctSpecs(10)
+	workerSpecs, workerSecrets := distinctSpecs(clientCacheKeyWorkers)
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
+	bounded, cancelBounded := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancelBounded)
 
 	cases := map[string]struct {
 		args args
@@ -81,6 +107,10 @@ func TestClientCacheSizeFor(t *testing.T) {
 				pcs:   append([]kconfig.ProviderConfigSpec{pcSpec("missing", "")}, tenSpecs...),
 			},
 			want: want{sizing: ClientCacheSizing{CredentialSets: 10, Unresolved: 1, Size: 13}},
+		},
+		"KeysAreDerivedConcurrently": {
+			args: args{ctx: bounded, local: gatedLocalClient(workerSecrets), pcs: workerSpecs},
+			want: want{sizing: ClientCacheSizing{CredentialSets: clientCacheKeyWorkers, Size: 18}},
 		},
 		"ExpiredContextIsAnError": {
 			args: args{
