@@ -89,6 +89,7 @@ type IdentityAwareBuilder struct {
 	// material that produced them, see KubeForProviderConfig.
 	clients   *lru.Cache
 	cacheSize int
+	metrics   *ClientCacheMetrics
 	building  singleflight.Group
 	newClient func(rc *rest.Config) (client.Client, error)
 }
@@ -126,6 +127,7 @@ func NewIdentityAwareBuilder(local client.Client, opts ...BuilderOption) *Identi
 		store:       token.NewReuseSourceStore(),
 		nebiusStore: nebius.NewSDKStore(),
 		cacheSize:   DefaultClientCacheSize,
+		metrics:     NewClientCacheMetrics(""),
 		newClient: func(rc *rest.Config) (client.Client, error) {
 			return client.New(rc, client.Options{})
 		},
@@ -133,9 +135,13 @@ func NewIdentityAwareBuilder(local client.Client, opts ...BuilderOption) *Identi
 	for _, o := range opts {
 		o(b)
 	}
+	// The cache holds its lock while it runs this callback, so it must not
+	// read the cache back; the entries gauge is refreshed after each Add.
 	b.clients = lru.NewWithEvictionFunc(b.cacheSize, func(lru.Key, any) {
+		b.metrics.event(cacheEventEvict)
 		b.log.Debug("Evicted least recently used target cluster client", "cacheSize", b.cacheSize)
 	})
+	b.metrics.size.Set(float64(b.cacheSize))
 	return b
 }
 
@@ -148,28 +154,38 @@ func NewIdentityAwareBuilder(local client.Client, opts ...BuilderOption) *Identi
 // thus a fresh client; token refresh happens inside the cached transports and
 // needs no rebuild.
 func (b *IdentityAwareBuilder) KubeForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (client.Client, *rest.Config, error) {
-	digest := sha256.New()
-	rc, err := b.restForProviderConfig(ctx, pc, digest)
+	r, err := b.resolve(ctx, pc)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "cannot get REST config for provider")
 	}
-	key := hex.EncodeToString(digest.Sum(nil))
-	if v, ok := b.clients.Get(key); ok {
+	if v, ok := b.clients.Get(r.key); ok {
+		b.metrics.event(cacheEventHit)
 		cached := v.(cachedClient)
 		return cached.kube, rest.CopyConfig(cached.rc), nil
 	}
+	b.metrics.event(cacheEventMiss)
 	// singleflight collapses the thundering herd of concurrent reconciles
 	// racing to build the same client on a cold cache (e.g. provider start).
-	v, err, _ := b.building.Do(key, func() (any, error) {
-		if v, ok := b.clients.Get(key); ok {
+	v, err, _ := b.building.Do(r.key, func() (any, error) {
+		if v, ok := b.clients.Get(r.key); ok {
 			return v, nil
 		}
-		k, err := b.newClient(rc)
+		// The token sources the identity injection installs outlive this
+		// call: the built client is cached and reused by later reconciles, so
+		// they must not inherit the per-reconcile cancellation
+		// (crossplane-runtime cancels ctx once the reconcile returns). Each
+		// wrapper bounds its own token fetches instead, with the request
+		// context or an explicit timeout (see gke.WrapRESTConfig).
+		if err := r.injectIdentity(context.WithoutCancel(ctx), r.rc); err != nil {
+			return nil, err
+		}
+		k, err := b.newClient(r.rc)
 		if err != nil {
 			return nil, err
 		}
-		cached := cachedClient{kube: k, rc: rc}
-		b.clients.Add(key, cached)
+		cached := cachedClient{kube: k, rc: r.rc}
+		b.clients.Add(r.key, cached)
+		b.metrics.entries.Set(float64(b.clients.Len()))
 		b.log.Debug("Built target cluster client", "cachedClients", b.clients.Len(), "cacheSize", b.cacheSize)
 		return cached, nil
 	})
@@ -180,6 +196,31 @@ func (b *IdentityAwareBuilder) KubeForProviderConfig(ctx context.Context, pc kco
 	// The config is shared by every caller of this credential set; hand out a
 	// copy so that nobody can mutate it underneath the cached client.
 	return cached.kube, rest.CopyConfig(cached.rc), nil
+}
+
+// ClientCacheKey returns the key under which KubeForProviderConfig caches the
+// client for the given provider config: a digest of the credential material
+// read through the builder's local client (credential source and kubeconfig,
+// then identity type, source and credentials). Provider configs with the same
+// key share one cached client, so the number of distinct keys among a set of
+// provider configs is the number of clients the builder holds for them.
+func (b *IdentityAwareBuilder) ClientCacheKey(ctx context.Context, pc kconfig.ProviderConfigSpec) (string, error) {
+	r, err := b.resolve(ctx, pc)
+	if err != nil {
+		return "", err
+	}
+	return r.key, nil
+}
+
+// resolved is a provider config resolved against the local cluster: the cache
+// key its credential material digests to, the REST config built from the
+// kubeconfig, and the identity injection still to be applied to that config.
+// Resolving reads credentials and runs on every reconcile; injecting the
+// identity installs token sources and runs once per built client.
+type resolved struct {
+	key            string
+	rc             *rest.Config
+	injectIdentity func(ctx context.Context, rc *rest.Config) error
 }
 
 // digestWrite feeds client-defining material into the cache-key digest,
@@ -193,11 +234,12 @@ func digestWrite(d hash.Hash, material ...[]byte) {
 	}
 }
 
-// restForProviderConfig returns the *rest.config for the given provider
-// config. Every input that shapes the resulting config (credential source,
-// extracted credential bytes, identity type and credentials) is also written
-// to digest, which callers use as the client cache key.
-func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec, digest hash.Hash) (*rest.Config, error) { // nolint:gocyclo
+// resolve returns the cache key, the REST config and the identity injection
+// for the given provider config. Every input that shapes the resulting client
+// (credential source, extracted credential bytes, identity type, source and
+// credentials) is written to the digest the key is taken from.
+func (b *IdentityAwareBuilder) resolve(ctx context.Context, pc kconfig.ProviderConfigSpec) (resolved, error) {
+	digest := sha256.New()
 	var (
 		rc  *rest.Config
 		err error
@@ -208,23 +250,23 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 	case xpv2.CredentialsSourceInjectedIdentity:
 		rc, err = rest.InClusterConfig()
 		if err != nil {
-			return nil, errors.Wrap(err, errCreateRestConfig)
+			return resolved{}, errors.Wrap(err, errCreateRestConfig)
 		}
 		digestWrite(digest, []byte(cd.Source))
 	default:
 		kc, err := resource.CommonCredentialExtractor(ctx, cd.Source, b.local, cd.CommonCredentialSelectors)
 		if err != nil {
-			return nil, errors.Wrap(err, errGetCreds)
+			return resolved{}, errors.Wrap(err, errGetCreds)
 		}
 		digestWrite(digest, []byte(cd.Source), kc)
 
 		ac, err = clientcmd.Load(kc)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to load kubeconfig")
+			return resolved{}, errors.Wrap(err, "failed to load kubeconfig")
 		}
 
 		if rc, err = fromAPIConfig(ac); err != nil {
-			return nil, errors.Wrap(err, errCreateRestConfig)
+			return resolved{}, errors.Wrap(err, errCreateRestConfig)
 		}
 	}
 
@@ -235,113 +277,113 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 	// priority and fairness instead.
 	rc.QPS = -1
 
-	// The token sources the identity wrappers install outlive this call: the
-	// built client is cached and reused by later reconciles, so they must not
-	// inherit the per-reconcile cancellation (crossplane-runtime cancels ctx
-	// once the reconcile returns). Credential reads above stay bound to ctx.
-	// Each wrapper bounds its own token fetches instead, with the request
-	// context or an explicit timeout (see gke.WrapRESTConfig).
-	wrapCtx := context.WithoutCancel(ctx)
-
+	inject := func(context.Context, *rest.Config) error { return nil }
 	if id := pc.Identity; id != nil {
 		digestWrite(digest, []byte(id.Type), []byte(id.Source))
-		switch id.Type {
-		case kconfig.IdentityTypeGoogleApplicationCredentials:
-			switch id.Source { //nolint:exhaustive
-			case xpv2.CredentialsSourceInjectedIdentity:
-				if err := gke.WrapRESTConfig(wrapCtx, rc, nil, gke.DefaultScopes...); err != nil {
-					return nil, errors.Wrap(err, errInjectGoogleCredentials)
-				}
-			default:
-				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
-				if err != nil {
-					return nil, errors.Wrap(err, errExtractGoogleCredentials)
-				}
-				digestWrite(digest, creds)
-
-				if err := gke.WrapRESTConfig(wrapCtx, rc, creds, gke.DefaultScopes...); err != nil {
-					return nil, errors.Wrap(err, errInjectGoogleCredentials)
-				}
-			}
-		case kconfig.IdentityTypeAzureServicePrincipalCredentials, kconfig.IdentityTypeAzureWorkloadIdentityCredentials:
-			switch id.Source { //nolint:exhaustive
-			case xpv2.CredentialsSourceInjectedIdentity:
-				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
-					xpv2.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeAzureServicePrincipalCredentials)
-			default:
-				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
-				if err != nil {
-					return nil, errors.Wrap(err, errExtractAzureCredentials)
-				}
-				digestWrite(digest, creds)
-
-				if err := azure.WrapRESTConfig(wrapCtx, rc, creds, id.Type); err != nil {
-					return nil, errors.Wrap(err, errInjectAzureCredentials)
-				}
-			}
-		case kconfig.IdentityTypeUpboundTokens:
-			switch id.Source { //nolint:exhaustive
-			case xpv2.CredentialsSourceInjectedIdentity:
-				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
-					xpv2.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeUpboundTokens)
-			default:
-				staticToken, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
-				if err != nil {
-					return nil, errors.Wrap(err, errExtractUpboundCredentials)
-				}
-				digestWrite(digest, staticToken)
-
-				// We trim the token to remove any leading/trailing whitespace
-				// which may have been added especially when stringData field
-				// is used while creating the secret.
-				if err := upbound.WrapRESTConfig(wrapCtx, rc, strings.TrimSpace(string(staticToken)), b.store); err != nil {
-					return nil, errors.Wrap(err, errInjectUpboundCredentials)
-				}
-			}
-		case kconfig.IdentityTypeAWSWebIdentityCredentials:
-			switch id.Source { //nolint:exhaustive
-			case xpv2.CredentialsSourceInjectedIdentity:
-				// Extract the cluster name from the provided kubeconfig.
-				// We need the actual cluster name (or ARN) for the presigned URL,
-				// not the random endpoint ID from the server URL.
-				var clusterName string
-				if ac != nil && ac.CurrentContext != "" {
-					if ctxConfig := ac.Contexts[ac.CurrentContext]; ctxConfig != nil {
-						clusterName = ctxConfig.Cluster
-					}
-				}
-				digestWrite(digest, []byte(clusterName))
-				// AWS Web Identity credentials use the default AWS credentials chain
-				// which includes IRSA (IAM Roles for Service Accounts) via environment variables:
-				// AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE, AWS_REGION
-				if err := aws.WrapRESTConfig(wrapCtx, rc, clusterName); err != nil {
-					return nil, errors.Wrap(err, errInjectAWSCredentials)
-				}
-			default:
-				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
-					id.Source, kconfig.IdentityTypeAWSWebIdentityCredentials)
-			}
-		case kconfig.IdentityTypeNebiusServiceAccountCredentials:
-			switch id.Source { //nolint:exhaustive
-			case xpv2.CredentialsSourceInjectedIdentity:
-				return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
-					xpv2.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeNebiusServiceAccountCredentials)
-			default:
-				creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
-				if err != nil {
-					return nil, errors.Wrap(err, errExtractNebiusCredentials)
-				}
-				digestWrite(digest, creds)
-				if err := nebius.WrapRESTConfig(wrapCtx, rc, creds, b.nebiusStore); err != nil {
-					return nil, errors.Wrap(err, errInjectNebiusCredentials)
-				}
-			}
-		default:
-			return nil, errors.Errorf("unknown identity type: %s", id.Type)
+		if inject, err = b.identityInjector(ctx, id, ac, digest); err != nil {
+			return resolved{}, err
 		}
 	}
+	return resolved{key: hex.EncodeToString(digest.Sum(nil)), rc: rc, injectIdentity: inject}, nil
+}
 
-	return rc, nil
+// identityInjector extracts the credentials of the identity, writing them to
+// the digest, and returns the function that injects the identity into a REST
+// config built from the kubeconfig ac. Only the injection installs token
+// sources, so it is deferred until a client is actually built.
+func (b *IdentityAwareBuilder) identityInjector(ctx context.Context, id *kconfig.Identity, ac *api.Config, digest hash.Hash) (func(ctx context.Context, rc *rest.Config) error, error) { //nolint:gocyclo // one case per identity type and source
+	switch id.Type {
+	case kconfig.IdentityTypeGoogleApplicationCredentials:
+		switch id.Source { //nolint:exhaustive
+		case xpv2.CredentialsSourceInjectedIdentity:
+			return func(ctx context.Context, rc *rest.Config) error {
+				return errors.Wrap(gke.WrapRESTConfig(ctx, rc, nil, gke.DefaultScopes...), errInjectGoogleCredentials)
+			}, nil
+		default:
+			creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
+			if err != nil {
+				return nil, errors.Wrap(err, errExtractGoogleCredentials)
+			}
+			digestWrite(digest, creds)
+			return func(ctx context.Context, rc *rest.Config) error {
+				return errors.Wrap(gke.WrapRESTConfig(ctx, rc, creds, gke.DefaultScopes...), errInjectGoogleCredentials)
+			}, nil
+		}
+	case kconfig.IdentityTypeAzureServicePrincipalCredentials, kconfig.IdentityTypeAzureWorkloadIdentityCredentials:
+		switch id.Source { //nolint:exhaustive
+		case xpv2.CredentialsSourceInjectedIdentity:
+			return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
+				xpv2.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeAzureServicePrincipalCredentials)
+		default:
+			creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
+			if err != nil {
+				return nil, errors.Wrap(err, errExtractAzureCredentials)
+			}
+			digestWrite(digest, creds)
+			return func(ctx context.Context, rc *rest.Config) error {
+				return errors.Wrap(azure.WrapRESTConfig(ctx, rc, creds, id.Type), errInjectAzureCredentials)
+			}, nil
+		}
+	case kconfig.IdentityTypeUpboundTokens:
+		switch id.Source { //nolint:exhaustive
+		case xpv2.CredentialsSourceInjectedIdentity:
+			return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
+				xpv2.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeUpboundTokens)
+		default:
+			staticToken, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
+			if err != nil {
+				return nil, errors.Wrap(err, errExtractUpboundCredentials)
+			}
+			digestWrite(digest, staticToken)
+			// We trim the token to remove any leading/trailing whitespace
+			// which may have been added especially when stringData field
+			// is used while creating the secret.
+			trimmed := strings.TrimSpace(string(staticToken))
+			return func(ctx context.Context, rc *rest.Config) error {
+				return errors.Wrap(upbound.WrapRESTConfig(ctx, rc, trimmed, b.store), errInjectUpboundCredentials)
+			}, nil
+		}
+	case kconfig.IdentityTypeAWSWebIdentityCredentials:
+		switch id.Source { //nolint:exhaustive
+		case xpv2.CredentialsSourceInjectedIdentity:
+			// Extract the cluster name from the provided kubeconfig.
+			// We need the actual cluster name (or ARN) for the presigned URL,
+			// not the random endpoint ID from the server URL.
+			var clusterName string
+			if ac != nil && ac.CurrentContext != "" {
+				if ctxConfig := ac.Contexts[ac.CurrentContext]; ctxConfig != nil {
+					clusterName = ctxConfig.Cluster
+				}
+			}
+			digestWrite(digest, []byte(clusterName))
+			// AWS Web Identity credentials use the default AWS credentials chain
+			// which includes IRSA (IAM Roles for Service Accounts) via environment variables:
+			// AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE, AWS_REGION
+			return func(ctx context.Context, rc *rest.Config) error {
+				return errors.Wrap(aws.WrapRESTConfig(ctx, rc, clusterName), errInjectAWSCredentials)
+			}, nil
+		default:
+			return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
+				id.Source, kconfig.IdentityTypeAWSWebIdentityCredentials)
+		}
+	case kconfig.IdentityTypeNebiusServiceAccountCredentials:
+		switch id.Source { //nolint:exhaustive
+		case xpv2.CredentialsSourceInjectedIdentity:
+			return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
+				xpv2.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeNebiusServiceAccountCredentials)
+		default:
+			creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
+			if err != nil {
+				return nil, errors.Wrap(err, errExtractNebiusCredentials)
+			}
+			digestWrite(digest, creds)
+			return func(ctx context.Context, rc *rest.Config) error {
+				return errors.Wrap(nebius.WrapRESTConfig(ctx, rc, creds, b.nebiusStore), errInjectNebiusCredentials)
+			}, nil
+		}
+	default:
+		return nil, errors.Errorf("unknown identity type: %s", id.Type)
+	}
 }
 
 func fromAPIConfig(c *api.Config) (*rest.Config, error) {
