@@ -31,11 +31,22 @@ spec:
 ## Target cluster clients
 
 The provider builds one client per distinct ProviderConfig credential set
-(kubeconfig plus identity) and keeps it in an LRU cache bounded by
-`--client-cache-size` (default 8, `0` removes the bound). Building a client is
+(kubeconfig plus identity) and keeps it in an LRU cache. Building a client is
 expensive because its REST mapper primes itself with full aggregated discovery
-on first use, so size the cache to the number of distinct credential sets the
-provider talks to.
+on first use, so the cache has to hold every credential set the provider talks
+to: a credential set that does not fit is rebuilt, discovery included, on every
+reconcile.
+
+At startup the provider sizes the cache from the cluster: it lists its
+`ProviderConfig` and `ClusterProviderConfig` objects, derives the cache key of
+each one the way the client builder does (so ProviderConfigs sharing a
+kubeconfig count once, and every in-cluster ProviderConfig counts as one), and
+bounds the cache at the number of distinct credential sets plus ten percent of
+headroom for credentials that rotate, never below 8. The result is logged at
+startup. The provider does not start if its ProviderConfigs cannot be listed.
+
+The bound is fixed for the lifetime of the process, so ProviderConfigs created
+after startup share the headroom until the next restart.
 
 Client-side rate limiting is disabled for these clients. A cached client is
 shared by every concurrent reconcile of its credential set, so client-go's
