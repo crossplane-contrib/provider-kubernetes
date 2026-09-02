@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
@@ -66,6 +68,7 @@ import (
 	controllerNamespaced "github.com/crossplane-contrib/provider-kubernetes/internal/controller/namespaced"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/features"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/version"
+	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
@@ -94,6 +97,7 @@ func main() {
 		pollJitterPercentage    = app.Flag("poll-jitter-percentage", "Percentage of jitter to apply to poll interval. It cannot be negative, and must be less than 100.").Default("10").Uint()
 		leaderElection          = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
 		maxReconcileRate        = app.Flag("max-reconcile-rate", "The number of concurrent reconciliations that may be running at one time.").Default("100").Int()
+		clientCacheSize         = app.Flag("client-cache-size", "Maximum number of cached target cluster clients, one per distinct ProviderConfig credential set; the least recently used client is evicted beyond this bound. 0 caches without bound.").Default(strconv.Itoa(kubeclient.DefaultClientCacheSize)).Envar("CLIENT_CACHE_SIZE").Uint()
 		sanitizeSecrets         = app.Flag("sanitize-secrets", "when enabled, redacts Secret data from Object status").Default("false").Envar("SANITIZE_SECRETS").Bool()
 		webhookPort             = app.Flag("webhook-port", "The port the webhook server listens on.").Default("9443").Envar("WEBHOOK_PORT").Int()
 		metricsBindAddress      = app.Flag("metrics-bind-address", "The address the metrics server listens on").Default(":8080").Envar("METRICS_BIND_ADDRESS").String()
@@ -109,6 +113,7 @@ func main() {
 		legacyCSAFieldManagers = app.Flag("legacy-csa-field-managers", "Additional legacy client-side apply Kubernetes field manager names for upgrading to SSA field manager").Default().Strings()
 		enableSecretCache      = app.Flag("enable-secret-cache", "Enable caching of Secret objects. When true, Secrets are served from the informer cache instead of direct API calls. This reduces API server load but increases memory usage.").Default("true").Envar("ENABLE_SECRET_CACHE").Bool()
 	)
+	app.Validate(func(*kingpin.Application) error { return validateClientCacheSize(*clientCacheSize) })
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
 	zl := zap.New(zap.UseDevMode(*debug), UseISO8601())
@@ -225,6 +230,9 @@ func main() {
 		RemoveManagedFields:  *removeManagedFields,
 		PollJitter:           pollJitter,
 		PollJitterPercentage: *pollJitterPercentage,
+		ClientBuilder: kubeclient.NewIdentityAwareBuilder(mgr.GetClient(),
+			kubeclient.WithLogger(log),
+			kubeclient.WithClientCacheSize(int(*clientCacheSize))),
 	}
 
 	if *enableManagementPolicies {
@@ -331,4 +339,13 @@ func canWatchCRD(ctx context.Context, mgr manager.Manager) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// validateClientCacheSize rejects flag values that do not fit the builder's
+// int bound instead of letting the conversion wrap around.
+func validateClientCacheSize(size uint) error {
+	if size > math.MaxInt {
+		return errors.Errorf("--client-cache-size must not exceed %d", math.MaxInt)
+	}
+	return nil
 }

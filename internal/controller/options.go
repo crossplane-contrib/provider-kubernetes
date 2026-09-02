@@ -18,6 +18,8 @@ package controller
 
 import (
 	"time"
+
+	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
 )
 
 // Options holds the configuration options for the provider controllers
@@ -27,4 +29,8 @@ type Options struct {
 	PollJitter             time.Duration
 	PollJitterPercentage   uint
 	LegacyCSAFieldManagers []string
+	// ClientBuilder builds clients for the target clusters referenced by
+	// ProviderConfigs. It is shared by all controllers so that its client
+	// cache is shared too.
+	ClientBuilder kubeclient.Builder
 }

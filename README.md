@@ -28,6 +28,23 @@ spec:
   package: xpkg.crossplane.io/crossplane-contrib/provider-kubernetes:v1.0.0
 ```
 
+## Target cluster clients
+
+The provider builds one client per distinct ProviderConfig credential set
+(kubeconfig plus identity) and keeps it in an LRU cache bounded by
+`--client-cache-size` (default 8, `0` removes the bound). Building a client is
+expensive because its REST mapper primes itself with full aggregated discovery
+on first use, so size the cache to the number of distinct credential sets the
+provider talks to.
+
+Client-side rate limiting is disabled for these clients. A cached client is
+shared by every concurrent reconcile of its credential set, so client-go's
+per-client token bucket (5 QPS, burst 10) would serialize them. This applies to
+everything built from the same configuration: the reconcile client, the watch
+informers and the server-side apply discovery client. Load on the target
+cluster is bounded by `--max-reconcile-rate` on the provider side and by API
+Priority and Fairness on the API server.
+
 ## Developing locally
 
 See the header of [`go.mod`](./go.mod) for the minimum supported version of Go.

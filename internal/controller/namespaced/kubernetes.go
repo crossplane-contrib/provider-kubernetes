@@ -33,10 +33,10 @@ func Setup(mgr ctrl.Manager, o controller.Options, po pcontroller.Options) error
 	if err := config.Setup(mgr, o); err != nil {
 		return err
 	}
-	if err := object.Setup(mgr, o, po.SanitizeSecrets, po.RemoveManagedFields, po.PollJitterPercentage, po.LegacyCSAFieldManagers); err != nil {
+	if err := object.Setup(mgr, o, po.ClientBuilder, po.SanitizeSecrets, po.RemoveManagedFields, po.PollJitterPercentage, po.LegacyCSAFieldManagers); err != nil {
 		return err
 	}
-	if err := observedobjectcollection.Setup(mgr, o, po.PollJitter); err != nil {
+	if err := observedobjectcollection.Setup(mgr, o, po.ClientBuilder, po.PollJitter); err != nil {
 		return err
 	}
 	return nil
@@ -49,10 +49,10 @@ func SetupGated(mgr ctrl.Manager, o controller.Options, po pcontroller.Options) 
 	if err := config.SetupGated(mgr, o); err != nil {
 		return err
 	}
-	if err := object.SetupGated(mgr, o, po.SanitizeSecrets, po.RemoveManagedFields, po.PollJitterPercentage, po.LegacyCSAFieldManagers); err != nil {
+	if err := object.SetupGated(mgr, o, po.ClientBuilder, po.SanitizeSecrets, po.RemoveManagedFields, po.PollJitterPercentage, po.LegacyCSAFieldManagers); err != nil {
 		return err
 	}
-	if err := observedobjectcollection.SetupGated(mgr, o, po.PollJitter); err != nil {
+	if err := observedobjectcollection.SetupGated(mgr, o, po.ClientBuilder, po.PollJitter); err != nil {
 		return err
 	}
 	return nil

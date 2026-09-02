@@ -15,16 +15,23 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"hash"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/pkg/errors"
+	"golang.org/x/sync/singleflight"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
+	"k8s.io/utils/lru"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
@@ -66,39 +73,131 @@ func (fn BuilderFn) KubeForProviderConfig(ctx context.Context, pc kconfig.Provid
 	return fn(ctx, pc)
 }
 
+// DefaultClientCacheSize is the default bound on the number of target cluster
+// clients an IdentityAwareBuilder keeps, one per distinct credential set.
+const DefaultClientCacheSize = 8
+
 // IdentityAwareBuilder is a Builder that can inject identity credentials into
 // the REST config of a Kubernetes client.
 type IdentityAwareBuilder struct {
 	local       client.Client
+	log         logging.Logger
 	store       *token.ReuseSourceStore
 	nebiusStore *nebius.SDKStore
+
+	// clients caches built clients keyed by a digest of the credential
+	// material that produced them, see KubeForProviderConfig.
+	clients   *lru.Cache
+	cacheSize int
+	building  singleflight.Group
+	newClient func(rc *rest.Config) (client.Client, error)
+}
+
+// cachedClient is a client together with the REST config it was built from.
+type cachedClient struct {
+	kube client.Client
+	rc   *rest.Config
+}
+
+// BuilderOption configures an IdentityAwareBuilder.
+type BuilderOption func(*IdentityAwareBuilder)
+
+// WithLogger sets the logger the builder reports client cache activity to.
+func WithLogger(l logging.Logger) BuilderOption {
+	return func(b *IdentityAwareBuilder) {
+		b.log = l
+	}
+}
+
+// WithClientCacheSize bounds the number of cached target cluster clients, one
+// per distinct credential set; the least recently used client is evicted
+// beyond the bound. A size of 0 or less removes the bound.
+func WithClientCacheSize(size int) BuilderOption {
+	return func(b *IdentityAwareBuilder) {
+		b.cacheSize = max(size, 0)
+	}
 }
 
 // NewIdentityAwareBuilder returns a new IdentityAwareBuilder.
-func NewIdentityAwareBuilder(local client.Client) *IdentityAwareBuilder {
-	return &IdentityAwareBuilder{
+func NewIdentityAwareBuilder(local client.Client, opts ...BuilderOption) *IdentityAwareBuilder {
+	b := &IdentityAwareBuilder{
 		local:       local,
+		log:         logging.NewNopLogger(),
 		store:       token.NewReuseSourceStore(),
 		nebiusStore: nebius.NewSDKStore(),
+		cacheSize:   DefaultClientCacheSize,
+		newClient: func(rc *rest.Config) (client.Client, error) {
+			return client.New(rc, client.Options{})
+		},
 	}
+	for _, o := range opts {
+		o(b)
+	}
+	b.clients = lru.NewWithEvictionFunc(b.cacheSize, func(lru.Key, any) {
+		b.log.Debug("Evicted least recently used target cluster client", "cacheSize", b.cacheSize)
+	})
+	return b
 }
 
 // KubeForProviderConfig returns the kube client and *rest.config for the given
-// provider config.
+// provider config. Clients are cached by a digest of the credential material
+// that produced them: a fresh client is expensive because its RESTMapper
+// primes itself via aggregated discovery on the first mapping lookup (the
+// whole API surface, multi-megabyte on CRD-heavy clusters), and this method
+// is called on every reconcile. A credential change yields a new digest and
+// thus a fresh client; token refresh happens inside the cached transports and
+// needs no rebuild.
 func (b *IdentityAwareBuilder) KubeForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (client.Client, *rest.Config, error) {
-	rc, err := b.restForProviderConfig(ctx, pc)
+	digest := sha256.New()
+	rc, err := b.restForProviderConfig(ctx, pc, digest)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "cannot get REST config for provider")
+		return nil, nil, errors.Wrap(err, "cannot get REST config for provider")
 	}
-	k, err := client.New(rc, client.Options{})
+	key := hex.EncodeToString(digest.Sum(nil))
+	if v, ok := b.clients.Get(key); ok {
+		cached := v.(cachedClient)
+		return cached.kube, rest.CopyConfig(cached.rc), nil
+	}
+	// singleflight collapses the thundering herd of concurrent reconciles
+	// racing to build the same client on a cold cache (e.g. provider start).
+	v, err, _ := b.building.Do(key, func() (any, error) {
+		if v, ok := b.clients.Get(key); ok {
+			return v, nil
+		}
+		k, err := b.newClient(rc)
+		if err != nil {
+			return nil, err
+		}
+		cached := cachedClient{kube: k, rc: rc}
+		b.clients.Add(key, cached)
+		b.log.Debug("Built target cluster client", "cachedClients", b.clients.Len(), "cacheSize", b.cacheSize)
+		return cached, nil
+	})
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "cannot create Kubernetes client for provider")
+		return nil, nil, errors.Wrap(err, "cannot create Kubernetes client for provider")
 	}
-	return k, rc, nil
+	cached := v.(cachedClient)
+	// The config is shared by every caller of this credential set; hand out a
+	// copy so that nobody can mutate it underneath the cached client.
+	return cached.kube, rest.CopyConfig(cached.rc), nil
 }
 
-// restForProviderConfig returns the *rest.config for the given provider config.
-func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (*rest.Config, error) { // nolint:gocyclo
+// digestWrite feeds client-defining material into the cache-key digest,
+// length-prefixed so adjacent fields cannot alias.
+func digestWrite(d hash.Hash, material ...[]byte) {
+	var length [8]byte
+	for _, m := range material {
+		binary.BigEndian.PutUint64(length[:], uint64(len(m)))
+		d.Write(length[:])
+		d.Write(m)
+	}
+}
+
+// restForProviderConfig returns the *rest.config for the given provider
+// config. Every input that shapes the resulting config (credential source,
+// extracted credential bytes, identity type and credentials) is also written
+// to digest, which callers use as the client cache key.
+func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec, digest hash.Hash) (*rest.Config, error) { // nolint:gocyclo
 	var (
 		rc  *rest.Config
 		err error
@@ -111,11 +210,13 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 		if err != nil {
 			return nil, errors.Wrap(err, errCreateRestConfig)
 		}
+		digestWrite(digest, []byte(cd.Source))
 	default:
 		kc, err := resource.CommonCredentialExtractor(ctx, cd.Source, b.local, cd.CommonCredentialSelectors)
 		if err != nil {
 			return nil, errors.Wrap(err, errGetCreds)
 		}
+		digestWrite(digest, []byte(cd.Source), kc)
 
 		ac, err = clientcmd.Load(kc)
 		if err != nil {
@@ -127,12 +228,28 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 		}
 	}
 
+	// The client built from this config is shared by every reconcile of the
+	// same credential set, so a per-client token bucket (client-go defaults
+	// to 5 QPS with a burst of 10 when none is set) would serialize them.
+	// Concurrency is bounded by --max-reconcile-rate and the API server's
+	// priority and fairness instead.
+	rc.QPS = -1
+
+	// The token sources the identity wrappers install outlive this call: the
+	// built client is cached and reused by later reconciles, so they must not
+	// inherit the per-reconcile cancellation (crossplane-runtime cancels ctx
+	// once the reconcile returns). Credential reads above stay bound to ctx.
+	// Each wrapper bounds its own token fetches instead, with the request
+	// context or an explicit timeout (see gke.WrapRESTConfig).
+	wrapCtx := context.WithoutCancel(ctx)
+
 	if id := pc.Identity; id != nil {
+		digestWrite(digest, []byte(id.Type), []byte(id.Source))
 		switch id.Type {
 		case kconfig.IdentityTypeGoogleApplicationCredentials:
 			switch id.Source { //nolint:exhaustive
 			case xpv2.CredentialsSourceInjectedIdentity:
-				if err := gke.WrapRESTConfig(ctx, rc, nil, gke.DefaultScopes...); err != nil {
+				if err := gke.WrapRESTConfig(wrapCtx, rc, nil, gke.DefaultScopes...); err != nil {
 					return nil, errors.Wrap(err, errInjectGoogleCredentials)
 				}
 			default:
@@ -140,8 +257,9 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 				if err != nil {
 					return nil, errors.Wrap(err, errExtractGoogleCredentials)
 				}
+				digestWrite(digest, creds)
 
-				if err := gke.WrapRESTConfig(ctx, rc, creds, gke.DefaultScopes...); err != nil {
+				if err := gke.WrapRESTConfig(wrapCtx, rc, creds, gke.DefaultScopes...); err != nil {
 					return nil, errors.Wrap(err, errInjectGoogleCredentials)
 				}
 			}
@@ -155,8 +273,9 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 				if err != nil {
 					return nil, errors.Wrap(err, errExtractAzureCredentials)
 				}
+				digestWrite(digest, creds)
 
-				if err := azure.WrapRESTConfig(ctx, rc, creds, id.Type); err != nil {
+				if err := azure.WrapRESTConfig(wrapCtx, rc, creds, id.Type); err != nil {
 					return nil, errors.Wrap(err, errInjectAzureCredentials)
 				}
 			}
@@ -170,11 +289,12 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 				if err != nil {
 					return nil, errors.Wrap(err, errExtractUpboundCredentials)
 				}
+				digestWrite(digest, staticToken)
 
 				// We trim the token to remove any leading/trailing whitespace
 				// which may have been added especially when stringData field
 				// is used while creating the secret.
-				if err := upbound.WrapRESTConfig(ctx, rc, strings.TrimSpace(string(staticToken)), b.store); err != nil {
+				if err := upbound.WrapRESTConfig(wrapCtx, rc, strings.TrimSpace(string(staticToken)), b.store); err != nil {
 					return nil, errors.Wrap(err, errInjectUpboundCredentials)
 				}
 			}
@@ -190,10 +310,11 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 						clusterName = ctxConfig.Cluster
 					}
 				}
+				digestWrite(digest, []byte(clusterName))
 				// AWS Web Identity credentials use the default AWS credentials chain
 				// which includes IRSA (IAM Roles for Service Accounts) via environment variables:
 				// AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE, AWS_REGION
-				if err := aws.WrapRESTConfig(ctx, rc, clusterName); err != nil {
+				if err := aws.WrapRESTConfig(wrapCtx, rc, clusterName); err != nil {
 					return nil, errors.Wrap(err, errInjectAWSCredentials)
 				}
 			default:
@@ -210,7 +331,8 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 				if err != nil {
 					return nil, errors.Wrap(err, errExtractNebiusCredentials)
 				}
-				if err := nebius.WrapRESTConfig(ctx, rc, creds, b.nebiusStore); err != nil {
+				digestWrite(digest, creds)
+				if err := nebius.WrapRESTConfig(wrapCtx, rc, creds, b.nebiusStore); err != nil {
 					return nil, errors.Wrap(err, errInjectNebiusCredentials)
 				}
 			}
@@ -267,11 +389,6 @@ func fromAPIConfig(c *api.Config) (*rest.Config, error) {
 		}
 		config.Proxy = http.ProxyURL(proxyURL)
 	}
-
-	// NOTE(tnthornton): these values match the burst and QPS values in kubectl.
-	// xref: https://github.com/kubernetes/kubernetes/pull/105520
-	config.Burst = 300
-	config.QPS = 50
 
 	return config, nil
 }

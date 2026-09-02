@@ -76,6 +76,7 @@ const (
 )
 
 const (
+	errNilClientBuilder  = "a client builder is required"
 	errGetProviderConfig = "cannot get provider config"
 	errTrackPCUsage      = "cannot track ProviderConfig usage"
 	errGetObject         = "cannot get object"
@@ -153,7 +154,10 @@ type ResourceSyncer interface {
 }
 
 // Setup adds a controller that reconciles Object managed resources.
-func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, removeManagedFields bool, pollJitterPercentage uint, legacyCSAFieldManagers []string) error { // nolint:gocyclo // Too many branches due to alpha features, hopefully we can clean them up after we graduate them.
+func Setup(mgr ctrl.Manager, o controller.Options, clientBuilder kubeclient.Builder, sanitizeSecrets bool, removeManagedFields bool, pollJitterPercentage uint, legacyCSAFieldManagers []string) error { // nolint:gocyclo // Too many branches due to alpha features, hopefully we can clean them up after we graduate them.
+	if clientBuilder == nil {
+		return errors.New(errNilClientBuilder)
+	}
 	name := managed.ControllerName(v1alpha2.ObjectGroupKind)
 	l := o.Logger.WithValues("controller", name)
 
@@ -182,7 +186,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, removeM
 		removeManagedFields: removeManagedFields,
 		kube:                mgr.GetClient(),
 		usage:               resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
-		clientBuilder:       kubeclient.NewIdentityAwareBuilder(mgr.GetClient()),
+		clientBuilder:       clientBuilder,
 	}
 
 	if o.Features.Enabled(features.EnableBetaServerSideApply) {
@@ -257,9 +261,12 @@ func Setup(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, removeM
 
 // SetupGated registers a controller setup function that reconciles Object managed resources.
 // The controller setup is initiated after the CRD for Object becomes available.
-func SetupGated(mgr ctrl.Manager, o controller.Options, sanitizeSecrets bool, removeManagedFields bool, pollJitterPercentage uint, legacyCSAFieldManagers []string) error {
+func SetupGated(mgr ctrl.Manager, o controller.Options, clientBuilder kubeclient.Builder, sanitizeSecrets bool, removeManagedFields bool, pollJitterPercentage uint, legacyCSAFieldManagers []string) error {
+	if clientBuilder == nil {
+		return errors.New(errNilClientBuilder)
+	}
 	o.Gate.Register(func() {
-		if err := Setup(mgr, o, sanitizeSecrets, removeManagedFields, pollJitterPercentage, legacyCSAFieldManagers); err != nil {
+		if err := Setup(mgr, o, clientBuilder, sanitizeSecrets, removeManagedFields, pollJitterPercentage, legacyCSAFieldManagers); err != nil {
 			mgr.GetLogger().Error(err, "unable to setup reconciler", "gvk", v1alpha2.ObjectGroupVersionKind.String())
 		}
 	}, v1alpha2.ObjectGroupVersionKind)
