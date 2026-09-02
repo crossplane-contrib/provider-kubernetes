@@ -22,7 +22,8 @@ const (
 
 	// cacheEventHit is a lookup served by a cached client.
 	cacheEventHit = "hit"
-	// cacheEventMiss is a lookup that found no cached client and built one.
+	// cacheEventMiss is a lookup that found no cached client; concurrent
+	// misses of one credential set collapse into a single build.
 	cacheEventMiss = "miss"
 	// cacheEventEvict is a cached client dropped to stay within the bound.
 	cacheEventEvict = "evict"
@@ -62,7 +63,7 @@ func NewClientCacheMetrics(namespace string) *ClientCacheMetrics {
 			Namespace: namespace,
 			Subsystem: metricsSubsystem,
 			Name:      "events_total",
-			Help:      "Client cache lookups by outcome: hit (cached client reused), miss (no cached client, one was built), evict (least recently used client dropped to stay within the bound).",
+			Help:      "Client cache lookups by outcome: hit (cached client reused), miss (no cached client at lookup time; concurrent misses of one credential set share a single build), evict (least recently used client dropped to stay within the bound).",
 		}, []string{"event"}),
 	}
 	for _, event := range []string{cacheEventHit, cacheEventMiss, cacheEventEvict} {
@@ -90,9 +91,12 @@ func (m *ClientCacheMetrics) event(event string) {
 }
 
 // WithClientCacheMetrics makes the builder report its client cache to m.
-// Without it the builder reports to collectors that are never registered.
+// Without it, or with a nil m, the builder reports to collectors that are
+// never registered.
 func WithClientCacheMetrics(m *ClientCacheMetrics) BuilderOption {
 	return func(b *IdentityAwareBuilder) {
-		b.metrics = m
+		if m != nil {
+			b.metrics = m
+		}
 	}
 }
