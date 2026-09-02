@@ -23,10 +23,16 @@ import (
 	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )
 
-// clientCacheKeyWorkers bounds the number of provider configs whose keys
-// ClientCacheSizeFor derives at once, and with it the credential reads in
-// flight against the local cluster.
-const clientCacheKeyWorkers = 16
+const (
+	// clientCacheKeyWorkers bounds the number of provider configs whose keys
+	// ClientCacheSizeFor derives at once, and with it the credential reads in
+	// flight against the local cluster.
+	clientCacheKeyWorkers = 16
+	// minClientCacheHeadroom is the least headroom the cache bound leaves
+	// above the credential sets counted, so that a few rotations or provider
+	// configs created after startup fit even in a small fleet.
+	minClientCacheHeadroom = 4
+)
 
 // ClientCacheSizing is the outcome of ClientCacheSizeFor.
 type ClientCacheSizing struct {
@@ -44,10 +50,10 @@ type ClientCacheSizing struct {
 
 // ClientCacheSizeFor sizes the client cache of an IdentityAwareBuilder for the
 // given provider configs so that every one of them keeps its client cached:
-// one entry per distinct credential set plus a tenth of headroom, rounded up,
-// for sets whose credentials rotate (the client built from the old
-// credentials occupies an entry until it ages out), and never below
-// DefaultClientCacheSize. Keys are derived by
+// one entry per distinct credential set plus headroom of a tenth, rounded up
+// and at least four, for sets whose credentials rotate (the client built from
+// the old credentials occupies an entry until it ages out) and for configs
+// created later, and never below DefaultClientCacheSize. Keys are derived by
 // a builder over local, exactly as KubeForProviderConfig derives them, so
 // configs that share credential material count once; up to
 // clientCacheKeyWorkers configs are derived at a time. A config whose key
@@ -88,8 +94,9 @@ func ClientCacheSizeFor(ctx context.Context, local client.Client, pcs []kconfig.
 	return s, nil
 }
 
-// clientCacheSizeFor returns the cache bound for n credential sets: n plus a
-// tenth of headroom, rounded up, and never below DefaultClientCacheSize.
+// clientCacheSizeFor returns the cache bound for n credential sets: n plus
+// headroom of a tenth, rounded up and at least minClientCacheHeadroom, and
+// never below DefaultClientCacheSize.
 func clientCacheSizeFor(n int) int {
-	return max(DefaultClientCacheSize, n+(n+9)/10)
+	return max(DefaultClientCacheSize, n+max((n+9)/10, minClientCacheHeadroom))
 }

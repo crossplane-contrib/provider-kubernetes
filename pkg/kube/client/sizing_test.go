@@ -98,7 +98,7 @@ func TestClientCacheSizeFor(t *testing.T) {
 		},
 		"HeadroomAboveTheDefault": {
 			args: args{ctx: context.Background(), local: secretLocalClient(tenSecrets), pcs: tenSpecs},
-			want: want{sizing: ClientCacheSizing{CredentialSets: 10, Size: 11}},
+			want: want{sizing: ClientCacheSizing{CredentialSets: 10, Size: 14}},
 		},
 		"UnresolvedCountsAsItsOwnSet": {
 			args: args{
@@ -106,11 +106,11 @@ func TestClientCacheSizeFor(t *testing.T) {
 				local: secretLocalClient(tenSecrets),
 				pcs:   append([]kconfig.ProviderConfigSpec{pcSpec("missing", "")}, tenSpecs...),
 			},
-			want: want{sizing: ClientCacheSizing{CredentialSets: 10, Unresolved: 1, Size: 13}},
+			want: want{sizing: ClientCacheSizing{CredentialSets: 10, Unresolved: 1, Size: 15}},
 		},
 		"KeysAreDerivedConcurrently": {
 			args: args{ctx: bounded, local: gatedLocalClient(workerSecrets), pcs: workerSpecs},
-			want: want{sizing: ClientCacheSizing{CredentialSets: clientCacheKeyWorkers, Size: 18}},
+			want: want{sizing: ClientCacheSizing{CredentialSets: clientCacheKeyWorkers, Size: clientCacheKeyWorkers + minClientCacheHeadroom}},
 		},
 		"ExpiredContextIsAnError": {
 			args: args{
@@ -138,21 +138,29 @@ func TestClientCacheSizeFor(t *testing.T) {
 }
 
 func TestClientCacheSizeForCount(t *testing.T) {
-	cases := map[string]struct {
+	type args struct {
 		credentialSets int
-		want           int
+	}
+	type want struct {
+		size int
+	}
+
+	cases := map[string]struct {
+		args args
+		want want
 	}{
-		"NoneIsTheDefault":       {credentialSets: 0, want: DefaultClientCacheSize},
-		"BelowTheDefault":        {credentialSets: 7, want: DefaultClientCacheSize},
-		"HeadroomLeavesDefault":  {credentialSets: 8, want: 9},
-		"HeadroomRoundsUp":       {credentialSets: 12, want: 14},
-		"HeadroomIsProportional": {credentialSets: 100, want: 110},
+		"NoneIsTheDefault":      {args: args{credentialSets: 0}, want: want{size: DefaultClientCacheSize}},
+		"FloorWithinTheDefault": {args: args{credentialSets: 4}, want: want{size: DefaultClientCacheSize}},
+		"FloorAboveTheDefault":  {args: args{credentialSets: 7}, want: want{size: 11}},
+		"FloorBeatsATenth":      {args: args{credentialSets: 20}, want: want{size: 24}},
+		"TenthRoundsUp":         {args: args{credentialSets: 42}, want: want{size: 47}},
+		"TenthIsProportional":   {args: args{credentialSets: 100}, want: want{size: 110}},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if diff := cmp.Diff(tc.want, clientCacheSizeFor(tc.credentialSets)); diff != "" {
-				t.Errorf("clientCacheSizeFor(%d): -want, +got:\n%s", tc.credentialSets, diff)
+			if diff := cmp.Diff(tc.want.size, clientCacheSizeFor(tc.args.credentialSets)); diff != "" {
+				t.Errorf("clientCacheSizeFor(%d): -want, +got:\n%s", tc.args.credentialSets, diff)
 			}
 		})
 	}

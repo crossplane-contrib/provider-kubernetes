@@ -198,7 +198,7 @@ func TestClientCacheSize(t *testing.T) {
 		},
 		"ManyCredentialSetsGetHeadroom": {
 			args: args{kube: &test.MockClient{MockList: manyProviderConfigs(20), MockGet: getSecrets(manySecrets)}},
-			want: want{size: 22},
+			want: want{size: 24},
 		},
 	}
 
