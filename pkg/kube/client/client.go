@@ -239,6 +239,8 @@ func (b *IdentityAwareBuilder) restForProviderConfig(ctx context.Context, pc kco
 	// built client is cached and reused by later reconciles, so they must not
 	// inherit the per-reconcile cancellation (crossplane-runtime cancels ctx
 	// once the reconcile returns). Credential reads above stay bound to ctx.
+	// Each wrapper bounds its own token fetches instead, with the request
+	// context or an explicit timeout (see gke.WrapRESTConfig).
 	wrapCtx := context.WithoutCancel(ctx)
 
 	if id := pc.Identity; id != nil {

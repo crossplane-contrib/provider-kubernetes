@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
@@ -31,9 +32,31 @@ var DefaultScopes []string = []string{
 	"https://www.googleapis.com/auth/userinfo.email",
 }
 
+// tokenFetchTimeout bounds every token exchange with Google. The oauth2 token
+// sources keep the context they were built with and perform their HTTP with
+// the *http.Client stored under oauth2.HTTPClient in that context, falling
+// back to http.DefaultClient, which has no timeout. The wrapped REST config is
+// cached and shared by every request of its credential set, and the shared
+// token source serializes those requests on one refresh, so an unbounded
+// exchange would block all of them for as long as the token endpoint stays
+// silent.
+const tokenFetchTimeout = 30 * time.Second
+
+// withTokenFetchClient returns ctx carrying the HTTP client the oauth2 token
+// sources use for their exchanges, unless the caller already supplied one.
+func withTokenFetchClient(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(oauth2.HTTPClient).(*http.Client); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, oauth2.HTTPClient, &http.Client{Timeout: tokenFetchTimeout})
+}
+
 // WrapRESTConfig configures the supplied REST config to use OAuth2 bearer
-// tokens fetched using the supplied Google Application Credentials.
+// tokens fetched using the supplied Google Application Credentials. The token
+// sources it installs outlive the call, so ctx should carry no cancellation;
+// their token exchanges are bounded by tokenFetchTimeout instead.
 func WrapRESTConfig(ctx context.Context, rc *rest.Config, credentials []byte, scopes ...string) error {
+	ctx = withTokenFetchClient(ctx)
 	// TODO(turkenh): Use token.ReuseSourceStore to cache token sources and
 	// avoid token regeneration on every reconciliation loop.
 	var ts oauth2.TokenSource
