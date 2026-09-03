@@ -151,6 +151,14 @@ type Readiness struct {
 	//  `object.status.conditions.all(x, x.status == "True")` mimics the behavior of the AllTrue readiness policy
 	//  `object.status.conditions.exists(c, c.type == "condition1" && c.status == "True" )` checks just one condition
 	CelQuery string `json:"celQuery,omitempty"`
+
+	// NoRequeue suppresses the periodic poll requeue once the object is ready and up-to-date.
+	// The object will still be reconciled immediately on any spec change via the watch mechanism.
+	// This is useful for large fleets of stable resources where periodic Observe() calls to the
+	// remote cluster are unnecessary overhead.
+	// +optional
+	// +kubebuilder:default=false
+	NoRequeue bool `json:"noRequeue,omitempty"`
 }
 
 // ConnectionDetail represents an entry in the connection secret for an Object

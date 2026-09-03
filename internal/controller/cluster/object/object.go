@@ -153,6 +153,29 @@ type ResourceSyncer interface {
 	SyncResource(ctx context.Context, obj *v1alpha2.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error)
 }
 
+// buildPollIntervalHook returns a PollIntervalHook that:
+// - returns 0 (no requeue) when noRequeue is true and the resource is ready,
+// - uses a short 30s interval when the resource is not yet ready,
+// - otherwise uses the configured poll interval with jitter.
+func buildPollIntervalHook(pollJitterPercentage uint) managed.PollIntervalHook {
+	return func(mg resource.Managed, pollInterval time.Duration) time.Duration {
+		obj, ok := mg.(*v1alpha2.Object)
+		if ok && obj.Spec.Readiness.NoRequeue && mg.GetCondition(xpv2.TypeReady).Status == v1.ConditionTrue {
+			// Suppress periodic requeue for stable resources with noRequeue: true.
+			// Watch events will still trigger an immediate reconcile on any spec change.
+			return 0
+		}
+		if mg.GetCondition(xpv2.TypeReady).Status != v1.ConditionTrue {
+			// If the resource is not ready, poll more frequently to avoid delaying time to readiness.
+			pollInterval = 30 * time.Second
+		}
+		pollJitter := time.Duration(float64(pollInterval) * (float64(pollJitterPercentage) / 100.0))
+		// This is the same as runtime default poll interval with jitter, see:
+		// https://github.com/crossplane/crossplane-runtime/blob/7fcb8c5cad6fc4abb6649813b92ab92e1832d368/pkg/reconciler/managed/reconciler.go#L573
+		return pollInterval + time.Duration((rand.Float64()-0.5)*2*float64(pollJitter)) //nolint G404 // No need for secure randomness
+	}
+}
+
 // Setup adds a controller that reconciles Object managed resources.
 func Setup(mgr ctrl.Manager, o controller.Options, clientBuilder kubeclient.Builder, sanitizeSecrets bool, removeManagedFields bool, pollJitterPercentage uint, legacyCSAFieldManagers []string) error { // nolint:gocyclo // Too many branches due to alpha features, hopefully we can clean them up after we graduate them.
 	if clientBuilder == nil {
@@ -164,16 +187,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, clientBuilder kubeclient.Buil
 	reconcilerOptions := []managed.ReconcilerOption{
 		managed.WithFinalizer(&objFinalizer{client: mgr.GetClient()}),
 		managed.WithPollInterval(o.PollInterval),
-		managed.WithPollIntervalHook(func(mg resource.Managed, pollInterval time.Duration) time.Duration {
-			if mg.GetCondition(xpv2.TypeReady).Status != v1.ConditionTrue {
-				// If the resource is not ready, we should poll more frequently not to delay time to readiness.
-				pollInterval = 30 * time.Second
-			}
-			pollJitter := time.Duration(float64(pollInterval) * (float64(pollJitterPercentage) / 100.0))
-			// This is the same as runtime default poll interval with jitter, see:
-			// https://github.com/crossplane/crossplane-runtime/blob/7fcb8c5cad6fc4abb6649813b92ab92e1832d368/pkg/reconciler/managed/reconciler.go#L573
-			return pollInterval + time.Duration((rand.Float64()-0.5)*2*float64(pollJitter)) //nolint G404 // No need for secure randomness
-		}),
+		managed.WithPollIntervalHook(buildPollIntervalHook(pollJitterPercentage)),
 		managed.WithLogger(l),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))), //nolint:staticcheck // SA1019: keeping the legacy events API until crossplane-runtime's event package moves to GetEventRecorder
 		managed.WithMetricRecorder(o.MetricOptions.MRMetrics),
