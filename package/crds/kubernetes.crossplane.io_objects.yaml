@@ -656,6 +656,14 @@ spec:
                        `object.status.conditions.all(x, x.status == "True")` mimics the behavior of the AllTrue readiness policy
                        `object.status.conditions.exists(c, c.type == "condition1" && c.status == "True" )` checks just one condition
                     type: string
+                  noRequeue:
+                    default: false
+                    description: |-
+                      NoRequeue suppresses the periodic poll requeue once the object is ready and up-to-date.
+                      The object will still be reconciled immediately on any spec change via the watch mechanism.
+                      This is useful for large fleets of stable resources where periodic Observe() calls to the
+                      remote cluster are unnecessary overhead.
+                    type: boolean
                   policy:
                     default: SuccessfulCreate
                     description: Policy defines how the Object's readiness condition

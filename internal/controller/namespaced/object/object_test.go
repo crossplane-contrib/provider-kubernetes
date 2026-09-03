@@ -2124,3 +2124,69 @@ func TestLoggableRedactsSecretData(t *testing.T) {
 		})
 	}
 }
+
+func TestPollIntervalHook(t *testing.T) {
+	const basePollInterval = 10 * time.Minute
+
+	cases := map[string]struct {
+		obj           *objv1alpha1.Object
+		wantZero      bool
+		wantShortPoll bool
+	}{
+		"DefaultNoRequeueFalseReadyTrue": {
+			obj: kubernetesObject(func(o *objv1alpha1.Object) {
+				o.Spec.Readiness = objv1alpha1.Readiness{NoRequeue: false}
+				o.Status.SetConditions(xpv2.Available())
+			}),
+			wantZero:      false,
+			wantShortPoll: false,
+		},
+		"NoRequeueTrueReadyFalse": {
+			obj: kubernetesObject(func(o *objv1alpha1.Object) {
+				o.Spec.Readiness = objv1alpha1.Readiness{NoRequeue: true}
+				o.Status.SetConditions(xpv2.Unavailable())
+			}),
+			wantZero:      false,
+			wantShortPoll: true,
+		},
+		"NoRequeueTrueReadyTrue": {
+			obj: kubernetesObject(func(o *objv1alpha1.Object) {
+				o.Spec.Readiness = objv1alpha1.Readiness{NoRequeue: true}
+				o.Status.SetConditions(xpv2.Available())
+			}),
+			wantZero:      true,
+			wantShortPoll: false,
+		},
+		"NotReadyUsesShortPoll": {
+			obj: kubernetesObject(func(o *objv1alpha1.Object) {
+				o.Status.SetConditions(xpv2.Unavailable())
+			}),
+			wantZero:      false,
+			wantShortPoll: true,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			hook := buildPollIntervalHook(0)
+			got := hook(tc.obj, basePollInterval)
+			switch {
+			case tc.wantZero:
+				if got != 0 {
+					t.Errorf("expected poll interval 0 (no requeue), got %s", got)
+				}
+			case tc.wantShortPoll:
+				if got > 30*time.Second {
+					t.Errorf("expected fast poll (<= 30s) for not-ready resource, got %s", got)
+				}
+			default:
+				if got == 0 {
+					t.Errorf("expected non-zero poll interval, got 0")
+				}
+				if got > basePollInterval {
+					t.Errorf("expected poll interval <= base %s, got %s", basePollInterval, got)
+				}
+			}
+		})
+	}
+}
