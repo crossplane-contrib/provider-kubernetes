@@ -78,14 +78,24 @@ func discoveryPaths(ctx context.Context, rc rest.Interface) (map[string]OpenAPIG
 		if err != nil {
 			return nil, nil, err
 		}
-		oapiGV.ServerRelativeURL = strings.TrimPrefix(oapiGV.ServerRelativeURL, rootPrefix)
-		useClientPrefix := strings.HasPrefix(oapiGV.ServerRelativeURL, "/openapi/v3")
+		normalized, useClientPrefix := stripAPIRootPrefix(oapiGV, rootPrefix)
 		etag := parse.Query().Get("hash")
-		oapiPathsToGV[path] = newCustomOAPIGroupVersion(rc, oapiGV, useClientPrefix)
+		oapiPathsToGV[path] = newCustomOAPIGroupVersion(rc, normalized, useClientPrefix)
 		oapiPathsToETags[path] = etag
 
 	}
 	return oapiPathsToGV, oapiPathsToETags, nil
+}
+
+// stripAPIRootPrefix removes the API server's root path prefix from an OpenAPI
+// v3 discovery entry's ServerRelativeURL so it can be matched against the
+// canonical "/openapi/v3" prefix. It reports whether that prefix now matches -
+// i.e. whether the schema fetch should build the URL via the REST client's
+// base path (AbsPath) rather than issuing the raw server-relative URL. When
+// the API server is served at the root (rootPrefix is empty) this is a no-op.
+func stripAPIRootPrefix(oapiGV handler3.OpenAPIV3DiscoveryGroupVersion, rootPrefix string) (handler3.OpenAPIV3DiscoveryGroupVersion, bool) {
+	oapiGV.ServerRelativeURL = strings.TrimPrefix(oapiGV.ServerRelativeURL, rootPrefix)
+	return oapiGV, strings.HasPrefix(oapiGV.ServerRelativeURL, "/openapi/v3")
 }
 
 // getParserForGV fetches the *GVKParser for the given GroupVersion.
