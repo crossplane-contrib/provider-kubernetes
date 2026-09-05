@@ -21,12 +21,17 @@ import (
 	"net/http"
 	"strings"
 
+	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/aws-sdk-go-v2/service/sts/types"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/pkg/errors"
 	"k8s.io/client-go/rest"
+
+	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )
 
 const (
@@ -42,26 +47,44 @@ const (
 
 // WrapRESTConfig configures the supplied REST config to use bearer tokens
 // fetched using AWS credentials chain for EKS authentication.
-// This uses AWS Web Identity / IRSA to assume a role that has access to the EKS cluster.
+// This uses the AWS default credentials chain, including Web Identity / IRSA.
 // clusterNameFromKubeconfig is the cluster name from the kubeconfig (can be an ARN or plain name).
-func WrapRESTConfig(ctx context.Context, rc *rest.Config, clusterNameFromKubeconfig string) error {
-	// Extract cluster name from ARN if needed
-	clusterName, err := extractClusterNameFromARN(clusterNameFromKubeconfig)
+// roleChain, when supplied, is assumed in order before EKS tokens are signed.
+func WrapRESTConfig(ctx context.Context, rc *rest.Config, clusterNameFromKubeconfig string, roleChain ...kconfig.AWSAssumeRoleOptions) error {
+	clusterName, region, err := ClusterNameAndRegion(clusterNameFromKubeconfig)
 	if err != nil {
 		return errors.Wrap(err, "failed to extract cluster name from kubeconfig")
 	}
 
-	cfg, err := config.LoadDefaultConfig(ctx)
+	loadOptions := make([]func(*config.LoadOptions) error, 0, 1)
+	if region != "" {
+		loadOptions = append(loadOptions, config.WithRegion(region))
+	}
+	cfg, err := config.LoadDefaultConfig(ctx, loadOptions...)
 	if err != nil {
 		return errors.Wrap(err, "failed to load AWS config using default credentials chain")
 	}
 
-	// Create STS client with the credentials (which may already be assumed role credentials)
-	stsClient := sts.NewFromConfig(cfg)
+	for i, role := range roleChain {
+		stsClient := sts.NewFromConfig(cfg)
+		provider := stscreds.NewAssumeRoleProvider(stsClient, role.RoleARN, func(o *stscreds.AssumeRoleOptions) {
+			o.ExternalID = role.ExternalID
+			o.TransitiveTagKeys = append([]string(nil), role.TransitiveTagKeys...)
+			o.Tags = make([]types.Tag, 0, len(role.Tags))
+			for _, tag := range role.Tags {
+				o.Tags = append(o.Tags, types.Tag{Key: awssdk.String(tag.Key), Value: awssdk.String(tag.Value)})
+			}
+		})
+		cfg.Credentials = awssdk.NewCredentialsCache(&assumeRoleCredentialsProvider{
+			CredentialsProvider: provider,
+			roleARN:             role.RoleARN,
+			hop:                 i + 1,
+		})
+	}
 
 	// Create a token source that generates EKS tokens on demand
 	tokenSource := &eksTokenSource{
-		stsClient: stsClient,
+		stsClient: sts.NewFromConfig(cfg),
 		clusterID: clusterName,
 	}
 
@@ -79,29 +102,45 @@ func WrapRESTConfig(ctx context.Context, rc *rest.Config, clusterNameFromKubecon
 	return nil
 }
 
-// extractClusterNameFromARN extracts the cluster name from an EKS cluster ARN
+// ClusterNameAndRegion returns an EKS cluster name and any region specified by
+// an EKS cluster ARN. Plain cluster names have no associated region.
 // ARN format: arn:aws:eks:region:account:cluster/cluster-name
-func extractClusterNameFromARN(arnString string) (string, error) {
+func ClusterNameAndRegion(arnString string) (string, string, error) {
 	// Check if it's an ARN using AWS SDK
 	if !arn.IsARN(arnString) {
 		// Not an ARN, might be just the cluster name
-		return arnString, nil
+		return arnString, "", nil
 	}
 
 	// Parse ARN using AWS SDK
 	parsedARN, err := arn.Parse(arnString)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to parse ARN")
+		return "", "", errors.Wrap(err, "failed to parse ARN")
+	}
+	if parsedARN.Service != "eks" {
+		return "", "", fmt.Errorf("ARN is for service %q, not EKS", parsedARN.Service)
 	}
 
-	// EKS cluster ARNs have Resource in format "cluster/cluster-name"
-	// Split by '/' to get the cluster name
-	parts := strings.Split(parsedARN.Resource, "/")
-	if len(parts) < 2 {
-		return "", fmt.Errorf("invalid EKS cluster ARN resource format: %s", parsedARN.Resource)
+	clusterName, ok := strings.CutPrefix(parsedARN.Resource, "cluster/")
+	if !ok || clusterName == "" || strings.Contains(clusterName, "/") {
+		return "", "", fmt.Errorf("invalid EKS cluster ARN resource format: %s", parsedARN.Resource)
 	}
 
-	return parts[len(parts)-1], nil
+	return clusterName, parsedARN.Region, nil
+}
+
+type assumeRoleCredentialsProvider struct {
+	awssdk.CredentialsProvider
+	roleARN string
+	hop     int
+}
+
+func (p *assumeRoleCredentialsProvider) Retrieve(ctx context.Context) (awssdk.Credentials, error) {
+	credentials, err := p.CredentialsProvider.Retrieve(ctx)
+	if err != nil {
+		return awssdk.Credentials{}, errors.Wrapf(err, "failed to assume IAM role %q at chain hop %d", p.roleARN, p.hop)
+	}
+	return credentials, nil
 }
 
 // tokenSource issues an EKS bearer token for the request carrying ctx.

@@ -41,22 +41,26 @@ import (
 const testNamespace = "crossplane-system"
 
 func kubeconfigFor(server string) []byte {
+	return kubeconfigForCluster(server, "c")
+}
+
+func kubeconfigForCluster(server, cluster string) []byte {
 	return fmt.Appendf(nil, `apiVersion: v1
 kind: Config
 clusters:
-- name: c
+- name: %s
   cluster:
     server: %s
 contexts:
 - name: ctx
   context:
-    cluster: c
+    cluster: %s
     user: u
 current-context: ctx
 users:
 - name: u
   user: {}
-`, server)
+`, cluster, server, cluster)
 }
 
 // secretLocalClient serves the supplied Secrets, keyed by name, from the
@@ -108,6 +112,18 @@ func pcSpec(kubeconfigSecret, identitySecret string) kconfig.ProviderConfigSpec 
 	return pc
 }
 
+func awsPCSpec(kubeconfigSecret string, chain ...kconfig.AWSAssumeRoleOptions) kconfig.ProviderConfigSpec {
+	pc := pcSpec(kubeconfigSecret, "")
+	pc.Identity = &kconfig.Identity{
+		Type: kconfig.IdentityTypeAWSWebIdentityCredentials,
+		ProviderCredentials: kconfig.ProviderCredentials{
+			Source: xpv2.CredentialsSourceInjectedIdentity,
+		},
+		AWS: &kconfig.AWSIdentityConfig{AssumeRoleChain: chain},
+	}
+	return pc
+}
+
 // clientIdentities maps every client to the index of the first call that
 // returned the same instance, so [0, 0] means one reused client and [0, 1]
 // means two distinct clients.
@@ -126,11 +142,14 @@ func clientIdentities(clients []client.Client) []int {
 }
 
 func TestKubeForProviderConfigCaching(t *testing.T) {
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	kubeconfigA := kubeconfigFor("https://a.example.org:6443")
 	kubeconfigB := kubeconfigFor("https://b.example.org:6443")
+	kubeconfigAWS := kubeconfigForCluster("https://a.example.org:6443", "arn:aws:eks:us-west-2:123456789012:cluster/target")
 	secrets := map[string]map[string][]byte{
-		"kubeconfig-a": {"kubeconfig": kubeconfigA},
-		"kubeconfig-b": {"kubeconfig": kubeconfigB},
+		"kubeconfig-a":   {"kubeconfig": kubeconfigA},
+		"kubeconfig-b":   {"kubeconfig": kubeconfigB},
+		"kubeconfig-aws": {"kubeconfig": kubeconfigAWS},
 		// Non-JSON Google credentials are used verbatim as a static access
 		// token, so no token endpoint is involved.
 		"token-a": {"credentials": []byte("access-token-a")},
@@ -173,6 +192,17 @@ func TestKubeForProviderConfigCaching(t *testing.T) {
 				},
 			},
 			want: want{clients: []int{0, 1, 2, 1}},
+		},
+		"SameKubeconfigDifferentAWSRoleChainBuildsNewClient": {
+			args: args{
+				cacheSize: DefaultClientCacheSize,
+				calls: []kconfig.ProviderConfigSpec{
+					awsPCSpec("kubeconfig-aws", kconfig.AWSAssumeRoleOptions{RoleARN: "arn:aws:iam::123456789012:role/a"}),
+					awsPCSpec("kubeconfig-aws", kconfig.AWSAssumeRoleOptions{RoleARN: "arn:aws:iam::123456789012:role/b"}),
+					awsPCSpec("kubeconfig-aws", kconfig.AWSAssumeRoleOptions{RoleARN: "arn:aws:iam::123456789012:role/a"}),
+				},
+			},
+			want: want{clients: []int{0, 1, 0}},
 		},
 		"LeastRecentlyUsedClientIsEvicted": {
 			args: args{
