@@ -18,6 +18,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"hash"
 	"net/http"
 	"net/url"
@@ -280,6 +281,13 @@ func (b *IdentityAwareBuilder) resolve(ctx context.Context, pc kconfig.ProviderC
 	inject := func(context.Context, *rest.Config) error { return nil }
 	if id := pc.Identity; id != nil {
 		digestWrite(digest, []byte(id.Type), []byte(id.Source))
+		if id.AWS != nil {
+			awsConfig, err := json.Marshal(id.AWS)
+			if err != nil {
+				return resolved{}, errors.Wrap(err, "cannot encode identity.aws for client cache key")
+			}
+			digestWrite(digest, awsConfig)
+		}
 		if inject, err = b.identityInjector(ctx, id, ac, digest); err != nil {
 			return resolved{}, err
 		}
@@ -346,21 +354,29 @@ func (b *IdentityAwareBuilder) identityInjector(ctx context.Context, id *kconfig
 	case kconfig.IdentityTypeAWSWebIdentityCredentials:
 		switch id.Source { //nolint:exhaustive
 		case xpv2.CredentialsSourceInjectedIdentity:
+			var assumeRoleChain []kconfig.AWSAssumeRoleOptions
+			if id.AWS != nil {
+				assumeRoleChain = id.AWS.AssumeRoleChain
+			}
 			// Extract the cluster name from the provided kubeconfig.
 			// We need the actual cluster name (or ARN) for the presigned URL,
 			// not the random endpoint ID from the server URL.
-			var clusterName string
+			var clusterIdentifier string
 			if ac != nil && ac.CurrentContext != "" {
 				if ctxConfig := ac.Contexts[ac.CurrentContext]; ctxConfig != nil {
-					clusterName = ctxConfig.Cluster
+					clusterIdentifier = ctxConfig.Cluster
 				}
 			}
-			digestWrite(digest, []byte(clusterName))
-			// AWS Web Identity credentials use the default AWS credentials chain
-			// which includes IRSA (IAM Roles for Service Accounts) via environment variables:
-			// AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE, AWS_REGION
+			clusterName, region, err := aws.ClusterNameAndRegion(clusterIdentifier)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to extract cluster name from kubeconfig")
+			}
+			digestWrite(digest, []byte(clusterName), []byte(region))
+			// AWS Web Identity credentials use the default AWS credentials chain,
+			// including IRSA via AWS_ROLE_ARN and AWS_WEB_IDENTITY_TOKEN_FILE.
+			// An EKS ARN's region takes precedence over the default AWS region.
 			return func(ctx context.Context, rc *rest.Config) error {
-				return errors.Wrap(aws.WrapRESTConfig(ctx, rc, clusterName), errInjectAWSCredentials)
+				return errors.Wrap(aws.WrapRESTConfig(ctx, rc, clusterIdentifier, assumeRoleChain...), errInjectAWSCredentials)
 			}, nil
 		default:
 			return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
