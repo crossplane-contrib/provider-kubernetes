@@ -1,0 +1,29 @@
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: kubernetes-provider
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: cluster-config
+      key: kubeconfig
+  identity:
+    type: AWSWebIdentityCredentials
+    source: InjectedIdentity
+    aws:
+      # Roles are assumed in order. The source identity needs sts:AssumeRole for
+      # the first role. Each target role must trust its predecessor, and each
+      # intermediate role needs permission to assume the next role.
+      assumeRoleChain:
+        - roleARN: arn:aws:iam::123456789012:role/intermediate
+        - roleARN: arn:aws:iam::210987654321:role/target-eks-access
+          externalID: optional-external-id
+          tags:
+            - key: owner
+              value: platform
+          transitiveTagKeys:
+            - owner
+      # Grant the final role access to EKS. AWS limits chained role sessions to
+      # one hour. Configuring tags also requires sts:TagSession permission.

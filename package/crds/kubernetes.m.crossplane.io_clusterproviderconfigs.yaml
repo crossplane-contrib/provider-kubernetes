@@ -115,6 +115,63 @@ spec:
                   credentials can be used to supplement kubeconfig 'credentials', for
                   example by configuring a bearer token source such as OAuth.
                 properties:
+                  aws:
+                    description: |-
+                      AWS contains AWS-specific identity configuration. It is supported only
+                      when type is AWSWebIdentityCredentials and source is InjectedIdentity.
+                    properties:
+                      assumeRoleChain:
+                        description: |-
+                          AssumeRoleChain is an ordered chain of AWS IAM roles to assume before
+                          authenticating to an EKS cluster. Each role uses the preceding role's
+                          temporary credentials. AWS limits role-chained sessions to one hour.
+                        items:
+                          description: AWSAssumeRoleOptions configures one hop in
+                            an ordered AWS IAM role chain.
+                          properties:
+                            externalID:
+                              description: ExternalID is the external ID to pass when
+                                assuming the role.
+                              type: string
+                            roleARN:
+                              description: RoleARN is the ARN of the IAM role to assume.
+                              minLength: 1
+                              pattern: ^arn:[a-z0-9-]+:iam::[0-9]{12}:role/.+$
+                              type: string
+                            tags:
+                              description: |-
+                                Tags are session tags to pass when assuming the role. The source role
+                                must be permitted to call sts:TagSession when tags are configured.
+                              items:
+                                description: AWSAssumeRoleTag is a session tag to
+                                  pass when assuming an AWS IAM role.
+                                properties:
+                                  key:
+                                    description: Key is the session tag key.
+                                    minLength: 1
+                                    type: string
+                                  value:
+                                    description: Value is the session tag value.
+                                    minLength: 1
+                                    type: string
+                                required:
+                                - key
+                                - value
+                                type: object
+                              type: array
+                            transitiveTagKeys:
+                              description: |-
+                                TransitiveTagKeys identifies session tags to pass to subsequent roles in
+                                the chain.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - roleARN
+                          type: object
+                        minItems: 1
+                        type: array
+                    type: object
                   env:
                     description: |-
                       Env is a reference to an environment variable that contains credentials
@@ -179,6 +236,11 @@ spec:
                 - source
                 - type
                 type: object
+                x-kubernetes-validations:
+                - message: aws is only valid when type is AWSWebIdentityCredentials
+                    and source is InjectedIdentity
+                  rule: '!has(self.aws) || (self.type == ''AWSWebIdentityCredentials''
+                    && self.source == ''InjectedIdentity'')'
             required:
             - credentials
             type: object
