@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -108,15 +109,14 @@ func pcSpec(kubeconfigSecret, identitySecret string) kconfig.ProviderConfigSpec 
 	return pc
 }
 
-// clientIdentities maps every client to the index of the first call that
-// returned the same instance, so [0, 0] means one reused client and [0, 1]
-// means two distinct clients.
-func clientIdentities(clients []client.Client) []int {
-	ids := make([]int, len(clients))
-	for i, c := range clients {
+// groups maps every item to the index of the first item equal to it, so
+// [0, 0] means one shared client or key and [0, 1] means two distinct ones.
+func groups[T comparable](items []T) []int {
+	ids := make([]int, len(items))
+	for i, it := range items {
 		ids[i] = i
 		for j := range i {
-			if clients[j] == c {
+			if items[j] == it {
 				ids[i] = ids[j]
 				break
 			}
@@ -211,8 +211,138 @@ func TestKubeForProviderConfigCaching(t *testing.T) {
 				clients = append(clients, k)
 			}
 
-			if diff := cmp.Diff(tc.want.clients, clientIdentities(clients)); diff != "" {
+			if diff := cmp.Diff(tc.want.clients, groups(clients)); diff != "" {
 				t.Errorf("KubeForProviderConfig(...): -want client identities, +got:\n%s", diff)
+			}
+		})
+	}
+}
+
+// awsSpec references the kubeconfig Secret and uses the AWS web identity of
+// the provider pod.
+func awsSpec(kubeconfigSecret string) kconfig.ProviderConfigSpec {
+	pc := pcSpec(kubeconfigSecret, "")
+	pc.Identity = &kconfig.Identity{
+		Type:                kconfig.IdentityTypeAWSWebIdentityCredentials,
+		ProviderCredentials: kconfig.ProviderCredentials{Source: xpv2.CredentialsSourceInjectedIdentity},
+	}
+	return pc
+}
+
+func TestClientCacheKey(t *testing.T) {
+	errBoom := errors.New("boom")
+	kubeconfigA := kubeconfigFor("https://a.example.org:6443")
+	secrets := map[string]map[string][]byte{
+		"kubeconfig-a":      {"kubeconfig": kubeconfigA},
+		"kubeconfig-a-copy": {"kubeconfig": kubeconfigA},
+		"kubeconfig-b":      {"kubeconfig": kubeconfigFor("https://b.example.org:6443")},
+		"token-a":           {"credentials": []byte("access-token-a")},
+		"token-b":           {"credentials": []byte("access-token-b")},
+	}
+
+	type args struct {
+		specs []kconfig.ProviderConfigSpec
+	}
+	type want struct {
+		groups []int
+		// buildable marks specs whose client can be built without a cloud
+		// environment; for them the keys must group exactly as the clients
+		// KubeForProviderConfig hands out.
+		buildable bool
+		err       error
+	}
+	cases := map[string]struct {
+		args args
+		want want
+	}{
+		"SameSecretSharesKey": {
+			args: args{specs: []kconfig.ProviderConfigSpec{pcSpec("kubeconfig-a", ""), pcSpec("kubeconfig-a", "")}},
+			want: want{groups: []int{0, 0}, buildable: true},
+		},
+		"SameKubeconfigInDifferentSecretsSharesKey": {
+			args: args{specs: []kconfig.ProviderConfigSpec{pcSpec("kubeconfig-a", ""), pcSpec("kubeconfig-a-copy", "")}},
+			want: want{groups: []int{0, 0}, buildable: true},
+		},
+		"DifferentKubeconfigsHaveDistinctKeys": {
+			args: args{specs: []kconfig.ProviderConfigSpec{pcSpec("kubeconfig-a", ""), pcSpec("kubeconfig-b", "")}},
+			want: want{groups: []int{0, 1}, buildable: true},
+		},
+		"IdentityCredentialsArePartOfTheKey": {
+			args: args{specs: []kconfig.ProviderConfigSpec{
+				pcSpec("kubeconfig-a", ""),
+				pcSpec("kubeconfig-a", "token-a"),
+				pcSpec("kubeconfig-a", "token-b"),
+				pcSpec("kubeconfig-a", "token-a"),
+			}},
+			want: want{groups: []int{0, 1, 2, 1}, buildable: true},
+		},
+		"InjectedIdentityIsPartOfTheKey": {
+			args: args{specs: []kconfig.ProviderConfigSpec{
+				pcSpec("kubeconfig-a", ""),
+				awsSpec("kubeconfig-a"),
+				awsSpec("kubeconfig-a-copy"),
+				awsSpec("kubeconfig-b"),
+			}},
+			want: want{groups: []int{0, 1, 1, 3}},
+		},
+		"MissingSecretIsAnError": {
+			args: args{specs: []kconfig.ProviderConfigSpec{pcSpec("missing", "")}},
+			want: want{err: errors.Wrap(errors.Wrap(errBoom, "cannot get credentials secret"), errGetCreds)},
+		},
+		"UnsupportedIdentitySourceIsAnError": {
+			args: args{specs: []kconfig.ProviderConfigSpec{{
+				Credentials: kconfig.ProviderCredentials{Source: xpv2.CredentialsSourceSecret, CommonCredentialSelectors: secretSelector("kubeconfig-a", "kubeconfig")},
+				Identity: &kconfig.Identity{
+					Type:                kconfig.IdentityTypeAWSWebIdentityCredentials,
+					ProviderCredentials: kconfig.ProviderCredentials{Source: xpv2.CredentialsSourceSecret, CommonCredentialSelectors: secretSelector("token-a", "credentials")},
+				},
+			}}},
+			want: want{err: errors.Errorf("%s is not supported as identity source for identity type %s", xpv2.CredentialsSourceSecret, kconfig.IdentityTypeAWSWebIdentityCredentials)},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			local := &test.MockClient{MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+				if _, ok := secrets[key.Name]; !ok {
+					return errBoom
+				}
+				return secretLocalClient(secrets).Get(ctx, key, obj)
+			}}
+			b := NewIdentityAwareBuilder(local, WithClientCacheSize(0))
+
+			keys := make([]string, 0, len(tc.args.specs))
+			var err error
+			for _, pc := range tc.args.specs {
+				var key string
+				if key, err = b.ClientCacheKey(context.Background(), pc); err != nil {
+					break
+				}
+				keys = append(keys, key)
+			}
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
+				t.Fatalf("ClientCacheKey(...): -want error, +got error:\n%s", diff)
+			}
+			if err != nil {
+				return
+			}
+			if diff := cmp.Diff(tc.want.groups, groups(keys)); diff != "" {
+				t.Errorf("ClientCacheKey(...): -want groups, +got groups:\n%s", diff)
+			}
+			if !tc.want.buildable {
+				return
+			}
+
+			clients := make([]client.Client, 0, len(tc.args.specs))
+			for i, pc := range tc.args.specs {
+				k, _, err := b.KubeForProviderConfig(context.Background(), pc)
+				if err != nil {
+					t.Fatalf("KubeForProviderConfig(...) call %d: unexpected error: %v", i, err)
+				}
+				clients = append(clients, k)
+			}
+			if diff := cmp.Diff(groups(clients), groups(keys)); diff != "" {
+				t.Errorf("ClientCacheKey(...): -want groups (cached clients), +got groups (keys):\n%s", diff)
 			}
 		})
 	}
@@ -251,7 +381,7 @@ func TestKubeForProviderConfigConcurrentBuildsCollapse(t *testing.T) {
 			t.Fatalf("KubeForProviderConfig(...) caller %d: unexpected error: %v", i, err)
 		}
 	}
-	if diff := cmp.Diff(make([]int, callers), clientIdentities(clients)); diff != "" {
+	if diff := cmp.Diff(make([]int, callers), groups(clients)); diff != "" {
 		t.Errorf("KubeForProviderConfig(...): -want every caller to share one client, +got:\n%s", diff)
 	}
 	if diff := cmp.Diff(int32(1), builds.Load()); diff != "" {

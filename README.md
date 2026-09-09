@@ -31,11 +31,34 @@ spec:
 ## Target cluster clients
 
 The provider builds one client per distinct ProviderConfig credential set
-(kubeconfig plus identity) and keeps it in an LRU cache bounded by
-`--client-cache-size` (default 8, `0` removes the bound). Building a client is
+(kubeconfig plus identity) and keeps it in an LRU cache. Building a client is
 expensive because its REST mapper primes itself with full aggregated discovery
-on first use, so size the cache to the number of distinct credential sets the
-provider talks to.
+on first use, so the cache has to hold every credential set the provider talks
+to. Once the credential sets in use outnumber the bound, every new client
+evicts the least recently used one, whose next reconcile rebuilds it (discovery
+included) and evicts another: the whole cache churns, not only the credential
+set that did not fit.
+
+At startup the provider sizes the cache from the cluster: it lists its
+`ProviderConfig` and `ClusterProviderConfig` objects, derives the cache key of
+each one the way the client builder does (so ProviderConfigs sharing a
+kubeconfig count once, and every in-cluster ProviderConfig counts as one), and
+bounds the cache at the number of distinct credential sets plus headroom of
+ten percent or four entries, whichever is larger, for credentials that rotate
+and ProviderConfigs created later, never below 8. The result is logged at
+startup. The provider does not start if its ProviderConfigs and their
+credentials cannot be read within 300 seconds. When the provider runs outside a
+cluster, as in local development, ProviderConfigs with an in-cluster identity
+cannot be resolved and each counts as a credential set of its own, so the
+cache is merely oversized.
+
+The bound is fixed for the lifetime of the process, so ProviderConfigs created
+after startup share the headroom until the next restart. The cache reports
+`provider_kubernetes_client_cache_size` (the bound),
+`provider_kubernetes_client_cache_entries` (clients currently cached) and
+`provider_kubernetes_client_cache_events_total` with an `event` label of
+`hit`, `miss` or `evict`; a sustained eviction rate means the credential sets
+in use no longer fit the bound and the cache is churning.
 
 Client-side rate limiting is disabled for these clients. A cached client is
 shared by every concurrent reconcile of its credential set, so client-go's
