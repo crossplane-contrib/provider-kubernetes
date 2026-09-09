@@ -25,8 +25,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
-	"github.com/pkg/errors"
 	"k8s.io/client-go/rest"
+
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 )
 
 const (

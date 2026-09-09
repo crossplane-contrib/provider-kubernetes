@@ -23,7 +23,6 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/pkg/errors"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -33,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
-	xperrors "github.com/crossplane/crossplane-runtime/v2/pkg/errors"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/ratelimiter"
@@ -88,7 +87,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, clientBuilder kubeclient.Buil
 		Named(name).
 		For(&observedobjectcollectionv1alpha1.ObservedObjectCollection{}).
 		WithEventFilter(resource.DesiredStateChanged()).
-		Complete(ratelimiter.NewReconciler(name, xperrors.WithSilentRequeueOnConflict(r), o.GlobalRateLimiter))
+		Complete(ratelimiter.NewReconciler(name, errors.WithSilentRequeueOnConflict(r), o.GlobalRateLimiter))
 }
 
 // SetupGated registers a controller setup function that reconciles

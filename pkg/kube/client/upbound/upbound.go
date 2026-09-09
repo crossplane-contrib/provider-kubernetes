@@ -5,11 +5,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/upbound/up-sdk-go"
 	"github.com/upbound/up-sdk-go/service/auth"
 	"golang.org/x/oauth2"
 	"k8s.io/client-go/rest"
+
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/token"
 )

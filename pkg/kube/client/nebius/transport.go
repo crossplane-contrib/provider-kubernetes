@@ -5,7 +5,8 @@ import (
 	"net/http"
 
 	"github.com/nebius/gosdk/auth"
-	"github.com/pkg/errors"
+
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 )
 
 // tokenSource yields a Nebius IAM bearer token. Satisfied by *gosdk.SDK and

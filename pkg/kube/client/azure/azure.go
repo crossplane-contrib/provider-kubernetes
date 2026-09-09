@@ -6,9 +6,10 @@ import (
 	"net/http"
 
 	"github.com/Azure/kubelogin/pkg/token"
-	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	"k8s.io/client-go/rest"
+
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 
 	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )

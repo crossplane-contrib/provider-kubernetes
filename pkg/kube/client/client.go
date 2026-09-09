@@ -23,7 +23,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/pkg/errors"
 	"golang.org/x/sync/singleflight"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -31,6 +30,7 @@ import (
 	"k8s.io/utils/lru"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"

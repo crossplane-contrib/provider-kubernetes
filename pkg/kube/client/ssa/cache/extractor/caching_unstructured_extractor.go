@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -23,6 +22,8 @@ import (
 	"k8s.io/kube-openapi/pkg/schemamutation"
 	"k8s.io/kube-openapi/pkg/spec3"
 	"k8s.io/kube-openapi/pkg/validation/spec"
+
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 )
 
 // cachingUnstructuredExtractor is an implementation of

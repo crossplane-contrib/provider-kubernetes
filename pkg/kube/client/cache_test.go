@@ -28,11 +28,11 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
