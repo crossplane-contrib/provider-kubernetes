@@ -3,9 +3,10 @@ package object
 import (
 	"testing"
 
-	"github.com/pkg/errors"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 )
 
 func TestCleanWrap(t *testing.T) {

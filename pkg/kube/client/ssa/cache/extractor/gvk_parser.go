@@ -31,12 +31,13 @@ package extractor
 import (
 	"fmt"
 
-	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/kube-openapi/pkg/schemaconv"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 	smdschema "sigs.k8s.io/structured-merge-diff/v6/schema"
 	"sigs.k8s.io/structured-merge-diff/v6/typed"
+
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 )
 
 // groupVersionKindExtensionKey is the key used to lookup the

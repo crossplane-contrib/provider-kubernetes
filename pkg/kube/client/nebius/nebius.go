@@ -9,8 +9,9 @@ import (
 
 	"github.com/nebius/gosdk"
 	"github.com/nebius/gosdk/auth"
-	"github.com/pkg/errors"
 	"k8s.io/client-go/rest"
+
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 )
 
 // credentialsFile mirrors the Nebius service account credentials JSON, matching

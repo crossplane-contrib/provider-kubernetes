@@ -16,9 +16,10 @@ package client
 import (
 	"context"
 
-	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 
 	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
 )
