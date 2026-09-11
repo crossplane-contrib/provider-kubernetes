@@ -272,8 +272,8 @@ func main() {
 	}
 
 	if *enableWatches {
-		o.Features.Enable(features.EnableAlphaWatches)
-		log.Info("Alpha feature enabled", "flag", features.EnableAlphaWatches)
+		o.Features.Enable(features.EnableBetaWatches)
+		log.Info("Beta feature enabled", "flag", features.EnableBetaWatches)
 	}
 
 	if *enableServerSideApply {

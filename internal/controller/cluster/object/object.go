@@ -206,7 +206,7 @@ func Setup(mgr ctrl.Manager, o controller.Options, clientBuilder kubeclient.Buil
 		WithOptions(o.ForControllerRuntime()).
 		For(&v1alpha2.Object{})
 
-	if o.Features.Enabled(features.EnableAlphaWatches) {
+	if o.Features.Enabled(features.EnableBetaWatches) {
 		ca := mgr.GetCache()
 		if err := ca.IndexField(context.Background(), &v1alpha2.Object{}, resourceRefGVKsIndex, IndexByProviderGVK); err != nil {
 			return errors.Wrap(err, "cannot add index for object reference GVKs")
