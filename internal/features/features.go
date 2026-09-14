@@ -20,9 +20,9 @@ import "github.com/crossplane/crossplane-runtime/v2/pkg/feature"
 
 // Feature flags.
 const (
-	// EnableAlphaWatches enables alpha support for watching referenced and
+	// EnableBetaWatches enables beta support for watching referenced and
 	// managed resources.
-	EnableAlphaWatches feature.Flag = "EnableAlphaWatches"
+	EnableBetaWatches feature.Flag = "EnableBetaWatches"
 	// EnableBetaServerSideApply enables beta support for Server Side Apply.
 	EnableBetaServerSideApply feature.Flag = "EnableBetaServerSideApply"
 )

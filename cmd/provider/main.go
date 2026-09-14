@@ -103,7 +103,7 @@ func main() {
 		changelogsSocketPath    = app.Flag("changelogs-socket-path", "Path for changelogs socket (if enabled)").Default("/var/run/changelogs/changelogs.sock").Envar("CHANGELOGS_SOCKET_PATH").String()
 
 		enableManagementPolicies = app.Flag("enable-management-policies", "Enable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
-		enableWatches            = app.Flag("enable-watches", "Enable support for watching resources.").Default("false").Envar("ENABLE_WATCHES").Bool()
+		enableWatches            = app.Flag("enable-watches", "Enable support for watching resources.").Default("true").Envar("ENABLE_WATCHES").Bool()
 		enableServerSideApply    = app.Flag("enable-server-side-apply", "Enable server side apply to sync object manifests to k8s API.").Default("true").Envar("ENABLE_SERVER_SIDE_APPLY").Bool()
 		enableChangeLogs         = app.Flag("enable-changelogs", "Enable support for capturing change logs during reconciliation.").Default("false").Envar("ENABLE_CHANGE_LOGS").Bool()
 		removeManagedFields      = app.Flag("remove-managed-fields", "Remove metadata.managedFields from status.atProvider.manifest.").Default("false").Envar("REMOVE_MANAGED_FIELDS").Bool()
@@ -272,8 +272,8 @@ func main() {
 	}
 
 	if *enableWatches {
-		o.Features.Enable(features.EnableAlphaWatches)
-		log.Info("Alpha feature enabled", "flag", features.EnableAlphaWatches)
+		o.Features.Enable(features.EnableBetaWatches)
+		log.Info("Beta feature enabled", "flag", features.EnableBetaWatches)
 	}
 
 	if *enableServerSideApply {
