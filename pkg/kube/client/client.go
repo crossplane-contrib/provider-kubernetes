@@ -59,6 +59,11 @@ const (
 	errParseProxyURL             = "cannot parse proxy URL from kubeconfig"
 )
 
+// gkeWrapRESTConfig is an indirection over gke.WrapRESTConfig so that tests
+// can verify the identity-to-impersonation wiring without reaching Google
+// APIs.
+var gkeWrapRESTConfig = gke.WrapRESTConfig
+
 // A Builder creates Kubernetes clients and REST configs for a given provider
 // config.
 type Builder interface {
@@ -294,10 +299,21 @@ func (b *IdentityAwareBuilder) resolve(ctx context.Context, pc kconfig.ProviderC
 func (b *IdentityAwareBuilder) identityInjector(ctx context.Context, id *kconfig.Identity, ac *api.Config, digest hash.Hash) (func(ctx context.Context, rc *rest.Config) error, error) { //nolint:gocyclo // one case per identity type and source
 	switch id.Type {
 	case kconfig.IdentityTypeGoogleApplicationCredentials:
+		var impersonation *gke.Impersonation
+		if isa := id.ImpersonateServiceAccount; isa != nil {
+			impersonation = &gke.Impersonation{
+				TargetPrincipal: isa.Name,
+				Delegates:       isa.Delegates,
+			}
+			digestWrite(digest, []byte(isa.Name))
+			for _, d := range isa.Delegates {
+				digestWrite(digest, []byte(d))
+			}
+		}
 		switch id.Source { //nolint:exhaustive
 		case xpv2.CredentialsSourceInjectedIdentity:
 			return func(ctx context.Context, rc *rest.Config) error {
-				return errors.Wrap(gke.WrapRESTConfig(ctx, rc, nil, gke.DefaultScopes...), errInjectGoogleCredentials)
+				return errors.Wrap(gkeWrapRESTConfig(ctx, rc, nil, impersonation, gke.DefaultScopes...), errInjectGoogleCredentials)
 			}, nil
 		default:
 			creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
@@ -306,7 +322,7 @@ func (b *IdentityAwareBuilder) identityInjector(ctx context.Context, id *kconfig
 			}
 			digestWrite(digest, creds)
 			return func(ctx context.Context, rc *rest.Config) error {
-				return errors.Wrap(gke.WrapRESTConfig(ctx, rc, creds, gke.DefaultScopes...), errInjectGoogleCredentials)
+				return errors.Wrap(gkeWrapRESTConfig(ctx, rc, creds, impersonation, gke.DefaultScopes...), errInjectGoogleCredentials)
 			}, nil
 		}
 	case kconfig.IdentityTypeAzureServicePrincipalCredentials, kconfig.IdentityTypeAzureWorkloadIdentityCredentials:
