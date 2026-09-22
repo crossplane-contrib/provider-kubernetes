@@ -60,6 +60,7 @@ import (
 	apiscluster "github.com/crossplane-contrib/provider-kubernetes/apis/cluster"
 	objectv1alpha1cluster "github.com/crossplane-contrib/provider-kubernetes/apis/cluster/object/v1alpha1"
 	apisnamespaced "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced"
+	objectv1alpha1namespaced "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/bootcheck"
 	pcontroller "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 	controllerCluster "github.com/crossplane-contrib/provider-kubernetes/internal/controller/cluster"
@@ -315,6 +316,7 @@ func main() {
 			Gate:                    crdGate,
 			Logger:                  log,
 			MaxConcurrentReconciles: 1,
+			Groups:                  []string{objectv1alpha1namespaced.Group, objectv1alpha1cluster.Group},
 		}
 		kingpin.FatalIfError(customresourcesgate.Setup(mgr, gateOpts), "Cannot setup CRD gate")
 		kingpin.FatalIfError(controllerCluster.SetupGated(mgr, o, po), "Cannot setup cluster-scoped controller")
