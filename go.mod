@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.25
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.3
 	github.com/aws/smithy-go v1.27.2
-	github.com/crossplane/crossplane-runtime/v2 v2.5.0-rc.0.0.20260921193339-4549d1144206
+	github.com/crossplane/crossplane-runtime/v2 v2.5.0-rc.0.0.20260922181840-9d02af3667a0
 	github.com/crossplane/crossplane-tools v0.0.0-20260719180100-659f1dc036c5
 	github.com/crossplane/crossplane/apis/v2 v2.4.1
 	github.com/go-logr/logr v1.4.4
