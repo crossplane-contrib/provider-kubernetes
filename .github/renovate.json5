@@ -20,7 +20,7 @@
       // We want a PR to bump Go versions used through env variables in any Github
       // Actions, taking it from the official Github repository.
       "customType": "regex",
-      "description": "Bump Go version in workflows",
+      "description": "Bump Go version in GH Action workflows",
       "managerFilePatterns": ["/^\\.github\\/workflows\\/[^/]+\\.ya?ml$/"],
       "matchStrings": [
         "GO_VERSION: ['\"]?(?<currentValue>.*?)['\"]?\\n"
@@ -109,34 +109,64 @@
       "allowedVersions": "<1.0"
     },
     {
-      // We want a single PR for all the patches bumps of kubernetes related
+      // We want a single PR for all the patch bumps of kubernetes related
       // dependencies, as most of the time these are all strictly related.
       "matchDatasources": ["go"],
       "groupName": "kubernetes patches",
       "matchUpdateTypes": ["patch", "digest"],
-      "matchPackageNames": ["k8s.io{/,}**", "sigs.k8s.io{/,}**"]
+      // Do not include k8s.io/utils and k8s.io/kube-openapi, they have no version tags
+      // let other k8s dependencies auto-manage them transitively
+      "matchPackageNames": ["k8s.io{/,}**", "sigs.k8s.io{/,}**", "!k8s.io/utils{/,}**", "!k8s.io/kube-openapi{/,}**"],
     },
     {
       // We want dedicated PRs for each minor and major bumps to kubernetes related
       // dependencies.
       "matchDatasources": ["go"],
       "matchUpdateTypes": ["major", "minor"],
-      "matchPackageNames": ["k8s.io{/,}**", "sigs.k8s.io{/,}**"]
+      "matchPackageNames": ["k8s.io{/,}**", "sigs.k8s.io{/,}**"],
+      // k8s library minor versions should typically follow
+      // crossplane-runtime for maximum compatibility.
+      // Let minor versions managed transitively and require
+      // dashboard approval.
+      "dependencyDashboardApproval": true,
     },
     {
-      // We want dedicated PRs for each bump to non-kubernetes Go dependencies, but
+      // Go XP dependencies separate major/minor/patch PRs
+      "description": "Separate PRs for major/minor/patch Crossplane Go dependencies",
+      "matchDatasources": ["go"],
+      "matchPackageNames": ["github.com/crossplane{/,}**"],
+      "separateMultipleMinor": true,
+      "separateMinorPatch": true,
+      "separateMajorMinor": true,
+    },
+    {
+      // Allow Crossplane Go dependencies patch version bumps
+      "description": "Crossplane Go dependencies patch versions",
+      "matchDatasources": ["go"],
+      "matchUpdateTypes": ["patch"],
+      "matchPackageNames": ["github.com/crossplane{/,}**"],
+    },
+    {
+      // Go XP dependencies major/minor with dashboard approval
+      "matchDatasources": ["go"],
+      "matchUpdateTypes": ["major", "minor"],
+      "matchPackageNames": ["github.com/crossplane{/,}**"],
+      "dependencyDashboardApproval": true,
+    },
+    {
+      // We want dedicated PRs for each bump to non-kubernetes and non-XP Go dependencies, but
       // only if there are known vulnerabilities in the current version.
       "matchDatasources": ["go"],
-      "matchPackageNames": ["!k8s.io{/,}**", "!sigs.k8s.io{/,}**"],
+      "matchPackageNames": ["!k8s.io{/,}**", "!sigs.k8s.io{/,}**", "!github.com/crossplane{/,}**"],
       "enabled": false,
       "matchUpdateTypes": ["major"]
     },
     {
-      // We want a single PR for all minor and patch bumps to non-kubernetes Go
+      // We want a single PR for all minor and patch bumps to non-kubernetes and non-XP Go
       // dependencies, but only if there are known vulnerabilities in the current
       // version.
       "matchDatasources": ["go"],
-      "matchPackageNames": ["!k8s.io{/,}**", "!sigs.k8s.io{/,}**"],
+      "matchPackageNames": ["!k8s.io{/,}**", "!sigs.k8s.io{/,}**", "!github.com/crossplane{/,}**"],
       "enabled": false,
       "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "all non-major go dependencies"
@@ -185,5 +215,5 @@
       "matchDepTypes": ["action"],
       "pinDigests": true
     }
-  ],
+  ]
 }
