@@ -1892,6 +1892,63 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 			},
 		},
+		"AvailableIfCelQueryUsesOptionalFieldSelection": {
+			args: args{
+				obj: &objv1alpha1.Object{
+					Spec: objv1alpha1.ObjectSpec{
+						Readiness: objv1alpha1.Readiness{
+							Policy:   objv1alpha1.ReadinessPolicyDeriveFromCelQuery,
+							CelQuery: `object.?status.?conditions.orValue([]).exists(c, c.type == "Complete" && c.status == "True")`,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"status": xpv2.ConditionedStatus{
+							Conditions: []xpv2.Condition{
+								{
+									Type:   "Complete",
+									Status: corev1.ConditionTrue,
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				conditions: []xpv2.Condition{
+					{
+						Type:   xpv2.TypeReady,
+						Status: corev1.ConditionTrue,
+						Reason: xpv2.ReasonAvailable,
+					},
+				},
+			},
+		},
+		"UnavailableIfCelQueryUsesOptionalFieldSelectionAndStatusNotThere": {
+			args: args{
+				obj: &objv1alpha1.Object{
+					Spec: objv1alpha1.ObjectSpec{
+						Readiness: objv1alpha1.Readiness{
+							Policy:   objv1alpha1.ReadinessPolicyDeriveFromCelQuery,
+							CelQuery: `object.?status.?conditions.orValue([]).exists(c, c.type == "Complete" && c.status == "True")`,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{},
+				},
+			},
+			want: want{
+				conditions: []xpv2.Condition{
+					{
+						Type:   xpv2.TypeReady,
+						Status: corev1.ConditionFalse,
+						Reason: xpv2.ReasonUnavailable,
+					},
+				},
+			},
+		},
 		"AvailableIfCelQueryUsesExistsToAPath": {
 			args: args{
 				obj: &objv1alpha1.Object{
