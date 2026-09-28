@@ -1,0 +1,33 @@
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: sample-job-cel-optional
+  namespace: default
+  annotations:
+    uptest.upbound.io/timeout: "180"
+spec:
+  readiness:
+    # The Object is Ready when the Job has completed. A new Job has no status
+    # yet, so the query uses optional field selection (.?) and orValue()
+    # instead of has() guards.
+    policy: DeriveFromCelQuery
+    celQuery: >-
+      object.?status.?conditions.orValue([]).exists(c, c.type == "Complete" && c.status == "True")
+  forProvider:
+    manifest:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        namespace: default
+      spec:
+        backoffLimit: 0
+        template:
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: main
+                image: busybox:1.37
+                command: ["sh", "-c", "sleep 5"]
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: kubernetes-provider
