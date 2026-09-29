@@ -715,6 +715,9 @@ func (c *external) checkDeriveFromCelQuery(obj *v1alpha2.Object, observed *unstr
 
 	env, err := cel.NewEnv(
 		cel.Variable("object", cel.AnyType),
+		// Allow optional field selection (object.?status.?conditions.orValue([])),
+		// so a query can handle fields that are not set yet without has() guards.
+		cel.OptionalTypes(),
 	)
 	if err != nil {
 		c.logger.Debug("failed to create cel env", "err", err)
