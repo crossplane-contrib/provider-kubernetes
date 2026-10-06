@@ -116,7 +116,9 @@
       "matchDatasources": ["go"],
       "groupName": "kubernetes patches",
       "matchUpdateTypes": ["patch", "digest"],
-      "matchPackageNames": ["k8s.io{/,}**", "sigs.k8s.io{/,}**"]
+      // Do not include k8s.io/utils and k8s.io/kube-openapi, they have no version tags
+      // let other k8s dependencies auto-manage them transitively
+      "matchPackageNames": ["k8s.io{/,}**", "sigs.k8s.io{/,}**", "!k8s.io/utils{/,}**", "!k8s.io/kube-openapi{/,}**"]
     },
     {
       // We want dedicated PRs for each minor and major bumps to kubernetes related
@@ -124,6 +126,15 @@
       "matchDatasources": ["go"],
       "matchUpdateTypes": ["major", "minor"],
       "matchPackageNames": ["k8s.io{/,}**", "sigs.k8s.io{/,}**"]
+    },
+    {
+      // Explicitly disable k8s.io/utils and k8s.io/kube-openapi digest updates,
+      // they have no version tags, let other k8s dependencies auto-manage them
+      // transitively
+      "matchDatasources": ["go"],
+      "matchUpdateTypes": ["digest"],
+      "enabled": false,
+      "matchPackageNames": ["k8s.io/utils{/,}**", "k8s.io/kube-openapi{/,}**"]
     },
     {
       // We want dedicated PRs for each bump to non-kubernetes Go dependencies, but
