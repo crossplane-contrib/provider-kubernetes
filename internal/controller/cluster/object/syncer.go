@@ -205,7 +205,14 @@ func (s *SSAResourceSyncer) maybeUpgradeFieldManagers(ctx context.Context, obj *
 	if len(mfUpgradePatch) == 0 {
 		return nil
 	}
-	return errors.Wrap(s.client.Patch(ctx, current, client.RawPatch(types.JSONPatchType, mfUpgradePatch)), "failed to patch managed fields upgrade")
+	// The status manifest is a cached observation and can be stale: on the
+	// Create path Observe has already established that the target is gone,
+	// and on the Update path it can be deleted between Observe and this
+	// patch (for example a Job with ttlSecondsAfterFinished). A missing
+	// target has no managed fields to migrate, and the apply that follows
+	// creates it under the SSA field manager.
+	err = client.IgnoreNotFound(s.client.Patch(ctx, current, client.RawPatch(types.JSONPatchType, mfUpgradePatch)))
+	return errors.Wrap(err, "failed to patch managed fields upgrade")
 }
 
 // parseStatus extracts the last observed state of the target k8s object from the given
