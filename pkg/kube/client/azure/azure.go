@@ -1,3 +1,8 @@
+// Needs cgo on darwin since kubelogin v0.2 (Keychain-backed token cache);
+// azure_nocgo_darwin.go provides the stub for cgo-less darwin builds.
+
+//go:build !darwin || cgo
+
 package azure
 
 import (
