@@ -17,6 +17,7 @@ limitations under the License.
 package object
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -99,6 +100,7 @@ const (
 	errGetReferencedResource       = "cannot get referenced resource"
 	errPatchFromReferencedResource = "cannot patch from referenced resource"
 	errResolveResourceReferences   = "cannot resolve resource references"
+	errFmtSecretReference          = "spec.references[%d] (Secret %s/%s)"
 
 	errAddFinalizer             = "cannot add finalizer to Object"
 	errRemoveFinalizer          = "cannot remove finalizer from Object"
@@ -375,9 +377,21 @@ type external struct {
 	// for cleaning-up the desired state cache of MR from
 	// state cache manager, when MR gets deleted
 	desiredStateCacheCleanupFn func()
+
+	// resolvedManifest is the manifest with the references resolved by
+	// Observe, for Create and Update to apply. With sanitizeSecrets, it
+	// carries the values read from Secrets, so it must never be persisted.
+	resolvedManifest []byte
+	// secrets are the values read from Secrets with sanitizeSecrets, to be
+	// scrubbed from errors.
+	secrets pcontroller.SecretValues
 }
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) { // nolint:gocyclo // mostly branches due to feature flags, hopefully will be refactored once they are promoted
+func (c *external) Observe(ctx context.Context, mg resource.Managed) (_ managed.ExternalObservation, err error) { // nolint:gocyclo // mostly branches due to feature flags, hopefully will be refactored once they are promoted
+	// Errors end up in conditions and events, which must not reveal values
+	// read from Secrets.
+	defer func() { err = c.secrets.ScrubError(err) }()
+
 	obj, ok := mg.(*v1alpha1.Object)
 	if !ok {
 		return managed.ExternalObservation{}, errors.New(errNotKubernetesObject)
@@ -385,14 +399,17 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	c.logger.Debug("Observing", "resource", loggable(obj))
 
+	desired := obj
 	if !meta.WasDeleted(obj) {
 		// If the object is not being deleted, we need to resolve references
-		if err := c.resolveReferencies(ctx, obj); err != nil {
+		if desired, err = c.resolveReferencies(ctx, obj); err != nil {
 			return managed.ExternalObservation{}, errors.Wrap(err, errResolveResourceReferences)
 		}
+		// Copied, as decoding into obj reuses the backing array of its manifest.
+		c.resolvedManifest = bytes.Clone(desired.Spec.ForProvider.Manifest.Raw)
 	}
 
-	manifest, err := parseManifest(obj)
+	manifest, err := parseManifest(desired)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
@@ -426,19 +443,23 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	// current object, otherwise we will extract the state from the last
 	// applied annotation.
 	var observedState *unstructured.Unstructured
-	if observedState, err = c.syncer.GetObservedState(ctx, obj, current); err != nil {
+	if observedState, err = c.syncer.GetObservedState(ctx, desired, current); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObservedState)
 	}
 
 	var desiredState *unstructured.Unstructured
-	if desiredState, err = c.syncer.GetDesiredState(ctx, obj, manifest); err != nil {
+	if desiredState, err = c.syncer.GetDesiredState(ctx, desired, manifest); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetDesiredState)
 	}
 
 	return c.handleObservation(ctx, obj, observedState, desiredState)
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
+func (c *external) Create(ctx context.Context, mg resource.Managed) (_ managed.ExternalCreation, err error) {
+	// Errors end up in conditions and events, which must not reveal values
+	// read from Secrets.
+	defer func() { err = c.secrets.ScrubError(err) }()
+
 	obj, ok := mg.(*v1alpha1.Object)
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotKubernetesObject)
@@ -446,19 +467,28 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	c.logger.Debug("Creating", "resource", loggable(obj))
 
-	res, err := parseManifest(obj)
+	desired, err := c.desiredObject(ctx, obj)
 	if err != nil {
 		return managed.ExternalCreation{}, err
 	}
 
-	current, err := c.syncer.SyncResource(ctx, obj, res)
+	res, err := parseManifest(desired)
+	if err != nil {
+		return managed.ExternalCreation{}, err
+	}
+
+	current, err := c.syncer.SyncResource(ctx, desired, res)
 	if err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(CleanErr(err), errCreateObject)
 	}
 	return managed.ExternalCreation{}, c.setAtProvider(obj, current)
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
+func (c *external) Update(ctx context.Context, mg resource.Managed) (_ managed.ExternalUpdate, err error) {
+	// Errors end up in conditions and events, which must not reveal values
+	// read from Secrets.
+	defer func() { err = c.secrets.ScrubError(err) }()
+
 	obj, ok := mg.(*v1alpha1.Object)
 	if !ok {
 		return managed.ExternalUpdate{}, errors.New(errNotKubernetesObject)
@@ -466,12 +496,17 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	c.logger.Debug("Updating", "resource", loggable(obj))
 
-	res, err := parseManifest(obj)
+	desired, err := c.desiredObject(ctx, obj)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
 
-	current, err := c.syncer.SyncResource(ctx, obj, res)
+	res, err := parseManifest(desired)
+	if err != nil {
+		return managed.ExternalUpdate{}, err
+	}
+
+	current, err := c.syncer.SyncResource(ctx, desired, res)
 	if err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(CleanErr(err), errApplyObject)
 	}
@@ -542,8 +577,8 @@ type loggableObject struct {
 // end up in provider logs. The deeper handling of secret values persisted in
 // the managed resource itself is tracked in #223.
 func (l loggableObject) MarshalLog() any {
-	spec, specRedacted := redactSecretManifest(l.obj.Spec.ForProvider.Manifest.Raw)
-	status, statusRedacted := redactSecretManifest(l.obj.Status.AtProvider.Manifest.Raw)
+	spec, specRedacted := pcontroller.RedactSecretManifest(l.obj.Spec.ForProvider.Manifest.Raw)
+	status, statusRedacted := pcontroller.RedactSecretManifest(l.obj.Status.AtProvider.Manifest.Raw)
 	if !specRedacted && !statusRedacted {
 		return l.obj
 	}
@@ -551,49 +586,6 @@ func (l loggableObject) MarshalLog() any {
 	logged.Spec.ForProvider.Manifest.Raw = spec
 	logged.Status.AtProvider.Manifest.Raw = status
 	return logged
-}
-
-// isSecret returns whether the given object is a v1 Secret.
-func isSecret(u *unstructured.Unstructured) bool {
-	return u.GetAPIVersion() == "v1" && u.GetKind() == "Secret"
-}
-
-// redactField replaces the contents of the named top-level field with a
-// redaction marker.
-func redactField(u *unstructured.Unstructured, field string) error {
-	data := map[string][]byte{"redacted": []byte(nil)}
-	return fieldpath.Pave(u.Object).SetValue(field, data)
-}
-
-// redactSecretManifest replaces the data and stringData contents of a raw
-// v1 Secret manifest with a redaction marker. Non-Secret manifests and
-// unparseable payloads are returned unchanged.
-func redactSecretManifest(raw []byte) ([]byte, bool) {
-	u := &unstructured.Unstructured{}
-	if err := json.Unmarshal(raw, u); err != nil || !isSecret(u) {
-		return raw, false
-	}
-	redacted := false
-	for _, field := range []string{"data", "stringData"} {
-		if _, ok := u.Object[field]; ok {
-			if err := redactField(u, field); err != nil {
-				// prefer dropping the manifest from the log line over
-				// leaking secret data
-				return nil, true
-			}
-			redacted = true
-		}
-	}
-	if !redacted {
-		return raw, false
-	}
-	out, err := u.MarshalJSON()
-	if err != nil {
-		// should not happen for an object that was just unmarshalled; prefer
-		// dropping the manifest from the log line over leaking secret data
-		return nil, true
-	}
-	return out, true
 }
 
 func (c *external) setAtProvider(obj *v1alpha1.Object, observed *unstructured.Unstructured) error {
@@ -604,8 +596,8 @@ func (c *external) setAtProvider(obj *v1alpha1.Object, observed *unstructured.Un
 	if c.removeManagedFields {
 		sObserved.SetManagedFields(nil)
 	}
-	if c.sanitizeSecrets && isSecret(sObserved) {
-		if err = redactField(sObserved, "data"); err != nil {
+	if c.sanitizeSecrets {
+		if err = pcontroller.RedactSecretValues(sObserved, c.secretSourcedPaths(obj)); err != nil {
 			return errors.Wrap(err, errSanitizeSecretData)
 		}
 	}
@@ -626,9 +618,9 @@ func (c *external) updateConditionFromObserved(obj *v1alpha1.Object, observed *u
 
 	switch obj.Spec.Readiness.Policy {
 	case v1alpha1.ReadinessPolicyDeriveFromObject:
-		ready = c.checkDeriveFromObject(observed)
+		ready = c.checkDeriveFromObject(observed, c.secretSourcedPaths(obj))
 	case v1alpha1.ReadinessPolicyAllTrue:
-		ready = c.checkAllConditions(observed)
+		ready = c.checkAllConditions(observed, c.secretSourcedPaths(obj))
 	case v1alpha1.ReadinessPolicyDeriveFromCelQuery:
 		ready, err = c.checkDeriveFromCelQuery(obj, observed)
 	case v1alpha1.ReadinessPolicySuccessfulCreate, "":
@@ -674,24 +666,24 @@ func getReferenceInfo(ref v1alpha1.Reference) (string, string, string, string) {
 	return apiVersion, kind, namespace, name
 }
 
-func (c *external) checkDeriveFromObject(observed *unstructured.Unstructured) bool {
+func (c *external) checkDeriveFromObject(observed *unstructured.Unstructured, secretPaths []string) bool {
 	conditioned := xpv2.ConditionedStatus{}
 	if err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned); err != nil {
-		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
+		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", pcontroller.LoggableObserved(observed, secretPaths))
 		return false
 	}
 	if status := conditioned.GetCondition(xpv2.TypeReady).Status; status != v1.ConditionTrue {
-		c.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", observed)
+		c.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", pcontroller.LoggableObserved(observed, secretPaths))
 		return false
 	}
 	return true
 }
 
-func (c *external) checkAllConditions(observed *unstructured.Unstructured) (allTrue bool) {
+func (c *external) checkAllConditions(observed *unstructured.Unstructured, secretPaths []string) (allTrue bool) {
 	conditioned := xpv2.ConditionedStatus{}
 	err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
 	if err != nil {
-		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", observed)
+		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", pcontroller.LoggableObserved(observed, secretPaths))
 		return false
 	}
 	allTrue = len(conditioned.Conditions) > 0
@@ -765,6 +757,8 @@ func (c *external) checkDeriveFromCelQuery(obj *v1alpha1.Object, observed *unstr
 		"object": objMap,
 	})
 	if err != nil {
+		// The error may quote a value that was read from a Secret.
+		err = c.secrets.ScrubError(err)
 		c.logger.Debug("failed to eval the program", "err", err)
 		err = errors.Wrap(err, errCelQueryFailedToEvalProgram)
 		return ready, err
@@ -777,12 +771,15 @@ func (c *external) checkDeriveFromCelQuery(obj *v1alpha1.Object, observed *unstr
 // resolveReferencies resolves references for the current Object. If it fails to
 // resolve some reference, e.g.: due to reference not ready, it will then return
 // error and requeue to wait for resolving it next time.
-func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object) error {
+// It returns the Object to apply: obj itself, or with sanitizeSecrets a copy of
+// it if values were read from a Secret, as those are never patched into obj.
+func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object) (*v1alpha1.Object, error) {
 	c.logger.Debug("Resolving referencies.")
 
+	desired := obj
 	// Loop through references to resolve each referenced resource
 	gvks := make([]schema.GroupVersionKind, 0, len(obj.Spec.References))
-	for _, ref := range obj.Spec.References {
+	for i, ref := range obj.Spec.References {
 		if ref.DependsOn == nil && ref.PatchesFrom == nil {
 			continue
 		}
@@ -797,13 +794,13 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 			Name:      refName,
 		}, res)
 		if err != nil {
-			return errors.Wrap(err, errGetReferencedResource)
+			return nil, errors.Wrap(err, errGetReferencedResource)
 		}
 
 		// Patch fields if any
 		if ref.PatchesFrom != nil && ref.PatchesFrom.FieldPath != nil {
-			if err := ref.ApplyFromFieldPathPatch(res, obj); err != nil {
-				return errors.Wrap(err, errPatchFromReferencedResource)
+			if desired, err = c.patchFromReference(i, ref, res, obj, desired); err != nil {
+				return nil, errors.Wrap(err, errPatchFromReferencedResource)
 			}
 		}
 
@@ -822,7 +819,65 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 		c.kindObserver.WatchResources(nil, "", gvks...)
 	}
 
-	return nil
+	return desired, nil
+}
+
+// patchFromReference applies the patch of the i-th reference ref from res to obj, and to desired
+// if that is a copy of obj. With sanitizeSecrets, a value read from a Secret
+// is only patched into desired, which is copied from obj first if needed. It
+// returns desired.
+func (c *external) patchFromReference(i int, ref v1alpha1.Reference, res *unstructured.Unstructured, obj, desired *v1alpha1.Object) (*v1alpha1.Object, error) {
+	path, secret := pcontroller.SecretSourcedPath(ref.PatchesFrom.APIVersion, ref.PatchesFrom.Kind, ref.PatchesFrom.FieldPath, ref.ToFieldPath)
+	if c.sanitizeSecrets && secret {
+		if err := pcontroller.ValidateSecretSourcedPath(path); err != nil {
+			return nil, errors.Wrapf(err, errFmtSecretReference, i, ref.PatchesFrom.Namespace, ref.PatchesFrom.Name)
+		}
+		c.secrets.Add(res, *ref.PatchesFrom.FieldPath)
+		if desired == obj {
+			desired = obj.DeepCopy()
+		}
+	} else if err := ref.ApplyFromFieldPathPatch(res, obj); err != nil {
+		return nil, err
+	}
+	if desired != obj {
+		return desired, ref.ApplyFromFieldPathPatch(res, desired)
+	}
+	return desired, nil
+}
+
+// desiredObject returns the Object that Create and Update apply. With
+// sanitizeSecrets, values read from Secrets are not stored in obj, so that is
+// a copy of obj with the manifest Observe resolved in this reconcile or,
+// without one, with its references resolved again.
+func (c *external) desiredObject(ctx context.Context, obj *v1alpha1.Object) (*v1alpha1.Object, error) {
+	if !c.sanitizeSecrets {
+		return obj, nil
+	}
+	if c.resolvedManifest == nil {
+		desired, err := c.resolveReferencies(ctx, obj)
+		return desired, errors.Wrap(err, errResolveResourceReferences)
+	}
+	desired := obj.DeepCopy()
+	desired.Spec.ForProvider.Manifest.Raw = c.resolvedManifest
+	return desired, nil
+}
+
+// secretSourcedPaths returns the paths of the manifest of obj that its
+// references patch from a Secret, if sanitizeSecrets is enabled.
+func (c *external) secretSourcedPaths(obj *v1alpha1.Object) []string {
+	if !c.sanitizeSecrets {
+		return nil
+	}
+	var paths []string
+	for _, ref := range obj.Spec.References {
+		if ref.PatchesFrom == nil {
+			continue
+		}
+		if path, ok := pcontroller.SecretSourcedPath(ref.PatchesFrom.APIVersion, ref.PatchesFrom.Kind, ref.PatchesFrom.FieldPath, ref.ToFieldPath); ok {
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 func (c *external) handleObservation(ctx context.Context, obj *v1alpha1.Object, last, desired *unstructured.Unstructured) (managed.ExternalObservation, error) {

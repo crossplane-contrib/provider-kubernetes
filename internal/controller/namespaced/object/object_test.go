@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
@@ -45,6 +46,7 @@ import (
 
 	objv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
 	kubernetesv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/v1alpha1"
+	pcontroller "github.com/crossplane-contrib/provider-kubernetes/internal/controller"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/namespaced/object/fake"
 	kubeclient "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client"
 	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
@@ -61,6 +63,10 @@ const (
 	externalResourceName = "crossplane-system"
 
 	someUID = "some-uid"
+
+	// testSecretData is the value of the key password of the Secret
+	// testSecretName. It decodes to s3cr3t-value.
+	testSecretData = "czNjcjN0LXZhbHVl"
 )
 
 var (
@@ -73,6 +79,8 @@ var (
 	}`, externalResourceName))
 
 	errBoom = errors.New("boom")
+
+	configMapRaw = []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cm"}}`)
 )
 
 type notKubernetesObject struct {
@@ -195,6 +203,87 @@ func referenceObjectWithFinalizer(val interface{}) *unstructured.Unstructured {
 	return res
 }
 
+// secretReference returns a reference that patches the key password of the
+// Secret testSecretName into the given path of the manifest.
+func secretReference(toFieldPath string) objv1alpha1.Reference {
+	return objv1alpha1.Reference{
+		PatchesFrom: &objv1alpha1.PatchesFrom{
+			DependsOn: objv1alpha1.DependsOn{
+				APIVersion: "v1",
+				Kind:       "Secret",
+				Name:       testSecretName,
+				Namespace:  testNamespace,
+			},
+			FieldPath: ptr.To("data.password"),
+		},
+		ToFieldPath: ptr.To(toFieldPath),
+	}
+}
+
+// labelReference returns a reference that patches the label app of the Object
+// testReferenceObjectName into data.app of the manifest.
+func labelReference() objv1alpha1.Reference {
+	ref := objectReferences()[0]
+	ref.PatchesFrom.FieldPath = ptr.To("spec.forProvider.manifest.metadata.labels.app")
+	ref.ToFieldPath = ptr.To("data.app")
+	return ref
+}
+
+func referencedSecret() *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      testSecretName,
+				"namespace": testNamespace,
+			},
+			"data": map[string]interface{}{
+				"password": testSecretData,
+			},
+		},
+	}
+}
+
+// configMap returns the object configMapRaw describes, with the given data.
+func configMap(data map[string]interface{}) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name": "cm",
+			},
+			"data": data,
+		},
+	}
+}
+
+// equateManifests compares manifests by their JSON content.
+func equateManifests() cmp.Option {
+	return cmp.Transformer("Manifest", func(r runtime.RawExtension) interface{} {
+		var v interface{}
+		if err := json.Unmarshal(r.Raw, &v); err != nil {
+			return string(r.Raw)
+		}
+		return v
+	})
+}
+
+// observedLogger records the observed objects that are logged at debug level.
+type observedLogger struct {
+	logging.Logger
+	observed []interface{}
+}
+
+func (l *observedLogger) Debug(_ string, keysAndValues ...interface{}) {
+	for i := 0; i+1 < len(keysAndValues); i += 2 {
+		if keysAndValues[i] == "observed" {
+			l.observed = append(l.observed, keysAndValues[i+1])
+		}
+	}
+}
+
 func TestConnect(t *testing.T) {
 	providerConfig := kubernetesv1alpha1.ProviderConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: providerName},
@@ -296,15 +385,19 @@ func TestConnect(t *testing.T) {
 
 func TestObserve(t *testing.T) {
 	type args struct {
-		client resource.ClientApplicator
-		syncer ResourceSyncer
-		mg     resource.Managed
+		client          resource.ClientApplicator
+		syncer          ResourceSyncer
+		mg              resource.Managed
+		sanitizeSecrets bool
 	}
 	type want struct {
 		out managed.ExternalObservation
 		err error
+		mg  resource.Managed
 	}
+	deleted := metav1.Now()
 	cases := map[string]struct {
+		reason string
 		args
 		want
 	}{
@@ -692,14 +785,216 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SanitizeSecretsKeepsSecretValuesOutOfObject": {
+			reason: "Values read from a Secret should only be in the manifest that is compared and applied, not in the Object or its status, while other references are patched into the Object as before.",
+			args: args{
+				sanitizeSecrets: true,
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{labelReference(), secretReference("data.password")}
+					obj.Spec.Readiness = objv1alpha1.Readiness{
+						Policy:   objv1alpha1.ReadinessPolicyDeriveFromCelQuery,
+						CelQuery: fmt.Sprintf("object.data.password == %q", testSecretData),
+					}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+							switch key.Name {
+							case testReferenceObjectName:
+								*obj.(*unstructured.Unstructured) = *referenceObject()
+							case testSecretName:
+								*obj.(*unstructured.Unstructured) = *referencedSecret()
+							case "cm":
+								cm := configMap(map[string]interface{}{"app": "foo", "password": testSecretData})
+								cm.SetAnnotations(map[string]string{
+									corev1.LastAppliedConfigAnnotation: fmt.Sprintf(`{"apiVersion":"v1","data":{"app":"foo","password":%q},"kind":"ConfigMap","metadata":{"name":"cm"}}`, testSecretData),
+								})
+								*obj.(*unstructured.Unstructured) = *cm
+							default:
+								return errBoom
+							}
+							return nil
+						},
+					},
+				},
+				syncer: &PatchingResourceSyncer{},
+			},
+			want: want{
+				out: managed.ExternalObservation{
+					ResourceExists:    true,
+					ResourceUpToDate:  true,
+					ConnectionDetails: managed.ConnectionDetails{},
+				},
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = []byte(`{"apiVersion":"v1","data":{"app":"foo"},"kind":"ConfigMap","metadata":{"name":"cm"}}`)
+					obj.Spec.References = []objv1alpha1.Reference{labelReference(), secretReference("data.password")}
+					obj.Spec.Readiness = objv1alpha1.Readiness{
+						Policy:   objv1alpha1.ReadinessPolicyDeriveFromCelQuery,
+						CelQuery: fmt.Sprintf("object.data.password == %q", testSecretData),
+					}
+					obj.Status.AtProvider.Manifest.Raw = []byte(`{"apiVersion":"v1","data":{"app":"foo","password":"<redacted>"},"kind":"ConfigMap","metadata":{"name":"cm"}}`)
+					obj.Status.SetConditions(xpv2.Available())
+				}),
+			},
+		},
+		"SanitizeSecretsDisabledPatchesSecretValueIntoObject": {
+			reason: "Without sanitizeSecrets, values read from a Secret should still be patched into the Object, as before.",
+			args: args{
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+							switch key.Name {
+							case testSecretName:
+								*obj.(*unstructured.Unstructured) = *referencedSecret()
+							case "cm":
+								*obj.(*unstructured.Unstructured) = *configMap(map[string]interface{}{"password": testSecretData})
+							default:
+								return errBoom
+							}
+							return nil
+						},
+					},
+				},
+				syncer: &PatchingResourceSyncer{},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: true},
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = []byte(fmt.Sprintf(`{"apiVersion":"v1","data":{"password":%q},"kind":"ConfigMap","metadata":{"name":"cm"}}`, testSecretData))
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+					obj.Status.AtProvider.Manifest.Raw = []byte(fmt.Sprintf(`{"apiVersion":"v1","data":{"password":%q},"kind":"ConfigMap","metadata":{"name":"cm"}}`, testSecretData))
+				}),
+			},
+		},
+		"SanitizeSecretsRejectsSecretValueInMetadata": {
+			reason: "A value read from a Secret should not be patched into the name of the manifest, which deleting the object needs.",
+			args: args{
+				sanitizeSecrets: true,
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("metadata.name")}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+							if key.Name == testSecretName {
+								*obj.(*unstructured.Unstructured) = *referencedSecret()
+								return nil
+							}
+							return kerrors.NewNotFound(schema.GroupResource{}, "")
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(
+					errors.Wrap(
+						errors.Wrapf(pcontroller.ValidateSecretSourcedPath("metadata.name"), errFmtSecretReference, 0, testNamespace, testSecretName),
+						errPatchFromReferencedResource), errResolveResourceReferences),
+			},
+		},
+		"SanitizeSecretsScrubsErrorsAndConditions": {
+			reason: "Values read from a Secret should be scrubbed from returned errors and condition messages.",
+			args: args{
+				sanitizeSecrets: true,
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+					obj.Spec.Readiness = objv1alpha1.Readiness{
+						Policy:   objv1alpha1.ReadinessPolicyDeriveFromCelQuery,
+						CelQuery: `timestamp(object.data.password) > timestamp("2020-01-01T00:00:00Z")`,
+					}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+							switch key.Name {
+							case testSecretName:
+								*obj.(*unstructured.Unstructured) = *referencedSecret()
+							case "cm":
+								*obj.(*unstructured.Unstructured) = *configMap(map[string]interface{}{"password": testSecretData})
+							default:
+								return errBoom
+							}
+							return nil
+						},
+					},
+				},
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *objv1alpha1.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return current, nil
+					},
+					GetDesiredStateFn: func(ctx context.Context, obj *objv1alpha1.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return nil, errors.Errorf(`ConfigMap "cm" is invalid: data.password: Invalid value: %q (s3cr3t-value)`, testSecretData)
+					},
+				},
+			},
+			want: want{
+				err: errors.New(`cannot get desired state: ConfigMap "cm" is invalid: data.password: Invalid value: "<redacted>" (<redacted>)`),
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+					obj.Spec.Readiness = objv1alpha1.Readiness{
+						Policy:   objv1alpha1.ReadinessPolicyDeriveFromCelQuery,
+						CelQuery: `timestamp(object.data.password) > timestamp("2020-01-01T00:00:00Z")`,
+					}
+					obj.Status.AtProvider.Manifest.Raw = []byte(`{"apiVersion":"v1","data":{"password":"<redacted>"},"kind":"ConfigMap","metadata":{"name":"cm"}}`)
+					obj.Status.SetConditions(xpv2.Unavailable().WithMessage(`failed to eval the program: invalid RFC 3339 timestamp "<redacted>"`))
+				}),
+			},
+		},
+		"SanitizeSecretsRedactsStatusIfObjectWasDeleted": {
+			reason: "References should not be resolved while the Object is being deleted, but values patched from a Secret should still be redacted from its status.",
+			args: args{
+				sanitizeSecrets: true,
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.ObjectMeta.DeletionTimestamp = &deleted
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+							if key.Name == "cm" {
+								*obj.(*unstructured.Unstructured) = *configMap(map[string]interface{}{"password": testSecretData})
+								return nil
+							}
+							return errBoom
+						},
+					},
+				},
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *objv1alpha1.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return current, nil
+					},
+					GetDesiredStateFn: func(ctx context.Context, obj *objv1alpha1.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return manifest, nil
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: false},
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.ObjectMeta.DeletionTimestamp = &deleted
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+					obj.Status.AtProvider.Manifest.Raw = []byte(`{"apiVersion":"v1","data":{"password":"<redacted>"},"kind":"ConfigMap","metadata":{"name":"cm"}}`)
+				}),
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := &external{
-				logger:      logging.NewNopLogger(),
-				client:      tc.args.client,
-				localClient: tc.args.client.Client,
-				syncer:      tc.args.syncer,
+				logger:          logging.NewNopLogger(),
+				client:          tc.args.client,
+				localClient:     tc.args.client.Client,
+				syncer:          tc.args.syncer,
+				sanitizeSecrets: tc.args.sanitizeSecrets,
 			}
 			got, gotErr := e.Observe(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
@@ -709,20 +1004,31 @@ func TestObserve(t *testing.T) {
 			if diff := cmp.Diff(tc.want.out, got); diff != "" {
 				t.Fatalf("e.Observe(...): -want out, +got out: %s", diff)
 			}
+
+			if tc.want.mg != nil {
+				if diff := cmp.Diff(tc.want.mg, tc.args.mg, equateManifests(), test.EquateConditions(), cmpopts.IgnoreFields(xpv2.Condition{}, "LastTransitionTime")); diff != "" {
+					t.Errorf("%s\ne.Observe(...): -want managed resource, +got managed resource: %s", tc.reason, diff)
+				}
+			}
 		})
 	}
 }
 
 func TestCreate(t *testing.T) {
 	type args struct {
-		mg     resource.Managed
-		syncer ResourceSyncer
+		mg               resource.Managed
+		syncer           ResourceSyncer
+		client           client.Client
+		sanitizeSecrets  bool
+		resolvedManifest []byte
 	}
 	type want struct {
 		out managed.ExternalCreation
 		err error
+		mg  resource.Managed
 	}
 	cases := map[string]struct {
+		reason string
 		args
 		want
 	}{
@@ -790,12 +1096,99 @@ func TestCreate(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SanitizeSecretsResolvesReferencesWithoutObserve": {
+			reason: "Without an Observe in the same reconcile, the references should be resolved again, and a value read from a Secret should be applied but not stored in the Object.",
+			args: args{
+				sanitizeSecrets: true,
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+				}),
+				client: &test.MockClient{
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+						*obj.(*unstructured.Unstructured) = *referencedSecret()
+						return nil
+					}),
+				},
+				syncer: &fake.ResourceSyncer{
+					SyncResourceFn: func(ctx context.Context, obj *objv1alpha1.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						if diff := cmp.Diff(configMap(map[string]interface{}{"password": testSecretData}), desired); diff != "" {
+							t.Errorf("SyncResource(...): -want desired, +got desired: %s", diff)
+						}
+						return desired, nil
+					},
+				},
+			},
+			want: want{
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+					obj.Status.AtProvider.Manifest.Raw = []byte(`{"apiVersion":"v1","data":{"password":"<redacted>"},"kind":"ConfigMap","metadata":{"name":"cm"}}`)
+				}),
+			},
+		},
+		"SanitizeSecretsAppliesManifestResolvedByObserve": {
+			reason: "The manifest that Observe resolved in the same reconcile should be applied without resolving the references again.",
+			args: args{
+				sanitizeSecrets:  true,
+				resolvedManifest: []byte(fmt.Sprintf(`{"apiVersion":"v1","data":{"password":%q},"kind":"ConfigMap","metadata":{"name":"cm"}}`, testSecretData)),
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+				}),
+				client: &test.MockClient{
+					MockGet: test.NewMockGetFn(errBoom),
+				},
+				syncer: &fake.ResourceSyncer{
+					SyncResourceFn: func(ctx context.Context, obj *objv1alpha1.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						if diff := cmp.Diff(configMap(map[string]interface{}{"password": testSecretData}), desired); diff != "" {
+							t.Errorf("SyncResource(...): -want desired, +got desired: %s", diff)
+						}
+						return desired, nil
+					},
+				},
+			},
+			want: want{
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+					obj.Status.AtProvider.Manifest.Raw = []byte(`{"apiVersion":"v1","data":{"password":"<redacted>"},"kind":"ConfigMap","metadata":{"name":"cm"}}`)
+				}),
+			},
+		},
+		"SanitizeSecretsScrubsErrors": {
+			reason: "Values read from a Secret should be scrubbed from returned errors.",
+			args: args{
+				sanitizeSecrets: true,
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+				}),
+				client: &test.MockClient{
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+						*obj.(*unstructured.Unstructured) = *referencedSecret()
+						return nil
+					}),
+				},
+				syncer: &fake.ResourceSyncer{
+					SyncResourceFn: func(ctx context.Context, obj *objv1alpha1.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return nil, errors.Errorf(`ConfigMap "cm" is invalid: data.password: Invalid value: %q (s3cr3t-value)`, testSecretData)
+					},
+				},
+			},
+			want: want{
+				err: errors.New(`cannot create object: ConfigMap "cm" is invalid: data.password: Invalid value: "<redacted>" (<redacted>)`),
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := &external{
-				logger: logging.NewNopLogger(),
-				syncer: tc.args.syncer,
+				logger:           logging.NewNopLogger(),
+				syncer:           tc.args.syncer,
+				localClient:      tc.args.client,
+				sanitizeSecrets:  tc.args.sanitizeSecrets,
+				resolvedManifest: tc.args.resolvedManifest,
 			}
 			got, gotErr := e.Create(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
@@ -805,20 +1198,31 @@ func TestCreate(t *testing.T) {
 			if diff := cmp.Diff(tc.want.out, got); diff != "" {
 				t.Fatalf("e.Create(...): -want out, +got out: %s", diff)
 			}
+
+			if tc.want.mg != nil {
+				if diff := cmp.Diff(tc.want.mg, tc.args.mg, equateManifests()); diff != "" {
+					t.Errorf("%s\ne.Create(...): -want managed resource, +got managed resource: %s", tc.reason, diff)
+				}
+			}
 		})
 	}
 }
 
 func TestUpdate(t *testing.T) {
 	type args struct {
-		mg     resource.Managed
-		syncer ResourceSyncer
+		mg               resource.Managed
+		syncer           ResourceSyncer
+		client           client.Client
+		sanitizeSecrets  bool
+		resolvedManifest []byte
 	}
 	type want struct {
 		out managed.ExternalUpdate
 		err error
+		mg  resource.Managed
 	}
 	cases := map[string]struct {
+		reason string
 		args
 		want
 	}{
@@ -886,12 +1290,70 @@ func TestUpdate(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SanitizeSecretsResolvesReferencesWithoutObserve": {
+			reason: "Without an Observe in the same reconcile, the references should be resolved again, and a value read from a Secret should be applied but not stored in the Object.",
+			args: args{
+				sanitizeSecrets: true,
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+				}),
+				client: &test.MockClient{
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+						*obj.(*unstructured.Unstructured) = *referencedSecret()
+						return nil
+					}),
+				},
+				syncer: &fake.ResourceSyncer{
+					SyncResourceFn: func(ctx context.Context, obj *objv1alpha1.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						if diff := cmp.Diff(configMap(map[string]interface{}{"password": testSecretData}), desired); diff != "" {
+							t.Errorf("SyncResource(...): -want desired, +got desired: %s", diff)
+						}
+						return desired, nil
+					},
+				},
+			},
+			want: want{
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+					obj.Status.AtProvider.Manifest.Raw = []byte(`{"apiVersion":"v1","data":{"password":"<redacted>"},"kind":"ConfigMap","metadata":{"name":"cm"}}`)
+				}),
+			},
+		},
+		"SanitizeSecretsScrubsErrors": {
+			reason: "Values read from a Secret should be scrubbed from returned errors.",
+			args: args{
+				sanitizeSecrets: true,
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+				}),
+				client: &test.MockClient{
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+						*obj.(*unstructured.Unstructured) = *referencedSecret()
+						return nil
+					}),
+				},
+				syncer: &fake.ResourceSyncer{
+					SyncResourceFn: func(ctx context.Context, obj *objv1alpha1.Object, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return nil, errors.Errorf(`ConfigMap "cm" is invalid: data.password: Invalid value: %q (s3cr3t-value)`, testSecretData)
+					},
+				},
+			},
+			want: want{
+				err: errors.New(`cannot apply object: ConfigMap "cm" is invalid: data.password: Invalid value: "<redacted>" (<redacted>)`),
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := &external{
-				logger: logging.NewNopLogger(),
-				syncer: tc.args.syncer,
+				logger:           logging.NewNopLogger(),
+				syncer:           tc.args.syncer,
+				localClient:      tc.args.client,
+				sanitizeSecrets:  tc.args.sanitizeSecrets,
+				resolvedManifest: tc.args.resolvedManifest,
 			}
 			got, gotErr := e.Update(context.Background(), tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
@@ -900,6 +1362,12 @@ func TestUpdate(t *testing.T) {
 
 			if diff := cmp.Diff(tc.want.out, got); diff != "" {
 				t.Fatalf("e.Update(...): -want out, +got out: %s", diff)
+			}
+
+			if tc.want.mg != nil {
+				if diff := cmp.Diff(tc.want.mg, tc.args.mg, equateManifests()); diff != "" {
+					t.Errorf("%s\ne.Update(...): -want managed resource, +got managed resource: %s", tc.reason, diff)
+				}
 			}
 		})
 	}
@@ -1478,14 +1946,17 @@ func TestConnectionDetails(t *testing.T) {
 
 func TestUpdateConditionFromObserved(t *testing.T) {
 	type args struct {
-		obj      *objv1alpha1.Object
-		observed *unstructured.Unstructured
+		obj             *objv1alpha1.Object
+		observed        *unstructured.Unstructured
+		sanitizeSecrets bool
 	}
 	type want struct {
 		err        error
 		conditions []xpv2.Condition
+		logged     []interface{}
 	}
 	cases := map[string]struct {
+		reason string
 		args
 		want
 	}{
@@ -1986,11 +2457,67 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 			},
 		},
+		"RedactsLoggedSecretData": {
+			reason: "The data of an observed Secret should be redacted from debug logs, also without secret sanitization.",
+			args: args{
+				obj: &objv1alpha1.Object{
+					Spec: objv1alpha1.ObjectSpec{
+						Readiness: objv1alpha1.Readiness{
+							Policy: objv1alpha1.ReadinessPolicyDeriveFromObject,
+						},
+					},
+				},
+				observed: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"apiVersion": "v1",
+						"kind":       "Secret",
+						"data": map[string]interface{}{
+							"password": testSecretData,
+						},
+					},
+				},
+			},
+			want: want{
+				conditions: []xpv2.Condition{xpv2.Unavailable()},
+				logged: []interface{}{
+					&unstructured.Unstructured{
+						Object: map[string]interface{}{
+							"apiVersion": "v1",
+							"kind":       "Secret",
+							"data":       map[string]interface{}{"redacted": nil},
+						},
+					},
+				},
+			},
+		},
+		"RedactsLoggedSecretSourcedValues": {
+			reason: "Values patched from a Secret should be redacted from debug logs of the observed object.",
+			args: args{
+				sanitizeSecrets: true,
+				obj: &objv1alpha1.Object{
+					Spec: objv1alpha1.ObjectSpec{
+						References: []objv1alpha1.Reference{secretReference("data.password")},
+						Readiness: objv1alpha1.Readiness{
+							Policy: objv1alpha1.ReadinessPolicyAllTrue,
+						},
+					},
+				},
+				observed: configMap(map[string]interface{}{"password": testSecretData}),
+			},
+			want: want{
+				conditions: []xpv2.Condition{xpv2.Unavailable()},
+				logged: []interface{}{
+					configMap(map[string]interface{}{"password": "<redacted>"}),
+				},
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			l := &observedLogger{Logger: logging.NewNopLogger()}
 			e := &external{
-				logger: logging.NewNopLogger(),
+				logger:          l,
+				sanitizeSecrets: tc.args.sanitizeSecrets,
 			}
 			gotErr := e.updateConditionFromObserved(tc.args.obj, tc.args.observed)
 			if diff := cmp.Diff(tc.want.err, gotErr, test.EquateErrors()); diff != "" {
@@ -2000,6 +2527,18 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				return a.Type < b.Type
 			}), cmpopts.IgnoreFields(xpv2.Condition{}, "LastTransitionTime")); diff != "" {
 				t.Errorf("updateConditionFromObserved(...): -want result, +got result: %s", diff)
+			}
+			if tc.want.logged != nil {
+				got := make([]interface{}, 0, len(l.observed))
+				for _, o := range l.observed {
+					if m, ok := o.(logr.Marshaler); ok {
+						o = m.MarshalLog()
+					}
+					got = append(got, o)
+				}
+				if diff := cmp.Diff(tc.want.logged, got); diff != "" {
+					t.Errorf("%s\nupdateConditionFromObserved(...): -want logged, +got logged: %s", tc.reason, diff)
+				}
 			}
 		})
 	}
