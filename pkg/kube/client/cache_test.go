@@ -42,22 +42,26 @@ import (
 const testNamespace = "crossplane-system"
 
 func kubeconfigFor(server string) []byte {
+	return kubeconfigForCluster(server, "c")
+}
+
+func kubeconfigForCluster(server, cluster string) []byte {
 	return fmt.Appendf(nil, `apiVersion: v1
 kind: Config
 clusters:
-- name: c
+- name: %s
   cluster:
     server: %s
 contexts:
 - name: ctx
   context:
-    cluster: c
+    cluster: %s
     user: u
 current-context: ctx
 users:
 - name: u
   user: {}
-`, server)
+`, cluster, server, cluster)
 }
 
 // secretLocalClient serves the supplied Secrets, keyed by name, from the
@@ -109,6 +113,18 @@ func pcSpec(kubeconfigSecret, identitySecret string) kconfig.ProviderConfigSpec 
 	return pc
 }
 
+func awsPCSpec(kubeconfigSecret string, chain ...kconfig.AWSAssumeRoleOptions) kconfig.ProviderConfigSpec {
+	pc := pcSpec(kubeconfigSecret, "")
+	pc.Identity = &kconfig.Identity{
+		Type: kconfig.IdentityTypeAWSWebIdentityCredentials,
+		ProviderCredentials: kconfig.ProviderCredentials{
+			Source: xpv2.CredentialsSourceInjectedIdentity,
+		},
+		AWS: &kconfig.AWSIdentityConfig{AssumeRoleChain: chain},
+	}
+	return pc
+}
+
 // groups maps every item to the index of the first item equal to it, so
 // [0, 0] means one shared client or key and [0, 1] means two distinct ones.
 func groups[T comparable](items []T) []int {
@@ -126,11 +142,14 @@ func groups[T comparable](items []T) []int {
 }
 
 func TestKubeForProviderConfigCaching(t *testing.T) {
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	kubeconfigA := kubeconfigFor("https://a.example.org:6443")
 	kubeconfigB := kubeconfigFor("https://b.example.org:6443")
+	kubeconfigAWS := kubeconfigForCluster("https://a.example.org:6443", "arn:aws:eks:us-west-2:123456789012:cluster/target")
 	secrets := map[string]map[string][]byte{
-		"kubeconfig-a": {"kubeconfig": kubeconfigA},
-		"kubeconfig-b": {"kubeconfig": kubeconfigB},
+		"kubeconfig-a":   {"kubeconfig": kubeconfigA},
+		"kubeconfig-b":   {"kubeconfig": kubeconfigB},
+		"kubeconfig-aws": {"kubeconfig": kubeconfigAWS},
 		// Non-JSON Google credentials are used verbatim as a static access
 		// token, so no token endpoint is involved.
 		"token-a": {"credentials": []byte("access-token-a")},
@@ -173,6 +192,17 @@ func TestKubeForProviderConfigCaching(t *testing.T) {
 				},
 			},
 			want: want{clients: []int{0, 1, 2, 1}},
+		},
+		"SameKubeconfigDifferentAWSRoleChainBuildsNewClient": {
+			args: args{
+				cacheSize: DefaultClientCacheSize,
+				calls: []kconfig.ProviderConfigSpec{
+					awsPCSpec("kubeconfig-aws", kconfig.AWSAssumeRoleOptions{RoleARN: "arn:aws:iam::123456789012:role/a"}),
+					awsPCSpec("kubeconfig-aws", kconfig.AWSAssumeRoleOptions{RoleARN: "arn:aws:iam::123456789012:role/b"}),
+					awsPCSpec("kubeconfig-aws", kconfig.AWSAssumeRoleOptions{RoleARN: "arn:aws:iam::123456789012:role/a"}),
+				},
+			},
+			want: want{clients: []int{0, 1, 0}},
 		},
 		"LeastRecentlyUsedClientIsEvicted": {
 			args: args{
@@ -285,6 +315,14 @@ func TestClientCacheKey(t *testing.T) {
 			}},
 			want: want{groups: []int{0, 1, 1, 3}},
 		},
+		"AWSRoleChainIsPartOfTheKey": {
+			args: args{specs: []kconfig.ProviderConfigSpec{
+				awsPCSpec("kubeconfig-a", kconfig.AWSAssumeRoleOptions{RoleARN: "arn:aws:iam::123456789012:role/a"}),
+				awsPCSpec("kubeconfig-a", kconfig.AWSAssumeRoleOptions{RoleARN: "arn:aws:iam::123456789012:role/b"}),
+				awsPCSpec("kubeconfig-a-copy", kconfig.AWSAssumeRoleOptions{RoleARN: "arn:aws:iam::123456789012:role/a"}),
+			}},
+			want: want{groups: []int{0, 1, 0}},
+		},
 		"MissingSecretIsAnError": {
 			args: args{specs: []kconfig.ProviderConfigSpec{pcSpec("missing", "")}},
 			want: want{err: errors.Wrap(errors.Wrap(errBoom, "cannot get credentials secret"), errGetCreds)},
@@ -345,6 +383,26 @@ func TestClientCacheKey(t *testing.T) {
 				t.Errorf("ClientCacheKey(...): -want groups (cached clients), +got groups (keys):\n%s", diff)
 			}
 		})
+	}
+}
+
+// Computing keys for cache sizing must not load AWS configuration or install
+// credential providers; only building a client should inject the identity.
+func TestAWSClientCacheKeyDefersIdentityInjection(t *testing.T) {
+	t.Setenv("AWS_RETRY_MODE", "invalid-retry-mode")
+	b := NewIdentityAwareBuilder(secretLocalClient(map[string]map[string][]byte{
+		"kubeconfig": {"kubeconfig": kubeconfigForCluster("https://eks.example.org", "arn:aws:eks:eu-west-1:123456789012:cluster/target")},
+	}))
+	pc := awsPCSpec("kubeconfig", kconfig.AWSAssumeRoleOptions{RoleARN: "arn:aws:iam::123456789012:role/access"})
+	key, err := b.ClientCacheKey(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("ClientCacheKey(...): unexpected error: %v", err)
+	}
+	if key == "" {
+		t.Fatal("ClientCacheKey(...): expected a non-empty key")
+	}
+	if _, _, err := b.KubeForProviderConfig(context.Background(), pc); err == nil {
+		t.Fatal("KubeForProviderConfig(...): expected invalid AWS configuration to fail during identity injection")
 	}
 }
 
