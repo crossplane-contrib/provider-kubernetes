@@ -384,6 +384,19 @@ func TestLoggableObserved(t *testing.T) {
 	}
 }
 
+func TestLoggableIdentity(t *testing.T) {
+	u := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]interface{}{"name": "cm", "namespace": "default"},
+		"data":       map[string]interface{}{"password": "s3cr3t-value"},
+	}}
+	want := map[string]string{"apiVersion": "v1", "kind": "ConfigMap", "namespace": "default", "name": "cm"}
+	if diff := cmp.Diff(want, LoggableIdentity(u).MarshalLog()); diff != "" {
+		t.Errorf("Only the identity of the observed object should be logged.\nMarshalLog(): -want, +got:\n%s", diff)
+	}
+}
+
 func TestSecretValuesScrubError(t *testing.T) {
 	secret := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "v1",

@@ -135,6 +135,28 @@ func (l loggableObserved) MarshalLog() any {
 	return logged
 }
 
+// LoggableIdentity wraps an observed object for debug logging so that only
+// its apiVersion, kind, namespace and name are logged. It is meant for when
+// the values read from Secrets are unknown, e.g. while the Object is being
+// deleted and its references are not resolved.
+func LoggableIdentity(u *unstructured.Unstructured) logr.Marshaler {
+	return loggableIdentity{u: u}
+}
+
+type loggableIdentity struct {
+	u *unstructured.Unstructured
+}
+
+// MarshalLog implements logr.Marshaler.
+func (l loggableIdentity) MarshalLog() any {
+	return map[string]string{
+		"apiVersion": l.u.GetAPIVersion(),
+		"kind":       l.u.GetKind(),
+		"namespace":  l.u.GetNamespace(),
+		"name":       l.u.GetName(),
+	}
+}
+
 // RedactSecretManifest replaces the data and stringData contents of a raw
 // v1 Secret manifest with a redaction marker. Non-Secret manifests and
 // unparseable payloads are returned unchanged.

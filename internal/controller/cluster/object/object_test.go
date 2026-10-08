@@ -2554,6 +2554,28 @@ func TestUpdateConditionFromObserved(t *testing.T) {
 				},
 			},
 		},
+		"LogsOnlyIdentityIfObjectWasDeleted": {
+			reason: "While the Object is being deleted, the values read from a Secret are unknown, so only the identity of the observed object should be logged.",
+			args: args{
+				sanitizeSecrets: true,
+				obj: &v1alpha2.Object{
+					ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: ptr.To(metav1.Now())},
+					Spec: v1alpha2.ObjectSpec{
+						References: []v1alpha2.Reference{secretReference("data.password")},
+						Readiness: v1alpha2.Readiness{
+							Policy: v1alpha2.ReadinessPolicyDeriveFromObject,
+						},
+					},
+				},
+				observed: configMap(map[string]interface{}{"copy": testSecretData}),
+			},
+			want: want{
+				conditions: []xpv2.Condition{xpv2.Unavailable()},
+				logged: []interface{}{
+					map[string]string{"apiVersion": "v1", "kind": "ConfigMap", "namespace": "", "name": "cm"},
+				},
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

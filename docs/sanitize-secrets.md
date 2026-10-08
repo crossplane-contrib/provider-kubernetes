@@ -48,7 +48,8 @@ The flag applies to references whose `patchesFrom` sets both `apiVersion: v1` an
 - Values of 6 characters or more are replaced with `<redacted>` in the error messages, which
   end up in conditions and Events, also in their base64-decoded form when they are read
   from the `data` of the Secret.
-- The observed objects logged with `--debug` are redacted the same way.
+- The observed objects logged with `--debug` are redacted the same way. While the `Object`
+  is being deleted, only their apiVersion, kind, namespace and name are logged.
 
 Such a reference can't patch `metadata`, `metadata.name` or `metadata.namespace`: deleting
 an `Object` doesn't resolve its references, so these must be stored. The `Object` reports

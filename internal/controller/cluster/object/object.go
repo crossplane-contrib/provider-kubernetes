@@ -622,11 +622,18 @@ func (c *external) updateConditionFromObserved(obj *v1alpha2.Object, observed *u
 	var ready bool
 	var err error
 
+	logged := pcontroller.LoggableObserved(observed, c.secretSourcedPaths(obj), &c.secrets)
+	if c.sanitizeSecrets && meta.WasDeleted(obj) {
+		// References are not resolved while the Object is being deleted, so
+		// the values read from Secrets are unknown and cannot be redacted.
+		logged = pcontroller.LoggableIdentity(observed)
+	}
+
 	switch obj.Spec.Readiness.Policy {
 	case v1alpha2.ReadinessPolicyDeriveFromObject:
-		ready = c.checkDeriveFromObject(observed, c.secretSourcedPaths(obj))
+		ready = c.checkDeriveFromObject(observed, logged)
 	case v1alpha2.ReadinessPolicyAllTrue:
-		ready = c.checkAllConditions(observed, c.secretSourcedPaths(obj))
+		ready = c.checkAllConditions(observed, logged)
 	case v1alpha2.ReadinessPolicyDeriveFromCelQuery:
 		ready, err = c.checkDeriveFromCelQuery(obj, observed)
 	case v1alpha2.ReadinessPolicySuccessfulCreate, "":
@@ -672,24 +679,24 @@ func getReferenceInfo(ref v1alpha2.Reference) (string, string, string, string) {
 	return apiVersion, kind, namespace, name
 }
 
-func (c *external) checkDeriveFromObject(observed *unstructured.Unstructured, secretPaths []string) bool {
+func (c *external) checkDeriveFromObject(observed *unstructured.Unstructured, logged logr.Marshaler) bool {
 	conditioned := xpv2.ConditionedStatus{}
 	if err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned); err != nil {
-		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", pcontroller.LoggableObserved(observed, secretPaths, &c.secrets))
+		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", logged)
 		return false
 	}
 	if status := conditioned.GetCondition(xpv2.TypeReady).Status; status != v1.ConditionTrue {
-		c.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", pcontroller.LoggableObserved(observed, secretPaths, &c.secrets))
+		c.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", logged)
 		return false
 	}
 	return true
 }
 
-func (c *external) checkAllConditions(observed *unstructured.Unstructured, secretPaths []string) (allTrue bool) {
+func (c *external) checkAllConditions(observed *unstructured.Unstructured, logged logr.Marshaler) (allTrue bool) {
 	conditioned := xpv2.ConditionedStatus{}
 	err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
 	if err != nil {
-		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", pcontroller.LoggableObserved(observed, secretPaths, &c.secrets))
+		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", logged)
 		return false
 	}
 	allTrue = len(conditioned.Conditions) > 0
