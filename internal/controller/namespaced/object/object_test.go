@@ -981,20 +981,25 @@ func TestObserve(t *testing.T) {
 				}),
 			},
 		},
-		"SanitizeSecretsRedactsStatusIfObjectWasDeleted": {
-			reason: "References should not be resolved while the Object is being deleted, but values patched from a Secret should still be redacted from its status.",
+		"SanitizeSecretsKeepsStatusIfObjectWasDeleted": {
+			reason: "While the Object is being deleted, references are not resolved, so the values read from a Secret are unknown: the last observed manifest should be kept, as the target may hold the values elsewhere, while readiness is still updated.",
 			args: args{
 				sanitizeSecrets: true,
 				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
 					obj.ObjectMeta.DeletionTimestamp = &deleted
 					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
 					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+					obj.Spec.Readiness = objv1alpha1.Readiness{
+						Policy:   objv1alpha1.ReadinessPolicyDeriveFromCelQuery,
+						CelQuery: fmt.Sprintf("object.data.copy == %q", testSecretData),
+					}
+					obj.Status.AtProvider.Manifest.Raw = []byte(`{"apiVersion":"v1","data":{"password":"<redacted>"},"kind":"ConfigMap","metadata":{"name":"cm"}}`)
 				}),
 				client: resource.ClientApplicator{
 					Client: &test.MockClient{
 						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 							if key.Name == "cm" {
-								*obj.(*unstructured.Unstructured) = *configMap(map[string]interface{}{"password": testSecretData})
+								*obj.(*unstructured.Unstructured) = *configMap(map[string]interface{}{"password": testSecretData, "copy": testSecretData})
 								return nil
 							}
 							return errBoom
@@ -1016,7 +1021,12 @@ func TestObserve(t *testing.T) {
 					obj.ObjectMeta.DeletionTimestamp = &deleted
 					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
 					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+					obj.Spec.Readiness = objv1alpha1.Readiness{
+						Policy:   objv1alpha1.ReadinessPolicyDeriveFromCelQuery,
+						CelQuery: fmt.Sprintf("object.data.copy == %q", testSecretData),
+					}
 					obj.Status.AtProvider.Manifest.Raw = []byte(`{"apiVersion":"v1","data":{"password":"<redacted>"},"kind":"ConfigMap","metadata":{"name":"cm"}}`)
+					obj.Status.SetConditions(xpv2.Available())
 				}),
 			},
 		},

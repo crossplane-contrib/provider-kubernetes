@@ -596,14 +596,21 @@ func (c *external) setAtProvider(obj *v1alpha1.Object, observed *unstructured.Un
 	if c.removeManagedFields {
 		sObserved.SetManagedFields(nil)
 	}
-	if c.sanitizeSecrets {
+	switch {
+	case c.sanitizeSecrets && meta.WasDeleted(obj):
+		// References are not resolved while the Object is being deleted, so
+		// the values read from Secrets are unknown and cannot be redacted
+		// wherever the target holds them. Keep the last observed manifest:
+		// only the field manager upgrade of Create and Update reads it.
+	case c.sanitizeSecrets:
 		if err = pcontroller.RedactSecretValues(sObserved, c.secretSourcedPaths(obj), &c.secrets); err != nil {
 			return errors.Wrap(err, errSanitizeSecretData)
 		}
-	}
-
-	if obj.Status.AtProvider.Manifest.Raw, err = sObserved.MarshalJSON(); err != nil {
-		return errors.Wrap(err, errFailedToMarshalExisting)
+		fallthrough
+	default:
+		if obj.Status.AtProvider.Manifest.Raw, err = sObserved.MarshalJSON(); err != nil {
+			return errors.Wrap(err, errFailedToMarshalExisting)
+		}
 	}
 
 	if err := c.updateConditionFromObserved(obj, observed); err != nil {

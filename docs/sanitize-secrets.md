@@ -43,7 +43,8 @@ The flag applies to references whose `patchesFrom` sets both `apiVersion: v1` an
   mutating admission), are replaced with `"<redacted>"`; the `data` and `stringData` of a
   target `Secret` with `{"redacted": null}`; and the
   `kubectl.kubernetes.io/last-applied-configuration` annotation is removed. The target's
-  name, namespace and `managedFields` are kept as they are.
+  name, namespace and `managedFields` are kept as they are. While the `Object` is
+  being deleted, references aren't resolved, so this manifest isn't refreshed.
 - Values of 6 characters or more are replaced with `<redacted>` in the error messages, which
   end up in conditions and Events, also in their base64-decoded form when they are read
   from the `data` of the Secret.
