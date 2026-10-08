@@ -38,9 +38,12 @@ The flag applies to references whose `patchesFrom` sets both `apiVersion: v1` an
 
 - The value is applied to the target object, but never patched into the `Object`'s spec.
   When the Secret changes, the next reconcile applies the new value.
-- In `.status.atProvider.manifest`, the field patched from a Secret is replaced with
-  `"<redacted>"`, the `data` and `stringData` of a target `Secret` with `{"redacted": null}`, and
-  the `kubectl.kubernetes.io/last-applied-configuration` annotation is removed.
+- In `.status.atProvider.manifest`, the field patched from a Secret, and values of 6
+  characters or more read from it wherever else the target holds them (e.g. after a
+  mutating admission), are replaced with `"<redacted>"`; the `data` and `stringData` of a
+  target `Secret` with `{"redacted": null}`; and the
+  `kubectl.kubernetes.io/last-applied-configuration` annotation is removed. The target's
+  name, namespace and `managedFields` are kept as they are.
 - Values of 6 characters or more are replaced with `<redacted>` in the error messages, which
   end up in conditions and Events, also in their base64-decoded form when they are read
   from the `data` of the Secret.
@@ -67,6 +70,6 @@ these `Object`s, or remove the values from their manifest. Mind that deleting an
 deletes its target object, unless its `managementPolicies` leave out `Delete`. Then rotate
 the Secrets, as the values also remain in etcd history, backups and audit logs.
 
-> [!WARN]
+> [!WARNING]
 > With the flag, patching from the `.status.atProvider.manifest` of another `Object`
 > reads the redacted values. Use `spec.connectionDetails`, or reference the Secret directly.

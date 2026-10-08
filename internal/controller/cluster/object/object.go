@@ -596,7 +596,7 @@ func (c *external) setAtProvider(obj *v1alpha2.Object, observed *unstructured.Un
 		sObserved.SetManagedFields(nil)
 	}
 	if c.sanitizeSecrets {
-		if err = pcontroller.RedactSecretValues(sObserved, c.secretSourcedPaths(obj)); err != nil {
+		if err = pcontroller.RedactSecretValues(sObserved, c.secretSourcedPaths(obj), &c.secrets); err != nil {
 			return errors.Wrap(err, errSanitizeSecretData)
 		}
 	}
@@ -668,11 +668,11 @@ func getReferenceInfo(ref v1alpha2.Reference) (string, string, string, string) {
 func (c *external) checkDeriveFromObject(observed *unstructured.Unstructured, secretPaths []string) bool {
 	conditioned := xpv2.ConditionedStatus{}
 	if err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned); err != nil {
-		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", pcontroller.LoggableObserved(observed, secretPaths))
+		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", pcontroller.LoggableObserved(observed, secretPaths, &c.secrets))
 		return false
 	}
 	if status := conditioned.GetCondition(xpv2.TypeReady).Status; status != v1.ConditionTrue {
-		c.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", pcontroller.LoggableObserved(observed, secretPaths))
+		c.logger.Debug("Observed object is not ready, setting it as Unavailable", "status", status, "observed", pcontroller.LoggableObserved(observed, secretPaths, &c.secrets))
 		return false
 	}
 	return true
@@ -682,7 +682,7 @@ func (c *external) checkAllConditions(observed *unstructured.Unstructured, secre
 	conditioned := xpv2.ConditionedStatus{}
 	err := fieldpath.Pave(observed.Object).GetValueInto("status", &conditioned)
 	if err != nil {
-		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", pcontroller.LoggableObserved(observed, secretPaths))
+		c.logger.Debug("Got error while getting conditions from observed object, setting it as Unavailable", "error", err, "observed", pcontroller.LoggableObserved(observed, secretPaths, &c.secrets))
 		return false
 	}
 	allTrue = len(conditioned.Conditions) > 0

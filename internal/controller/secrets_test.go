@@ -156,14 +156,52 @@ func TestRedactSecretValues(t *testing.T) {
 	}
 
 	type args struct {
-		u     map[string]interface{}
-		paths []string
+		u      map[string]interface{}
+		paths  []string
+		values []string
 	}
 	cases := map[string]struct {
 		reason string
 		args   args
 		want   map[string]interface{}
 	}{
+		"SecretValuesElsewhere": {
+			reason: "Values read from a Secret should be redacted wherever else they are, e.g. at another list index after a mutating admission, but not in the fields that identify the object or in its managed fields.",
+			args: args{
+				u: map[string]interface{}{
+					"apiVersion": "apps/v1",
+					"kind":       "Deployment",
+					"metadata": map[string]interface{}{
+						"name":          "s3cr3t-value",
+						"annotations":   map[string]interface{}{"copy": "user:s3cr3t-value"},
+						"managedFields": []interface{}{map[string]interface{}{"manager": "s3cr3t-value"}},
+					},
+					"spec": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{"name": "sidecar"},
+							map[string]interface{}{"name": "app", "env": []interface{}{map[string]interface{}{"value": "s3cr3t-value"}}},
+						},
+					},
+				},
+				paths:  []string{"spec.containers[0].env[0].value"},
+				values: []string{"s3cr3t-value"},
+			},
+			want: map[string]interface{}{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]interface{}{
+					"name":          "s3cr3t-value",
+					"annotations":   map[string]interface{}{"copy": "user:<redacted>"},
+					"managedFields": []interface{}{map[string]interface{}{"manager": "s3cr3t-value"}},
+				},
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{"name": "sidecar"},
+						map[string]interface{}{"name": "app", "env": []interface{}{map[string]interface{}{"value": "<redacted>"}}},
+					},
+				},
+			},
+		},
 		"SecretSourcedPaths": {
 			reason: "The values at paths patched from a Secret should be redacted, wherever they are, except the name, and nothing should be added.",
 			args: args{
@@ -290,7 +328,11 @@ func TestRedactSecretValues(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			u := &unstructured.Unstructured{Object: tc.args.u}
-			if err := RedactSecretValues(u, tc.args.paths); err != nil {
+			values := &SecretValues{}
+			for _, v := range tc.args.values {
+				values.add(v, false)
+			}
+			if err := RedactSecretValues(u, tc.args.paths, values); err != nil {
 				t.Fatalf("RedactSecretValues(...): %v", err)
 			}
 			if diff := cmp.Diff(tc.want, u.Object); diff != "" {
@@ -331,7 +373,7 @@ func TestLoggableObserved(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			u := observed()
-			got := LoggableObserved(u, tc.paths).MarshalLog()
+			got := LoggableObserved(u, tc.paths, nil).MarshalLog()
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("%s\nMarshalLog(): -want, +got:\n%s", tc.reason, diff)
 			}

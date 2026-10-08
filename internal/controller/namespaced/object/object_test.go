@@ -871,6 +871,40 @@ func TestObserve(t *testing.T) {
 				}),
 			},
 		},
+		"SanitizeSecretsRedactsSecretValueElsewhereInStatus": {
+			reason: "A value read from a Secret should be redacted from status also where the target holds it at another path, e.g. after a mutating admission.",
+			args: args{
+				sanitizeSecrets: true,
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+							switch key.Name {
+							case testSecretName:
+								*obj.(*unstructured.Unstructured) = *referencedSecret()
+							case "cm":
+								*obj.(*unstructured.Unstructured) = *configMap(map[string]interface{}{"password": testSecretData, "copy": testSecretData})
+							default:
+								return errBoom
+							}
+							return nil
+						},
+					},
+				},
+				syncer: &PatchingResourceSyncer{},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: true},
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ForProvider.Manifest.Raw = configMapRaw
+					obj.Spec.References = []objv1alpha1.Reference{secretReference("data.password")}
+					obj.Status.AtProvider.Manifest.Raw = []byte(`{"apiVersion":"v1","data":{"copy":"<redacted>","password":"<redacted>"},"kind":"ConfigMap","metadata":{"name":"cm"}}`)
+				}),
+			},
+		},
 		"SanitizeSecretsRejectsSecretValueInMetadata": {
 			reason: "A value read from a Secret should not be patched into the name of the manifest, which deleting the object needs.",
 			args: args{

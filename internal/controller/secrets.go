@@ -77,14 +77,18 @@ func ValidateSecretSourcedPath(path string) error {
 // object, in place:
 //   - the value at each of paths that is present in u is replaced with
 //     "<redacted>", unless ValidateSecretSourcedPath rejects the path;
+//   - the values recorded in values are replaced with "<redacted>" wherever
+//     else they are, e.g. after a mutating admission moved them to another
+//     list index or the target copied them into another field;
 //   - the data and stringData of a v1 Secret are replaced with a redaction
 //     marker;
 //   - the last applied configuration annotation, which holds the whole
 //     manifest, is removed from a v1 Secret or if there are paths.
-func RedactSecretValues(u *unstructured.Unstructured, paths []string) error {
+func RedactSecretValues(u *unstructured.Unstructured, paths []string, values *SecretValues) error {
 	if err := redactPaths(u, paths); err != nil {
 		return err
 	}
+	values.redactIn(u)
 	secret := isSecret(u.GetAPIVersion(), u.GetKind())
 	if secret {
 		if err := redactField(u, "data"); err != nil {
@@ -110,19 +114,20 @@ func RedactSecretValues(u *unstructured.Unstructured, paths []string) error {
 // LoggableObserved wraps an observed object for debug logging so that it is
 // redacted with RedactSecretValues lazily, only when the log line is actually
 // emitted.
-func LoggableObserved(u *unstructured.Unstructured, paths []string) logr.Marshaler {
-	return loggableObserved{u: u, paths: paths}
+func LoggableObserved(u *unstructured.Unstructured, paths []string, values *SecretValues) logr.Marshaler {
+	return loggableObserved{u: u, paths: paths, values: values}
 }
 
 type loggableObserved struct {
-	u     *unstructured.Unstructured
-	paths []string
+	u      *unstructured.Unstructured
+	paths  []string
+	values *SecretValues
 }
 
 // MarshalLog implements logr.Marshaler.
 func (l loggableObserved) MarshalLog() any {
 	logged := l.u.DeepCopy()
-	if err := RedactSecretValues(logged, l.paths); err != nil {
+	if err := RedactSecretValues(logged, l.paths, l.values); err != nil {
 		// prefer dropping the object from the log line over leaking secret
 		// data
 		return nil
@@ -219,6 +224,11 @@ func (s *SecretValues) scrub(msg string) string {
 	if s.forms.Len() == 0 {
 		return msg
 	}
+	return s.replacer().Replace(msg)
+}
+
+// replacer returns a replacer of every recorded value with redactedValue.
+func (s *SecretValues) replacer() *strings.Replacer {
 	// Longest first, so that a value is replaced as a whole rather than one
 	// of its substrings that happens to be another recorded value.
 	forms := s.forms.UnsortedList()
@@ -232,7 +242,54 @@ func (s *SecretValues) scrub(msg string) string {
 	for _, f := range forms {
 		oldnew = append(oldnew, f, redactedValue)
 	}
-	return strings.NewReplacer(oldnew...).Replace(msg)
+	return strings.NewReplacer(oldnew...)
+}
+
+// redactIn replaces the recorded values in the strings of u with
+// redactedValue. The apiVersion, kind, name, namespace, resourceVersion and
+// managed fields of u are left alone: the SSA field manager upgrade patches
+// the target with them, as read from the observed state in the status.
+func (s *SecretValues) redactIn(u *unstructured.Unstructured) {
+	if s == nil || s.forms.Len() == 0 {
+		return
+	}
+	r := s.replacer()
+	for k, v := range u.Object {
+		switch k {
+		case "apiVersion", "kind":
+		case "metadata":
+			m, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			for mk, mv := range m {
+				switch mk {
+				case "name", "namespace", "resourceVersion", "managedFields":
+				default:
+					m[mk] = replaceStrings(mv, r)
+				}
+			}
+		default:
+			u.Object[k] = replaceStrings(v, r)
+		}
+	}
+}
+
+// replaceStrings applies r to every string in v.
+func replaceStrings(v any, r *strings.Replacer) any {
+	switch v := v.(type) {
+	case string:
+		return r.Replace(v)
+	case map[string]any:
+		for k, e := range v {
+			v[k] = replaceStrings(e, r)
+		}
+	case []any:
+		for i, e := range v {
+			v[i] = replaceStrings(e, r)
+		}
+	}
+	return v
 }
 
 // ScrubError returns err with the recorded values scrubbed from its message.
