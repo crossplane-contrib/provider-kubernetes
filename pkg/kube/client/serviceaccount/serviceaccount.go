@@ -163,7 +163,7 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	resp, err := t.base.RoundTrip(req2)
 	if err != nil && req.Body != nil {
-		req.Body.Close() //nolint:errcheck
+		req.Body.Close() //nolint:errcheck // Close the request body on error; its error is irrelevant because we are already returning a transport error.
 	}
 	return resp, err
 }

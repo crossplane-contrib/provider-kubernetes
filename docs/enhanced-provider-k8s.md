@@ -73,6 +73,7 @@ The enhanced Provider Kubernetes provides a couple of new features to help you m
 * It allows you to define resource references for current `Object` as dependencies to retrieve values from dependant resources at runtime and guarantee the resource rendering in a specified order.
 
 Note: These new features are implemented in [this git repository](https://github.com/morningspace/provider-kubernetes) at the moment which is forked from [the upstream repository](https://github.com/crossplane-contrib/provider-kubernetes) in Crossplane community. It
+
 has not been merged into the community version yet.
 
 In order to better understand how these features can help to manage Kubernetes resources, I will use a demo project called [capabilities-shim](https://github.com/morningspace/capabilities-shim) to describe the problems that I experienced and how the enhanced provider can help to address these problems.
@@ -310,3 +311,59 @@ Thus, we can drive the backends by creating `Object` resources that represent th
 ![](images/provider-kubernetes.png)
 
 One more additional value by using enhanced Provider Kubernetes is that some features such as resource references that have not been implemeted in Crossplane core yet can be added at provider level. It tells us that if you want to try a feature but cannot wait until it can be accepted and added in Crossplane core in its official release, or even worse that may never get chance to go into Crossplane core, it would be much better to implement it in provider rather than fork the Crossplane core and modify the core directly. This is because it may be hard to track and upgrade to the following Crossplane releases based on a forked version if you want some features that are only available in the coming releases.
+### ServiceAccount Identity
+
+Use the `ServiceAccount` identity type when Provider Kubernetes and the target cluster are the same cluster and you want to authenticate without storing a kubeconfig or bearer token in a Secret. The provider uses its in-cluster credentials to request a token for the target ServiceAccount through the Kubernetes TokenRequest API.
+
+The following `ProviderConfig` shows the required and optional fields. In this example, the provider requests a token for the `workload-manager` ServiceAccount in the `workloads` namespace:
+
+```yaml
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: workload-cluster
+spec:
+  credentials:
+    source: InjectedIdentity # Use the provider pod's in-cluster credentials to reach the same cluster.
+  identity:
+    type: ServiceAccount # Request a token for the referenced ServiceAccount.
+    serviceAccountRef:
+      name: workload-manager # Name of the ServiceAccount to impersonate.
+      namespace: workloads # Namespace containing that ServiceAccount.
+      audiences:
+        - https://kubernetes.default.svc.cluster.local # Optional: audience requested for the token; see note below.
+      expirationSeconds: 3600 # Optional: requested lifetime in seconds (defaults to 3600; the API server may clamp it).
+```
+
+The provider's own ServiceAccount needs permission to create TokenRequests for the target ServiceAccount. Bind a Role in the target namespace to the provider's ServiceAccount (replace `crossplane-system` and its name if your installation uses different values):
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: request-workload-manager-token
+  namespace: workloads
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: ["workload-manager"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: provider-request-workload-manager-token
+  namespace: workloads
+subjects:
+  - kind: ServiceAccount
+    name: provider-kubernetes # ServiceAccount running the provider.
+    namespace: crossplane-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: request-workload-manager-token
+```
+
+The target ServiceAccount must also have the Kubernetes permissions needed for the resources that the provider will manage; the TokenRequest permission only allows the provider to mint its token. The `audiences` value must match an audience accepted by the target cluster's TokenRequest API. If omitted, the API server's default audience is used. Defaults vary by cluster and may be `kubernetes` or `https://kubernetes.default.svc.cluster.local`; check your cluster's configuration before setting this field.
+
+Tokens are cached and refreshed automatically before expiration. You do not need to create or rotate token Secrets for this identity.

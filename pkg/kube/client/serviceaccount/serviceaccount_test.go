@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+
 	authnv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -19,65 +22,65 @@ import (
 // ---- NormalizeAudiences ----
 
 func TestNormalizeAudiences(t *testing.T) {
-	cases := []struct {
-		name string
-		in   []string
-		want []string
+	cases := map[string]struct {
+		reason string
+		args   struct{ in []string }
+		want   struct{ audiences []string }
 	}{
-		{"nil", nil, nil},
-		{"empty", []string{}, nil},
-		{"single", []string{"a"}, []string{"a"}},
-		{"already sorted", []string{"a", "b", "c"}, []string{"a", "b", "c"}},
-		{"unsorted", []string{"c", "a", "b"}, []string{"a", "b", "c"}},
-		{"dedup", []string{"b", "a", "b", "a"}, []string{"a", "b"}},
-		{"order-independent same result", []string{"z", "a"}, []string{"a", "z"}},
+		"nil":                           {reason: "nil input remains nil", args: struct{ in []string }{nil}, want: struct{ audiences []string }{nil}},
+		"empty":                         {reason: "empty input normalizes to nil", args: struct{ in []string }{[]string{}}, want: struct{ audiences []string }{nil}},
+		"single":                        {reason: "single audience is unchanged", args: struct{ in []string }{[]string{"a"}}, want: struct{ audiences []string }{[]string{"a"}}},
+		"already sorted":                {reason: "sorted audiences remain sorted", args: struct{ in []string }{[]string{"a", "b", "c"}}, want: struct{ audiences []string }{[]string{"a", "b", "c"}}},
+		"unsorted":                      {reason: "audiences are sorted", args: struct{ in []string }{[]string{"c", "a", "b"}}, want: struct{ audiences []string }{[]string{"a", "b", "c"}}},
+		"dedup":                         {reason: "duplicate audiences are removed", args: struct{ in []string }{[]string{"b", "a", "b", "a"}}, want: struct{ audiences []string }{[]string{"a", "b"}}},
+		"order-independent same result": {reason: "ordering is canonical", args: struct{ in []string }{[]string{"z", "a"}}, want: struct{ audiences []string }{[]string{"a", "z"}}},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := NormalizeAudiences(tc.in)
-			if len(got) != len(tc.want) {
-				t.Fatalf("len: want %d got %d (%v)", len(tc.want), len(got), got)
-			}
-			for i := range tc.want {
-				if got[i] != tc.want[i] {
-					t.Errorf("[%d]: want %q got %q", i, tc.want[i], got[i])
-				}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if diff := cmp.Diff(tc.want.audiences, NormalizeAudiences(tc.args.in)); diff != "" {
+				t.Fatalf("NormalizeAudiences(): -want +got\\n%s", diff)
 			}
 		})
 	}
 }
 
 func TestNormalizeAudiencesDoesNotMutateInput(t *testing.T) {
-	in := []string{"z", "a", "m"}
-	orig := make([]string, len(in))
-	copy(orig, in)
-	NormalizeAudiences(in)
-	for i := range orig {
-		if in[i] != orig[i] {
-			t.Errorf("input mutated at [%d]: was %q now %q", i, orig[i], in[i])
-		}
+	cases := map[string]struct {
+		reason string
+		args   struct{ audiences []string }
+	}{
+		"unsorted": {reason: "normalization does not modify caller-owned input", args: struct{ audiences []string }{[]string{"z", "a", "m"}}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			original := append([]string(nil), tc.args.audiences...)
+			NormalizeAudiences(tc.args.audiences)
+			if diff := cmp.Diff(original, tc.args.audiences); diff != "" {
+				t.Fatalf("input mutated: -want +got\\n%s", diff)
+			}
+		})
 	}
 }
 
 // ---- expirationSeconds ----
 
 func TestExpirationSecondsDefaults(t *testing.T) {
-	cases := []struct {
-		name string
-		in   int64
-		want int64
+	cases := map[string]struct {
+		reason string
+		args   struct{ expirationSeconds int64 }
+		want   struct{ expirationSeconds int64 }
 	}{
-		{"zero uses default", 0, defaultExpirationSeconds},
-		{"negative uses default", -1, defaultExpirationSeconds},
-		{"below minimum is clamped", minExpirationSeconds - 1, minExpirationSeconds},
-		{"at minimum is accepted", minExpirationSeconds, minExpirationSeconds},
-		{"above minimum passes through", 7200, 7200},
+		"zero uses default":            {reason: "zero uses configured default", args: struct{ expirationSeconds int64 }{0}, want: struct{ expirationSeconds int64 }{defaultExpirationSeconds}},
+		"negative uses default":        {reason: "negative uses configured default", args: struct{ expirationSeconds int64 }{-1}, want: struct{ expirationSeconds int64 }{defaultExpirationSeconds}},
+		"below minimum is clamped":     {reason: "below minimum is clamped", args: struct{ expirationSeconds int64 }{minExpirationSeconds - 1}, want: struct{ expirationSeconds int64 }{minExpirationSeconds}},
+		"at minimum is accepted":       {reason: "minimum is accepted", args: struct{ expirationSeconds int64 }{minExpirationSeconds}, want: struct{ expirationSeconds int64 }{minExpirationSeconds}},
+		"above minimum passes through": {reason: "larger values pass through", args: struct{ expirationSeconds int64 }{7200}, want: struct{ expirationSeconds int64 }{7200}},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := Request{ExpirationSeconds: tc.in}
-			if got := r.expirationSeconds(); got != tc.want {
-				t.Errorf("want %d got %d", tc.want, got)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := (Request{ExpirationSeconds: tc.args.expirationSeconds}).expirationSeconds()
+			if diff := cmp.Diff(tc.want.expirationSeconds, got); diff != "" {
+				t.Fatalf("expirationSeconds(): -want +got\\n%s", diff)
 			}
 		})
 	}
@@ -106,19 +109,32 @@ func newCS(token string, exp time.Time) *fake.Clientset {
 	return cs
 }
 
-func TestTokenRejectsEmptyToken(t *testing.T) {
-	cs := newCS("", time.Now().Add(time.Hour))
-	src := NewSource(cs, Request{Name: "sa", Namespace: "ns"})
-	if _, err := src.Token(context.Background()); err == nil {
-		t.Fatal("expected error for empty token, got nil")
+func TestTokenValidation(t *testing.T) {
+	cases := map[string]struct {
+		reason string
+		args   struct {
+			token      string
+			expiration time.Time
+		}
+		want struct{ err error }
+	}{
+		"empty token": {reason: "empty returned token is rejected", args: struct {
+			token      string
+			expiration time.Time
+		}{"", time.Now().Add(time.Hour)}, want: struct{ err error }{cmpopts.AnyError}},
+		"zero expiration": {reason: "zero returned expiration is rejected", args: struct {
+			token      string
+			expiration time.Time
+		}{"tok", time.Time{}}, want: struct{ err error }{cmpopts.AnyError}},
 	}
-}
-
-func TestTokenRejectsZeroExpiration(t *testing.T) {
-	cs := newCS("tok", time.Time{})
-	src := NewSource(cs, Request{Name: "sa", Namespace: "ns"})
-	if _, err := src.Token(context.Background()); err == nil {
-		t.Fatal("expected error for zero expiration, got nil")
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			src := NewSource(newCS(tc.args.token, tc.args.expiration), Request{Name: "sa", Namespace: "ns"})
+			_, err := src.Token(context.Background())
+			if diff := cmp.Diff(tc.want.err, err, cmpopts.EquateErrors()); diff != "" {
+				t.Fatalf("Token(): -want +got\\n%s", diff)
+			}
+		})
 	}
 }
 
@@ -439,54 +455,59 @@ func TestTokenCreateTokenError(t *testing.T) {
 // ---- NewRequest canonicalization ----
 
 func TestNewRequestCanonicalizes(t *testing.T) {
-	cases := []struct {
-		name      string
-		exp       int64
-		wantExp   int64
-		audiences []string
-		wantAud   []string
+	cases := map[string]struct {
+		reason string
+		args   struct {
+			expiration int64
+			audiences  []string
+		}
+		want struct {
+			expiration int64
+			audiences  []string
+		}
 	}{
-		{
-			name:    "zero expiration defaults",
-			exp:     0,
-			wantExp: defaultExpirationSeconds,
-		},
-		{
-			name:    "negative expiration defaults",
-			exp:     -1,
-			wantExp: defaultExpirationSeconds,
-		},
-		{
-			name:    "below minimum is clamped",
-			exp:     minExpirationSeconds - 1,
-			wantExp: minExpirationSeconds,
-		},
-		{
-			name:    "explicit 3600 same as zero",
-			exp:     defaultExpirationSeconds,
-			wantExp: defaultExpirationSeconds,
-		},
-		{
-			name:      "audiences sorted and deduped",
-			exp:       3600,
-			wantExp:   3600,
-			audiences: []string{"z", "a", "a"},
-			wantAud:   []string{"a", "z"},
-		},
+		"zero expiration defaults": {reason: "unset expiration is defaulted", args: struct {
+			expiration int64
+			audiences  []string
+		}{0, nil}, want: struct {
+			expiration int64
+			audiences  []string
+		}{defaultExpirationSeconds, nil}},
+		"negative expiration defaults": {reason: "negative expiration is defaulted", args: struct {
+			expiration int64
+			audiences  []string
+		}{-1, nil}, want: struct {
+			expiration int64
+			audiences  []string
+		}{defaultExpirationSeconds, nil}},
+		"below minimum is clamped": {reason: "expiration is clamped", args: struct {
+			expiration int64
+			audiences  []string
+		}{minExpirationSeconds - 1, nil}, want: struct {
+			expiration int64
+			audiences  []string
+		}{minExpirationSeconds, nil}},
+		"explicit 3600 same as zero": {reason: "explicit default is preserved", args: struct {
+			expiration int64
+			audiences  []string
+		}{defaultExpirationSeconds, nil}, want: struct {
+			expiration int64
+			audiences  []string
+		}{defaultExpirationSeconds, nil}},
+		"audiences sorted and deduped": {reason: "audiences are canonicalized", args: struct {
+			expiration int64
+			audiences  []string
+		}{3600, []string{"z", "a", "a"}}, want: struct {
+			expiration int64
+			audiences  []string
+		}{3600, []string{"a", "z"}}},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := NewRequest("sa", "ns", tc.audiences, tc.exp)
-			if r.ExpirationSeconds != tc.wantExp {
-				t.Errorf("ExpirationSeconds: want %d got %d", tc.wantExp, r.ExpirationSeconds)
-			}
-			if len(r.Audiences) != len(tc.wantAud) {
-				t.Fatalf("Audiences len: want %d got %d (%v)", len(tc.wantAud), len(r.Audiences), r.Audiences)
-			}
-			for i := range tc.wantAud {
-				if r.Audiences[i] != tc.wantAud[i] {
-					t.Errorf("Audiences[%d]: want %q got %q", i, tc.wantAud[i], r.Audiences[i])
-				}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := NewRequest("sa", "ns", tc.args.audiences, tc.args.expiration)
+			want := Request{Name: "sa", Namespace: "ns", ExpirationSeconds: tc.want.expiration, Audiences: tc.want.audiences}
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Fatalf("NewRequest(): -want +got\\n%s", diff)
 			}
 		})
 	}
@@ -497,13 +518,27 @@ func TestNewRequestCanonicalizes(t *testing.T) {
 // ExpirationSeconds=defaultExpirationSeconds must produce identical Requests
 // and therefore identical store keys and digest bytes.
 func TestNewRequestZeroAndExplicitDefaultShareDigest(t *testing.T) {
-	implicit := NewRequest("sa", "ns", nil, 0)
-	explicit := NewRequest("sa", "ns", nil, defaultExpirationSeconds)
-	if implicit.ExpirationSeconds != explicit.ExpirationSeconds {
-		t.Errorf("implicit exp %d != explicit exp %d", implicit.ExpirationSeconds, explicit.ExpirationSeconds)
+	cases := map[string]struct {
+		reason string
+		args   struct{ implicit, explicit Request }
+		want   struct{ same bool }
+	}{
+		"equivalent defaults": {
+			reason: "unset and explicit default expiration share canonical request and digest",
+			args: struct{ implicit, explicit Request }{
+				NewRequest("sa", "ns", nil, 0),
+				NewRequest("sa", "ns", nil, defaultExpirationSeconds),
+			},
+			want: struct{ same bool }{true},
+		},
 	}
-	if requestKey(implicit) != requestKey(explicit) {
-		t.Error("different store keys for semantically equivalent requests")
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := tc.args.implicit.ExpirationSeconds == tc.args.explicit.ExpirationSeconds && requestKey(tc.args.implicit) == requestKey(tc.args.explicit)
+			if diff := cmp.Diff(tc.want.same, got); diff != "" {
+				t.Fatalf("requests equivalent: -want +got\\n%s", diff)
+			}
+		})
 	}
 }
 
