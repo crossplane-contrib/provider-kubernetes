@@ -38,10 +38,9 @@ identity supplies the bearer token.
 
 ## ServiceAccount identity
 
-Use `type: ServiceAccount` when the target cluster is the same cluster the
-provider runs in and you want to scope the provider's access to a specific
-ServiceAccount's RBAC — without storing a long-lived kubeconfig or bearer token
-in a Secret.
+Use `type: ServiceAccount` to authenticate to local or remote clusters using a
+short-lived token minted for a specific ServiceAccount — without storing a
+long-lived kubeconfig bearer token in a Secret.
 
 The provider calls the Kubernetes TokenRequest API using its own in-cluster
 credentials to mint a short-lived token for the referenced ServiceAccount, then
@@ -51,29 +50,65 @@ rotation is needed.
 
 ### ProviderConfig
 
-`spec.credentials.source` must be `InjectedIdentity` — the provider's own
-in-cluster config is the only viable server+CA source when target and provider
-cluster are the same.
+`spec.credentials` supplies the server URL and CA via a kubeconfig stored in a
+Secret. Because `spec.identity` provides the bearer token, the kubeconfig only
+needs the `cluster` stanza — `users` is optional and its token field is ignored
+when an identity is configured.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: remote-kubeconfig
+  namespace: crossplane-system
+stringData:
+  kubeconfig: |
+    apiVersion: v1
+    kind: Config
+    clusters:
+    - name: remote
+      cluster:
+        server: https://api.remote-cluster.example.com
+        certificate-authority-data: <base64-encoded-CA>
+    contexts:
+    - name: remote
+      context:
+        cluster: remote
+        user: deployer
+    current-context: remote
+    users:
+    - name: deployer
+      user: {}        # token omitted — identity.serviceAccountRef provides it
+```
+
+Reference the Secret from a `ProviderConfig`:
 
 ```yaml
 apiVersion: kubernetes.crossplane.io/v1alpha1
 kind: ProviderConfig
 metadata:
-  name: team-a
+  name: remote-team-a
 spec:
   credentials:
-    source: InjectedIdentity
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: remote-kubeconfig   # contains server URL + CA only, no user token
+      key: kubeconfig
   identity:
     type: ServiceAccount
     source: InjectedIdentity
     serviceAccountRef:
-      name: deployer        # ServiceAccount to mint tokens for
-      namespace: team-a     # Namespace that ServiceAccount lives in
-      audiences:            # Optional — see note on audiences below
-        - kubernetes
-      expirationSeconds: 3600  # Optional — defaults to 3600; the API server
-                               # may return a shorter or longer lifetime
+      name: deployer
+      namespace: team-a
+      audiences: [kubernetes]          # Optional — see note on audiences below
+      expirationSeconds: 3600          # Optional — defaults to 3600
 ```
+
+The remote cluster must trust the provider cluster's OIDC issuer and accept
+tokens with the configured audience. The TokenRequest is always issued against
+the provider's local cluster; the resulting token is then used to authenticate
+to whichever cluster `spec.credentials` points at.
 
 ### RBAC prerequisites
 
