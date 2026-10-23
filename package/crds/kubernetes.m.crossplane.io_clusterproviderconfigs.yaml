@@ -156,6 +156,39 @@ spec:
                     - name
                     - namespace
                     type: object
+                  serviceAccountRef:
+                    description: |-
+                      ServiceAccountRef configures the ServiceAccount identity type. Required
+                      when type is ServiceAccount, ignored otherwise.
+                    properties:
+                      audiences:
+                        description: |-
+                          Audiences the minted token is valid for. If empty, the API server's
+                          default audience (its own identifier) is used.
+                        items:
+                          type: string
+                        type: array
+                      expirationSeconds:
+                        description: |-
+                          ExpirationSeconds is the requested validity duration of the token. The
+                          API server may return a token with a longer or shorter lifetime and
+                          clamps values outside its configured bounds. Defaults to 3600 (1h)
+                          when unset.
+                        format: int64
+                        minimum: 600
+                        type: integer
+                      name:
+                        description: Name of the ServiceAccount to request tokens
+                          for.
+                        type: string
+                      namespace:
+                        description: Namespace of the ServiceAccount to request tokens
+                          for.
+                        type: string
+                    required:
+                    - name
+                    - namespace
+                    type: object
                   source:
                     description: Source of the provider credentials.
                     enum:
@@ -174,6 +207,7 @@ spec:
                     - UpboundTokens
                     - AWSWebIdentityCredentials
                     - NebiusServiceAccountCredentials
+                    - ServiceAccount
                     type: string
                 required:
                 - source

@@ -34,6 +34,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -256,6 +257,9 @@ func main() {
 		MetricOptions:           &mo,
 	}
 
+	tokenClient, err := kubernetes.NewForConfig(mgr.GetConfig())
+	kingpin.FatalIfError(err, "Cannot create clientset for ServiceAccount token requests")
+
 	po := pcontroller.Options{
 		SanitizeSecrets:      *sanitizeSecrets,
 		RemoveManagedFields:  *removeManagedFields,
@@ -264,7 +268,8 @@ func main() {
 		ClientBuilder: kubeclient.NewIdentityAwareBuilder(mgr.GetClient(),
 			kubeclient.WithLogger(log),
 			kubeclient.WithClientCacheSize(cacheSize),
-			kubeclient.WithClientCacheMetrics(cm)),
+			kubeclient.WithClientCacheMetrics(cm),
+			kubeclient.WithTokenClient(tokenClient)),
 	}
 
 	if *enableManagementPolicies {

@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"golang.org/x/sync/singleflight"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
@@ -39,6 +40,7 @@ import (
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/azure"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/gke"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/nebius"
+	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/serviceaccount"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/token"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/upbound"
 	kconfig "github.com/crossplane-contrib/provider-kubernetes/pkg/kube/config"
@@ -56,6 +58,7 @@ const (
 	errInjectAWSCredentials      = "failed to wrap REST client with AWS credentials"
 	errExtractNebiusCredentials  = "failed to extract Nebius service account credentials"
 	errInjectNebiusCredentials   = "failed to wrap REST client with Nebius service account credentials"
+	errInjectServiceAccount      = "failed to wrap REST client with ServiceAccount token"
 	errParseProxyURL             = "cannot parse proxy URL from kubeconfig"
 )
 
@@ -84,6 +87,8 @@ type IdentityAwareBuilder struct {
 	log         logging.Logger
 	store       *token.ReuseSourceStore
 	nebiusStore *nebius.SDKStore
+	saStore     *serviceaccount.Store
+	tokenClient kubernetes.Interface
 
 	// clients caches built clients keyed by a digest of the credential
 	// material that produced them, see KubeForProviderConfig.
@@ -119,6 +124,16 @@ func WithClientCacheSize(size int) BuilderOption {
 	}
 }
 
+// WithTokenClient sets the clientset used to mint ServiceAccount tokens via
+// the TokenRequest API of the cluster the provider runs in. It is required for
+// the ServiceAccount identity type and built from the provider's in-cluster
+// REST config.
+func WithTokenClient(c kubernetes.Interface) BuilderOption {
+	return func(b *IdentityAwareBuilder) {
+		b.tokenClient = c
+	}
+}
+
 // NewIdentityAwareBuilder returns a new IdentityAwareBuilder.
 func NewIdentityAwareBuilder(local client.Client, opts ...BuilderOption) *IdentityAwareBuilder {
 	b := &IdentityAwareBuilder{
@@ -126,6 +141,7 @@ func NewIdentityAwareBuilder(local client.Client, opts ...BuilderOption) *Identi
 		log:         logging.NewNopLogger(),
 		store:       token.NewReuseSourceStore(),
 		nebiusStore: nebius.NewSDKStore(),
+		saStore:     serviceaccount.NewStore(),
 		cacheSize:   DefaultClientCacheSize,
 		metrics:     NewClientCacheMetrics(""),
 		newClient: func(rc *rest.Config) (client.Client, error) {
@@ -381,6 +397,30 @@ func (b *IdentityAwareBuilder) identityInjector(ctx context.Context, id *kconfig
 				return errors.Wrap(nebius.WrapRESTConfig(ctx, rc, creds, b.nebiusStore), errInjectNebiusCredentials)
 			}, nil
 		}
+	case kconfig.IdentityTypeServiceAccount:
+		if id.Source != xpv2.CredentialsSourceInjectedIdentity {
+			return nil, errors.Errorf("%s is the only supported identity source for identity type %s, got %s",
+				xpv2.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeServiceAccount, id.Source)
+		}
+		sa := id.ServiceAccountRef
+		if sa == nil {
+			return nil, errors.Errorf("identity type %s requires a serviceAccountRef configuration", kconfig.IdentityTypeServiceAccount)
+		}
+		var exp int64
+		if sa.ExpirationSeconds != nil {
+			exp = *sa.ExpirationSeconds
+		}
+		req := serviceaccount.NewRequest(sa.Name, sa.Namespace, sa.Audiences, exp)
+		digestWrite(digest, []byte(req.Namespace), []byte(req.Name))
+		var buf [8]byte
+		binary.BigEndian.PutUint64(buf[:], uint64(req.ExpirationSeconds))
+		digestWrite(digest, buf[:])
+		for _, a := range req.Audiences {
+			digestWrite(digest, []byte(a))
+		}
+		return func(_ context.Context, rc *rest.Config) error {
+			return errors.Wrap(serviceaccount.WrapRESTConfig(b.tokenClient, rc, req, b.saStore), errInjectServiceAccount)
+		}, nil
 	default:
 		return nil, errors.Errorf("unknown identity type: %s", id.Type)
 	}
