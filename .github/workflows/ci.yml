@@ -16,7 +16,7 @@ env:
 
 jobs:
   detect-noop:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       noop: ${{ steps.noop.outputs.should_skip }}
     steps:
@@ -30,7 +30,7 @@ jobs:
 
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: detect-noop
     if: needs.detect-noop.outputs.noop != 'true'
 
@@ -54,7 +54,7 @@ jobs:
           version: ${{ env.GOLANGCI_VERSION }}
 
   check-diff:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: detect-noop
     if: needs.detect-noop.outputs.noop != 'true'
 
@@ -76,7 +76,7 @@ jobs:
         run: make check-diff
 
   unit-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: detect-noop
     if: needs.detect-noop.outputs.noop != 'true'
 
@@ -108,7 +108,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   e2e-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: detect-noop
     if: needs.detect-noop.outputs.noop != 'true'
 
