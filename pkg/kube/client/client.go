@@ -63,6 +63,22 @@ const (
 // config.
 type Builder interface {
 	KubeForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (client.Client, *rest.Config, error)
+	// TargetForProviderConfig returns the client and REST config that
+	// KubeForProviderConfig returns, together with the key the credentials
+	// behind them digest to.
+	TargetForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (Target, error)
+}
+
+// A Target is a client for a target cluster, the REST config it was built
+// from and the key the credential material behind the provider config
+// digests to, see ClientCacheKey. The key changes whenever the credentials
+// change, for example when a kubeconfig token is rotated in its Secret, so
+// anything long-lived that was built from Config, such as a watch informer,
+// can tell that it must be rebuilt.
+type Target struct {
+	Client client.Client
+	Config *rest.Config
+	Key    string
 }
 
 // BuilderFn is a function that can be used as a Builder.
@@ -71,6 +87,13 @@ type BuilderFn func(ctx context.Context, pc kconfig.ProviderConfigSpec) (client.
 // KubeForProviderConfig calls the underlying function.
 func (fn BuilderFn) KubeForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (client.Client, *rest.Config, error) {
 	return fn(ctx, pc)
+}
+
+// TargetForProviderConfig calls the underlying function. The function has no
+// notion of credential material, so the key is always empty.
+func (fn BuilderFn) TargetForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (Target, error) {
+	k, rc, err := fn(ctx, pc)
+	return Target{Client: k, Config: rc}, err
 }
 
 // DefaultClientCacheSize is the default bound on the number of target cluster
@@ -146,22 +169,29 @@ func NewIdentityAwareBuilder(local client.Client, opts ...BuilderOption) *Identi
 }
 
 // KubeForProviderConfig returns the kube client and *rest.config for the given
-// provider config. Clients are cached by a digest of the credential material
-// that produced them: a fresh client is expensive because its RESTMapper
-// primes itself via aggregated discovery on the first mapping lookup (the
-// whole API surface, multi-megabyte on CRD-heavy clusters), and this method
-// is called on every reconcile. A credential change yields a new digest and
-// thus a fresh client; token refresh happens inside the cached transports and
-// needs no rebuild.
+// provider config, see TargetForProviderConfig.
 func (b *IdentityAwareBuilder) KubeForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (client.Client, *rest.Config, error) {
+	t, err := b.TargetForProviderConfig(ctx, pc)
+	return t.Client, t.Config, err
+}
+
+// TargetForProviderConfig returns the kube client, *rest.config and cache key
+// for the given provider config. Clients are cached by a digest of the
+// credential material that produced them: a fresh client is expensive because
+// its RESTMapper primes itself via aggregated discovery on the first mapping
+// lookup (the whole API surface, multi-megabyte on CRD-heavy clusters), and
+// this method is called on every reconcile. A credential change yields a new
+// digest and thus a fresh client; token refresh happens inside the cached
+// transports and needs no rebuild.
+func (b *IdentityAwareBuilder) TargetForProviderConfig(ctx context.Context, pc kconfig.ProviderConfigSpec) (Target, error) {
 	r, err := b.resolve(ctx, pc)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "cannot get REST config for provider")
+		return Target{}, errors.Wrap(err, "cannot get REST config for provider")
 	}
 	if v, ok := b.clients.Get(r.key); ok {
 		b.metrics.event(cacheEventHit)
 		cached := v.(cachedClient)
-		return cached.kube, rest.CopyConfig(cached.rc), nil
+		return Target{Client: cached.kube, Config: rest.CopyConfig(cached.rc), Key: r.key}, nil
 	}
 	b.metrics.event(cacheEventMiss)
 	// singleflight collapses the thundering herd of concurrent reconciles
@@ -190,12 +220,12 @@ func (b *IdentityAwareBuilder) KubeForProviderConfig(ctx context.Context, pc kco
 		return cached, nil
 	})
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "cannot create Kubernetes client for provider")
+		return Target{}, errors.Wrap(err, "cannot create Kubernetes client for provider")
 	}
 	cached := v.(cachedClient)
 	// The config is shared by every caller of this credential set; hand out a
 	// copy so that nobody can mutate it underneath the cached client.
-	return cached.kube, rest.CopyConfig(cached.rc), nil
+	return Target{Client: cached.kube, Config: rest.CopyConfig(cached.rc), Key: r.key}, nil
 }
 
 // ClientCacheKey returns the key under which KubeForProviderConfig caches the

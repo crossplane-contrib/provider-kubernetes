@@ -73,6 +73,9 @@ type gvkWithConfig struct {
 type resourceCache struct {
 	cache    cache.Cache
 	cancelFn context.CancelFunc
+	// credentialsKey identifies the credentials the cache was built with.
+	// WatchResources replaces the cache when it is called with another key.
+	credentialsKey string
 }
 
 var _ source.Source = &resourceInformers{}
@@ -102,25 +105,30 @@ func (i *resourceInformers) Start(ctx context.Context, q workqueue.TypedRateLimi
 }
 
 // WatchResources starts informers for the given resource GVKs for the given
-// cluster (i.e. rest.Config & providerConfig).
-// The is wired into the Object reconciler, which will call this method on
+// cluster (i.e. rest.Config & providerConfig). credentialsKey identifies the
+// credentials rc was built with: an informer that was started for the same
+// provider config and GVK with other credentials is stopped and started again
+// with rc, because its own credentials may have expired (e.g. a kubeconfig
+// token rotated in its Secret) and nothing else would ever refresh them.
+// This is wired into the Object reconciler, which will call this method on
 // every reconcile to make resourceInformers aware of the referenced or managed
 // resources of the given Object.
 //
 // Note that this complements cleanupResourceInformers which regularly
 // garbage collects resource informers that are no longer referenced by
 // any Object.
-func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig string, gvks ...schema.GroupVersionKind) { // nolint:gocyclo // we need to handle all cases.
+func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig, credentialsKey string, gvks ...schema.GroupVersionKind) { // nolint:gocyclo // we need to handle all cases.
 	if rc == nil {
 		rc = i.config
 	}
 
 	// start new informers
 	for _, gvk := range gvks {
+		key := gvkWithConfig{providerConfig: providerConfig, gvk: gvk}
 		i.lock.RLock()
-		_, found := i.resourceCaches[gvkWithConfig{providerConfig: providerConfig, gvk: gvk}]
+		existing, found := i.resourceCaches[key]
 		i.lock.RUnlock()
-		if found {
+		if found && existing.credentialsKey == credentialsKey {
 			continue
 		}
 
@@ -128,16 +136,19 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 
 		ca, err := cache.New(rc, cache.Options{
 			DefaultTransform: cache.TransformStripManagedFields(),
-			DefaultWatchErrorHandler: func(_ context.Context, r *kcache.Reflector, err error) {
-				if errors.Is(io.EOF, err) {
+			DefaultWatchErrorHandler: func(_ context.Context, _ *kcache.Reflector, err error) {
+				if errors.Is(err, io.EOF) {
 					// Watch closed normally.
 					return
 				}
-				log.Debug("Watch error - probably remote cluster api is gone", "error", err)
+				// The reflector retries with a backoff of at most 30s, so
+				// this is the only sign of a watch that keeps failing, e.g.
+				// with 401 once the credentials it was started with expired.
+				log.Info("Resource watch failed, retrying", "error", err)
 			},
 		})
 		if err != nil {
-			log.Debug("failed creating a cache", "error", err)
+			log.Info("failed creating a cache", "error", err)
 			continue
 		}
 
@@ -150,7 +161,7 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 		inf, err := ca.GetInformer(ctx, obj, cache.BlockUntilSynced(false)) // don't block. We wait in the go routine below.
 		if err != nil {
 			cancelFn()
-			log.Debug("failed getting informer", "error", err)
+			log.Info("failed getting informer", "error", err)
 			continue
 		}
 
@@ -181,7 +192,7 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 			},
 		}); err != nil {
 			cancelFn()
-			log.Debug("failed adding event handler", "error", err)
+			log.Info("failed adding event handler", "error", err)
 			continue
 		}
 
@@ -193,17 +204,24 @@ func (i *resourceInformers) WatchResources(rc *rest.Config, providerConfig strin
 		}()
 
 		i.lock.Lock()
-		_, ok := i.resourceCaches[gvkWithConfig{providerConfig: providerConfig, gvk: gvk}]
-		if ok {
-			// Another goroutine already started the cache in parallel. We
-			// should cancel the new one.
+		current, ok := i.resourceCaches[key]
+		if ok && current.credentialsKey == credentialsKey {
+			// Another goroutine already started the cache with these
+			// credentials in parallel. We should cancel the new one.
 			cancelFn()
 			i.lock.Unlock()
 			continue
 		}
-		i.resourceCaches[gvkWithConfig{providerConfig: providerConfig, gvk: gvk}] = resourceCache{
-			cache:    ca,
-			cancelFn: cancelFn,
+		if ok {
+			// The cache was started with other credentials, which may have
+			// expired since. Hand over to the new one.
+			current.cancelFn()
+			log.Info("Stopped resource watch, credentials changed")
+		}
+		i.resourceCaches[key] = resourceCache{
+			cache:          ca,
+			cancelFn:       cancelFn,
+			credentialsKey: credentialsKey,
 		}
 		i.lock.Unlock()
 
@@ -243,11 +261,20 @@ func (i *resourceInformers) cleanupResourceInformers(ctx context.Context) {
 			continue
 		}
 
-		ca.cancelFn()
-		i.log.Info("Stopped resource watch", "providerConfig", gc.providerConfig, "gvk", gc.gvk)
 		i.lock.Lock()
+		current, ok := i.resourceCaches[gc]
+		if !ok || current.cache != ca.cache {
+			// WatchResources replaced the informer, or another run removed
+			// it, since the map was copied. The replacement is considered on
+			// the next run.
+			i.lock.Unlock()
+			continue
+		}
 		delete(i.resourceCaches, gc)
 		i.lock.Unlock()
+
+		ca.cancelFn()
+		i.log.Info("Stopped resource watch", "providerConfig", gc.providerConfig, "gvk", gc.gvk)
 	}
 }
 

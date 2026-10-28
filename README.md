@@ -68,6 +68,16 @@ informers and the server-side apply discovery client. Load on the target
 cluster is bounded by `--max-reconcile-rate` on the provider side and by API
 Priority and Fairness on the API server.
 
+The watch informers that `spec.watch: true` starts follow the credential set as
+well. When it changes, for example because a short-lived kubeconfig token was
+rotated in its Secret, the next reconcile of an Object that watches through
+that ProviderConfig stops the informer and starts it again with the new
+credentials, logged as `Stopped resource watch, credentials changed` and
+`Starting resource watch`. Until that reconcile the informer keeps the
+credentials it was started with, so rotate them before they expire; a watch
+that keeps failing, for example with `401 Unauthorized` after its token
+expired, is logged as `Resource watch failed, retrying`.
+
 ## Known limitations
 
 ### Write-only fields cannot be reconciled

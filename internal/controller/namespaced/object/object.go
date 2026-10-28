@@ -128,7 +128,9 @@ const (
 type KindObserver interface {
 	// WatchResources starts a watch of the given kinds to trigger reconciles
 	// when a referenced or managed objects of those kinds changes.
-	WatchResources(rc *rest.Config, providerConfig string, gvks ...schema.GroupVersionKind)
+	// credentialsKey identifies the credentials rc was built with; a watch
+	// that was started with other credentials is restarted with rc.
+	WatchResources(rc *rest.Config, providerConfig, credentialsKey string, gvks ...schema.GroupVersionKind)
 }
 
 // ResourceSyncer contains the methods required to decide whether an object is
@@ -308,10 +310,11 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, err
 	}
 
-	k, rc, err := c.clientBuilder.KubeForProviderConfig(ctx, *pcSpec)
+	target, err := c.clientBuilder.TargetForProviderConfig(ctx, *pcSpec)
 	if err != nil {
 		return nil, errors.Wrap(err, errBuildKubeForProviderConfig)
 	}
+	k, rc := target.Client, target.Config
 
 	e := &external{
 		logger: c.logger,
@@ -320,6 +323,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 			Applicator: resource.NewAPIPatchingApplicator(k),
 		},
 		rest:                rc,
+		credentialsKey:      target.Key,
 		localClient:         c.kube,
 		sanitizeSecrets:     c.sanitizeSecrets,
 		removeManagedFields: c.removeManagedFields,
@@ -366,6 +370,9 @@ type external struct {
 	logger logging.Logger
 	client resource.ClientApplicator
 	rest   *rest.Config
+	// credentialsKey identifies the credentials rest was built with, see
+	// kubeclient.Target.
+	credentialsKey string
 	// localClient is specifically used to connect to local cluster, a.k.a control plane.
 	localClient  client.Client
 	syncer       ResourceSyncer
@@ -415,7 +422,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (_ managed.
 	}
 
 	if c.shouldWatch(obj) {
-		c.kindObserver.WatchResources(c.rest, providerConfigRefKey(obj), manifest.GroupVersionKind())
+		c.kindObserver.WatchResources(c.rest, providerConfigRefKey(obj), c.credentialsKey, manifest.GroupVersionKind())
 	}
 
 	current := manifest.DeepCopy()
@@ -830,7 +837,7 @@ func (c *external) resolveReferencies(ctx context.Context, obj *v1alpha1.Object)
 		// Referenced resources always live on the control plane (i.e. local cluster),
 		// so we don't pass an extra rest config (defaulting local rest config)
 		// or provider config with the watch call.
-		c.kindObserver.WatchResources(nil, "", gvks...)
+		c.kindObserver.WatchResources(nil, "", "", gvks...)
 	}
 
 	return desired, nil

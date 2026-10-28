@@ -218,6 +218,92 @@ func TestKubeForProviderConfigCaching(t *testing.T) {
 	}
 }
 
+// TestTargetForProviderConfigKey guards the key that long-lived consumers of
+// a client, such as the watch informers, compare to notice a credential
+// change: it must follow the kubeconfig bytes even when the Secret keeps its
+// name, as it does when a token is rotated in place.
+func TestTargetForProviderConfigKey(t *testing.T) {
+	tokenKubeconfig := func(token string) []byte {
+		return fmt.Appendf(nil, `apiVersion: v1
+kind: Config
+clusters:
+- name: c
+  cluster:
+    server: https://a.example.org:6443
+contexts:
+- name: ctx
+  context:
+    cluster: c
+    user: u
+current-context: ctx
+users:
+- name: u
+  user:
+    token: %s
+`, token)
+	}
+	secrets := map[string]map[string][]byte{
+		"kubeconfig": {"kubeconfig": tokenKubeconfig("token-a")},
+	}
+
+	type args struct {
+		// rotate sets the kubeconfig Secret's token before the call.
+		rotations []string
+	}
+	type want struct {
+		keys   []int
+		tokens []string
+	}
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"UnchangedSecretKeepsKey": {
+			reason: "Calls that read the same kubeconfig bytes must share the key and the client.",
+			args:   args{rotations: []string{"token-a", "token-a"}},
+			want:   want{keys: []int{0, 0}, tokens: []string{"token-a", "token-a"}},
+		},
+		"RotatedTokenChangesKey": {
+			reason: "A token rotated in the Secret changes the kubeconfig bytes, so the key and the REST config must follow it.",
+			args:   args{rotations: []string{"token-a", "token-b", "token-b"}},
+			want:   want{keys: []int{0, 1, 1}, tokens: []string{"token-a", "token-b", "token-b"}},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			b := NewIdentityAwareBuilder(secretLocalClient(secrets))
+
+			keys := make([]string, 0, len(tc.args.rotations))
+			tokens := make([]string, 0, len(tc.args.rotations))
+			for i, token := range tc.args.rotations {
+				secrets["kubeconfig"]["kubeconfig"] = tokenKubeconfig(token)
+				target, err := b.TargetForProviderConfig(context.Background(), pcSpec("kubeconfig", ""))
+				if err != nil {
+					t.Fatalf("TargetForProviderConfig(...) call %d: unexpected error: %v", i, err)
+				}
+				cacheKey, err := b.ClientCacheKey(context.Background(), pcSpec("kubeconfig", ""))
+				if err != nil {
+					t.Fatalf("ClientCacheKey(...) call %d: unexpected error: %v", i, err)
+				}
+				if diff := cmp.Diff(cacheKey, target.Key); diff != "" {
+					t.Errorf("\n%s\nTargetForProviderConfig(...) call %d: -want key as ClientCacheKey, +got:\n%s", tc.reason, i, diff)
+				}
+				keys = append(keys, target.Key)
+				tokens = append(tokens, target.Config.BearerToken)
+			}
+
+			if diff := cmp.Diff(tc.want.keys, groups(keys)); diff != "" {
+				t.Errorf("\n%s\nTargetForProviderConfig(...): -want key identities, +got:\n%s", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want.tokens, tokens); diff != "" {
+				t.Errorf("\n%s\nTargetForProviderConfig(...): -want bearer tokens, +got:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
 // awsSpec references the kubeconfig Secret and uses the AWS web identity of
 // the provider pod.
 func awsSpec(kubeconfigSecret string) kconfig.ProviderConfigSpec {
