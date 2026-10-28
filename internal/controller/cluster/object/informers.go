@@ -261,11 +261,20 @@ func (i *resourceInformers) cleanupResourceInformers(ctx context.Context) {
 			continue
 		}
 
-		ca.cancelFn()
-		i.log.Info("Stopped resource watch", "providerConfig", gc.providerConfig, "gvk", gc.gvk)
 		i.lock.Lock()
+		current, ok := i.resourceCaches[gc]
+		if !ok || current.cache != ca.cache {
+			// WatchResources replaced the informer, or another run removed
+			// it, since the map was copied. The replacement is considered on
+			// the next run.
+			i.lock.Unlock()
+			continue
+		}
 		delete(i.resourceCaches, gc)
 		i.lock.Unlock()
+
+		ca.cancelFn()
+		i.log.Info("Stopped resource watch", "providerConfig", gc.providerConfig, "gvk", gc.gvk)
 	}
 }
 

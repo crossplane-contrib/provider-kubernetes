@@ -17,6 +17,7 @@ limitations under the License.
 package object
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -29,9 +30,12 @@ import (
 	clientfeaturestesting "k8s.io/client-go/features/testing"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	runtimeevent "sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
+
+	"github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
 )
 
 // watchedAPIServer is the smallest API server a ConfigMap informer runs
@@ -205,6 +209,94 @@ func TestWatchResourcesRestartsOnCredentialsChange(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.want.credentialsKey, i.resourceCaches[key].credentialsKey); diff != "" {
 				t.Errorf("\n%s\nWatchResources(...): -want credentials key, +got credentials key:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
+// objectsCacheFunc is the Object cache the garbage collector lists through,
+// with everything but List left to the embedded nil interface.
+type objectsCacheFunc struct {
+	cache.Cache
+	list func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error
+}
+
+func (c *objectsCacheFunc) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	return c.list(ctx, list, opts...)
+}
+
+func TestCleanupResourceInformers(t *testing.T) {
+	key := gvkWithConfig{providerConfig: "pc", gvk: schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}}
+
+	type args struct {
+		// referenced is whether an Object still references the kind.
+		referenced bool
+		// swap replaces the informer while the collector lists the Objects,
+		// as WatchResources does when the credentials change.
+		swap bool
+	}
+	type want struct {
+		// cancelledOriginal and cancelledReplacement tell which informers
+		// the collector stopped: the one it copied and its replacement.
+		cancelledOriginal    bool
+		cancelledReplacement bool
+		// kept is the informer the map holds afterwards, if any.
+		kept string
+	}
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"UnreferencedInformerIsStopped": {
+			reason: "An informer no Object references any more must be stopped and forgotten.",
+			args:   args{referenced: false},
+			want:   want{cancelledOriginal: true, kept: ""},
+		},
+		"ReferencedInformerIsKept": {
+			reason: "An informer an Object still references must keep running.",
+			args:   args{referenced: true},
+			want:   want{kept: "original"},
+		},
+		"ReplacedInformerIsLeftToTheNextRun": {
+			reason: "An informer replaced while the collector was deciding must neither be stopped nor forgotten, or the replacement would run untracked.",
+			args:   args{referenced: false, swap: true},
+			want:   want{kept: "replacement"},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			original, replacement := &objectsCacheFunc{}, &objectsCacheFunc{}
+			got := want{}
+			i := &resourceInformers{
+				log: logging.NewNopLogger(),
+				resourceCaches: map[gvkWithConfig]resourceCache{
+					key: {cache: original, cancelFn: func() { got.cancelledOriginal = true }, credentialsKey: "key-a"},
+				},
+			}
+			i.objectsCache = &objectsCacheFunc{list: func(_ context.Context, list client.ObjectList, _ ...client.ListOption) error {
+				if tc.args.swap {
+					i.lock.Lock()
+					i.resourceCaches[key] = resourceCache{cache: replacement, cancelFn: func() { got.cancelledReplacement = true }, credentialsKey: "key-b"}
+					i.lock.Unlock()
+				}
+				if tc.args.referenced {
+					list.(*v1alpha1.ObjectList).Items = []v1alpha1.Object{{}}
+				}
+				return nil
+			}}
+
+			i.cleanupResourceInformers(context.Background())
+
+			switch i.resourceCaches[key].cache {
+			case original:
+				got.kept = "original"
+			case replacement:
+				got.kept = "replacement"
+			}
+			if diff := cmp.Diff(tc.want, got, cmp.AllowUnexported(want{})); diff != "" {
+				t.Errorf("\n%s\ncleanupResourceInformers(...): -want, +got:\n%s", tc.reason, diff)
 			}
 		})
 	}
