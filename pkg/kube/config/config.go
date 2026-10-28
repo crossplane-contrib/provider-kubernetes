@@ -49,12 +49,61 @@ type ProviderCredentials struct {
 	xpv2.CommonCredentialSelectors `json:",inline"`
 }
 
+// AWSAssumeRoleTag is a session tag to pass when assuming an AWS IAM role.
+type AWSAssumeRoleTag struct {
+	// Key is the session tag key.
+	// +kubebuilder:validation:MinLength=1
+	Key string `json:"key"`
+
+	// Value is the session tag value.
+	// +kubebuilder:validation:MinLength=1
+	Value string `json:"value"`
+}
+
+// AWSAssumeRoleOptions configures one hop in an ordered AWS IAM role chain.
+type AWSAssumeRoleOptions struct {
+	// RoleARN is the ARN of the IAM role to assume.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^arn:[a-z0-9-]+:iam::[0-9]{12}:role/.+$`
+	RoleARN string `json:"roleARN"`
+
+	// ExternalID is the external ID to pass when assuming the role.
+	// +optional
+	ExternalID *string `json:"externalID,omitempty"`
+
+	// Tags are session tags to pass when assuming the role. The source role
+	// must be permitted to call sts:TagSession when tags are configured.
+	// +optional
+	Tags []AWSAssumeRoleTag `json:"tags,omitempty"`
+
+	// TransitiveTagKeys identifies session tags to pass to subsequent roles in
+	// the chain.
+	// +optional
+	TransitiveTagKeys []string `json:"transitiveTagKeys,omitempty"`
+}
+
+// AWSIdentityConfig contains AWS-specific identity configuration.
+type AWSIdentityConfig struct {
+	// AssumeRoleChain is an ordered chain of AWS IAM roles to assume before
+	// authenticating to an EKS cluster. Each role uses the preceding role's
+	// temporary credentials. AWS limits role-chained sessions to one hour.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	AssumeRoleChain []AWSAssumeRoleOptions `json:"assumeRoleChain,omitempty"`
+}
+
 // Identity used to authenticate.
+// +kubebuilder:validation:XValidation:rule="!has(self.aws) || (self.type == 'AWSWebIdentityCredentials' && self.source == 'InjectedIdentity')",message="aws is only valid when type is AWSWebIdentityCredentials and source is InjectedIdentity"
 type Identity struct {
 	// Type of identity.
 	Type IdentityType `json:"type"`
 
 	ProviderCredentials `json:",inline"`
+
+	// AWS contains AWS-specific identity configuration. It is supported only
+	// when type is AWSWebIdentityCredentials and source is InjectedIdentity.
+	// +optional
+	AWS *AWSIdentityConfig `json:"aws,omitempty"`
 }
 
 // A ProviderConfigSpec defines the desired state of a ProviderConfig.
