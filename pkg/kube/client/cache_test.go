@@ -642,3 +642,57 @@ func TestKubeForProviderConfigRESTConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestKubeForProviderConfigCoreWeaveIdentity(t *testing.T) {
+	secrets := map[string]map[string][]byte{
+		"kubeconfig": {"kubeconfig": kubeconfigFor("https://cks.example.org")},
+		"coreweave":  {"credentials": []byte(`{"token":"CW-SECRET-abc"}`)},
+		"empty":      {"credentials": []byte(`{"token":""}`)},
+	}
+
+	type want struct {
+		bearerToken string
+		err         bool
+	}
+	cases := map[string]struct {
+		reason         string
+		identitySecret string
+		want           want
+	}{
+		"TokenSetAsBearerToken": {
+			reason:         "The CoreWeave API token should be used as the REST config's bearer token.",
+			identitySecret: "coreweave",
+			want:           want{bearerToken: "CW-SECRET-abc"},
+		},
+		"EmptyToken": {
+			reason:         "An empty CoreWeave API token should be rejected.",
+			identitySecret: "empty",
+			want:           want{err: true},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			pc := pcSpec("kubeconfig", "")
+			pc.Identity = &kconfig.Identity{
+				Type: kconfig.IdentityTypeCoreWeaveAPIToken,
+				ProviderCredentials: kconfig.ProviderCredentials{
+					Source:                    xpv2.CredentialsSourceSecret,
+					CommonCredentialSelectors: secretSelector(tc.identitySecret, "credentials"),
+				},
+			}
+			b := NewIdentityAwareBuilder(secretLocalClient(secrets))
+
+			_, rc, err := b.KubeForProviderConfig(context.Background(), pc)
+			if diff := cmp.Diff(tc.want.err, err != nil); diff != "" {
+				t.Fatalf("\n%s\nKubeForProviderConfig(...): -want error, +got error: %v", tc.reason, err)
+			}
+			if err != nil {
+				return
+			}
+			if diff := cmp.Diff(tc.want.bearerToken, rc.BearerToken); diff != "" {
+				t.Errorf("\n%s\nKubeForProviderConfig(...): -want bearer token, +got:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
