@@ -21,12 +21,14 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
@@ -36,15 +38,51 @@ import (
 )
 
 func TestObserveReferenceOnly(t *testing.T) {
+	endpointSlice := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "discovery.k8s.io/v1",
+		"kind":       "EndpointSlice",
+		"metadata": map[string]interface{}{
+			"name": "backend-abc", "namespace": "workload",
+			"labels": map[string]interface{}{"kubernetes.io/service-name": "backend"},
+		},
+		"addressType": "IPv4",
+		"endpoints": []interface{}{map[string]interface{}{
+			"addresses":  []interface{}{"192.0.2.10"},
+			"conditions": map[string]interface{}{"ready": true},
+		}},
+		"ports": []interface{}{map[string]interface{}{"name": "http", "protocol": "TCP", "port": int64(8080)}},
+	}}
 	for _, tc := range []struct {
 		name        string
 		manifest    string
 		policies    xpv2.ManagementPolicies
+		live        *unstructured.Unstructured
+		labels      map[string]string
+		annotations map[string]string
+		references  []objv1alpha1.Reference
 		wantDesired bool
 	}{
 		{name: "Identity", manifest: `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"live"}}`},
 		{name: "Namespace", manifest: `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"live","namespace":"default"}}`},
 		{name: "DefaultName", manifest: `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"namespace":"default"}}`},
+		{
+			name:     "SelectedEndpointSlice",
+			manifest: `{"apiVersion":"discovery.k8s.io/v1","kind":"EndpointSlice","metadata":{"name":"backend-abc","namespace":"workload"}}`,
+			live:     endpointSlice,
+		},
+		{
+			name:        "EndpointSliceCollectionMetadata",
+			manifest:    `{"apiVersion":"discovery.k8s.io/v1","kind":"EndpointSlice","metadata":{"name":"backend-abc","namespace":"workload"}}`,
+			live:        endpointSlice,
+			labels:      map[string]string{"kubernetes.crossplane.io/owned-by-collection": "backend-slices", "test.example/team": "networking"},
+			annotations: map[string]string{"test.example/purpose": "endpoint-discovery"},
+		},
+		{
+			name:        "ReferenceAddsDesiredData",
+			manifest:    `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"live"}}`,
+			references:  []objv1alpha1.Reference{labelReference()},
+			wantDesired: true,
+		},
 		{name: "DesiredData", manifest: `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"live"},"data":{"key":"desired"}}`, wantDesired: true},
 		{name: "DesiredLabel", manifest: `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"live","labels":{"app":"desired"}}}`, wantDesired: true},
 		{name: "DesiredAnnotation", manifest: `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"live","annotations":{"app":"desired"}}}`, wantDesired: true},
@@ -56,26 +94,56 @@ func TestObserveReferenceOnly(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			obj := kubernetesObject(func(o *objv1alpha1.Object) {
+				o.SetName("live")
 				o.Spec.ForProvider.Manifest.Raw = []byte(tc.manifest)
+				o.Spec.References = tc.references
+				o.SetLabels(tc.labels)
+				o.SetAnnotations(tc.annotations)
 				o.Spec.ManagementPolicies = tc.policies
 				if tc.policies == nil {
 					o.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
 				}
 			})
-			live := &unstructured.Unstructured{Object: map[string]interface{}{
-				"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]interface{}{"name": "live"}, "data": map[string]interface{}{"key": "observed"},
-			}}
+			live := tc.live
+			if live == nil {
+				live = &unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]interface{}{"name": "live"}, "data": map[string]interface{}{"key": "observed"},
+				}}
+			}
+			kube := &test.MockClient{
+				MockGet: func(ctx context.Context, key client.ObjectKey, o client.Object) error {
+					switch key.Name {
+					case testReferenceObjectName:
+						*o.(*unstructured.Unstructured) = *referenceObject()
+					case live.GetName():
+						*o.(*unstructured.Unstructured) = *live.DeepCopy()
+					default:
+						return kerrors.NewNotFound(schema.GroupResource{}, key.Name)
+					}
+					return nil
+				},
+			}
 			desiredCalled := false
 			denied := kerrors.NewForbidden(schema.GroupResource{Resource: "configmaps"}, "live", nil)
 			e := &external{
-				logger: logging.NewNopLogger(),
-				client: resource.ClientApplicator{Client: &test.MockClient{MockGet: test.NewMockGetFn(nil, func(o client.Object) error { *o.(*unstructured.Unstructured) = *live.DeepCopy(); return nil })}},
+				logger:      logging.NewNopLogger(),
+				client:      resource.ClientApplicator{Client: kube},
+				localClient: kube,
 				syncer: &fake.ResourceSyncer{
 					GetObservedStateFn: func(context.Context, *objv1alpha1.Object, *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 						return live, nil
 					},
-					GetDesiredStateFn: func(context.Context, *objv1alpha1.Object, *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+					GetDesiredStateFn: func(ctx context.Context, o *objv1alpha1.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 						desiredCalled = true
+						if len(tc.references) > 0 {
+							app, _, err := unstructured.NestedString(manifest.Object, "data", "app")
+							if err != nil {
+								t.Fatal(err)
+							}
+							if diff := cmp.Diff("foo", app); diff != "" {
+								t.Errorf("GetDesiredState(...): -want resolved reference, +got:\n%s", diff)
+							}
+						}
 						return nil, denied
 					},
 				},
@@ -93,15 +161,16 @@ func TestObserveReferenceOnly(t *testing.T) {
 			if err != nil {
 				t.Fatalf("identity-only observation with read-only credentials failed: %v", err)
 			}
-			if !observation.ResourceExists || !observation.ResourceUpToDate {
-				t.Fatalf("unexpected observation: %+v", observation)
+			want := managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true, ConnectionDetails: managed.ConnectionDetails{}}
+			if diff := cmp.Diff(want, observation); diff != "" {
+				t.Errorf("Observe(...): -want observation, +got:\n%s", diff)
 			}
 			observed := &unstructured.Unstructured{}
 			if err := json.Unmarshal(obj.Status.AtProvider.Manifest.Raw, observed); err != nil {
 				t.Fatal(err)
 			}
-			if observed.Object["data"].(map[string]interface{})["key"] != "observed" {
-				t.Fatal("live resource was not published to atProvider")
+			if diff := cmp.Diff(live, observed); diff != "" {
+				t.Errorf("Observe(...): -want observed manifest, +got:\n%s", diff)
 			}
 		})
 	}
