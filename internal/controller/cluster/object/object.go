@@ -453,6 +453,15 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (_ managed.
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetObservedState)
 	}
 
+	// Reference-only observers have no desired state to compare. In particular,
+	// they must work with read-only credentials: an SSA dry run requires PATCH.
+	// Keep the comparison for manifests with desired fields, including metadata,
+	// so import/adoption workflows can still calculate their desired state.
+	if !sets.New[xpv2.ManagementAction](obj.GetManagementPolicies()...).
+		HasAny(xpv2.ManagementActionUpdate, xpv2.ManagementActionCreate, xpv2.ManagementActionAll) && pcontroller.IsIdentityOnly(manifest) {
+		return c.handleObservation(ctx, obj, observedState, nil)
+	}
+
 	var desiredState *unstructured.Unstructured
 	if desiredState, err = c.syncer.GetDesiredState(ctx, desired, manifest); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errGetDesiredState)

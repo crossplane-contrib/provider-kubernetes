@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -54,12 +55,27 @@ func TestReconciler(t *testing.T) {
 	pollIterval := 10 * time.Second
 	objectAPIVersion := "v1"
 	objectKind := "Foo"
+	endpointSlice := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "discovery.k8s.io/v1",
+		"kind":       "EndpointSlice",
+		"metadata": map[string]interface{}{
+			"name": "backend-abc", "namespace": "workload",
+			"labels": map[string]interface{}{"kubernetes.io/service-name": "backend"},
+		},
+		"addressType": "IPv4",
+		"endpoints": []interface{}{map[string]interface{}{
+			"addresses":  []interface{}{"192.0.2.10"},
+			"conditions": map[string]interface{}{"ready": true},
+		}},
+		"ports": []interface{}{map[string]interface{}{"name": "http", "protocol": "TCP", "port": int64(8080)}},
+	}}
 	type args struct {
 		client *test.MockClient
 	}
 	type want struct {
-		r   reconcile.Result
-		err error
+		r       reconcile.Result
+		err     error
+		patches *int
 	}
 	cases := map[string]struct {
 		reason string
@@ -197,6 +213,86 @@ func TestReconciler(t *testing.T) {
 				r: reconcile.Result{RequeueAfter: pollIterval},
 			},
 		},
+
+		"CreateObservedEndpointSliceReference": {
+			reason: "Label-selected EndpointSlices should create identity-only children without copying desired labels or endpoint data.",
+			args: args{client: &test.MockClient{
+				MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+					if _, ok := obj.(*apisv1alpha1.ClusterProviderConfig); ok {
+						return nil
+					}
+					if key != collectionName {
+						return fmt.Errorf("Expected %v, but got %v", collectionName, key)
+					}
+					c := obj.(*objcollectionv1alpha1.ObservedObjectCollection)
+					c.Name, c.Namespace = collectionName.Name, collectionName.Namespace
+					c.Spec = objcollectionv1alpha1.ObservedObjectCollectionSpec{
+						ProviderConfigReference: xpv2.ProviderConfigReference{Name: "readonly", Kind: "ClusterProviderConfig"},
+						ObserveObjects: objcollectionv1alpha1.ObserveObjectCriteria{
+							APIVersion: endpointSlice.GetAPIVersion(), Kind: endpointSlice.GetKind(), Namespace: endpointSlice.GetNamespace(),
+							Selector: metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/service-name": "backend"}},
+						},
+						Template: &objcollectionv1alpha1.ObservedObjectTemplate{Metadata: objcollectionv1alpha1.ObservedObjectTemplateMetadata{
+							Labels:      map[string]string{"test.example/team": "networking"},
+							Annotations: map[string]string{"test.example/purpose": "endpoint-discovery"},
+						}},
+					}
+					return nil
+				},
+				MockList: func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+					if _, ok := list.(*objectv1alpha1.ObjectList); ok {
+						return nil
+					}
+					options := (&client.ListOptions{}).ApplyOptions(opts)
+					if options.Namespace != "workload" || options.LabelSelector == nil || options.LabelSelector.String() != "kubernetes.io/service-name=backend" {
+						return fmt.Errorf("Unexpected EndpointSlice selector: %+v", options)
+					}
+					items := list.(*unstructured.UnstructuredList)
+					if items.GroupVersionKind() != endpointSlice.GroupVersionKind() {
+						return fmt.Errorf("Unexpected list GVK: %v", items.GroupVersionKind())
+					}
+					items.Items = []unstructured.Unstructured{*endpointSlice.DeepCopy()}
+					return nil
+				},
+				MockPatch: func(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					u := obj.(*unstructured.Unstructured)
+					manifest, found, err := unstructured.NestedMap(u.Object, "spec", "forProvider", "manifest")
+					if err != nil {
+						return err
+					}
+					if !found {
+						return fmt.Errorf("Manifest not found")
+					}
+					want := map[string]interface{}{
+						"apiVersion": "discovery.k8s.io/v1", "kind": "EndpointSlice",
+						"metadata": map[string]interface{}{"name": "backend-abc", "namespace": "workload"},
+					}
+					if diff := cmp.Diff(want, manifest); diff != "" {
+						return fmt.Errorf("Expected identity-only child manifest (-want,+got): %s", diff)
+					}
+					policies, _, err := unstructured.NestedStringSlice(u.Object, "spec", "managementPolicies")
+					if err != nil {
+						return err
+					}
+					if diff := cmp.Diff([]string{"Observe"}, policies); diff != "" {
+						return fmt.Errorf("Unexpected management policies: %s", diff)
+					}
+					if l := u.GetLabels()[membershipLabelKey]; l != collectionName.Name {
+						return fmt.Errorf("Expecting membership label %v but got %v", collectionName.Name, l)
+					}
+					if l := u.GetLabels()["test.example/team"]; l != "networking" {
+						return fmt.Errorf("Expecting template label test.example/team %q but got %q", "networking", l)
+					}
+					if a := u.GetAnnotations()["test.example/purpose"]; a != "endpoint-discovery" {
+						return fmt.Errorf("Expecting template annotation test.example/purpose %q but got %q", "endpoint-discovery", a)
+					}
+					return nil
+				},
+				MockStatusUpdate: test.NewMockSubResourceUpdateFn(nil),
+			}},
+			want: want{r: reconcile.Result{RequeueAfter: pollIterval}, patches: ptr.To(1)},
+		},
+
 		"RemoveNotMatchedObservedObjects": {
 			reason: "Remove observe-only objects that either not exist or are not matched anymore",
 			args: args{
@@ -426,6 +522,14 @@ func TestReconciler(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			patches := 0
+			if tc.want.patches != nil {
+				patch := tc.args.client.MockPatch
+				tc.args.client.MockPatch = func(ctx context.Context, obj client.Object, p client.Patch, opts ...client.PatchOption) error {
+					patches++
+					return patch(ctx, obj, p, opts...)
+				}
+			}
 			r := &Reconciler{
 				client: tc.args.client,
 				log:    logging.NewNopLogger(),
@@ -440,6 +544,11 @@ func TestReconciler(t *testing.T) {
 				},
 			}
 			got, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: collectionName})
+			if tc.want.patches != nil {
+				if diff := cmp.Diff(*tc.want.patches, patches); diff != "" {
+					t.Errorf("\n%s\nr.Reconcile(...): -want patches, +got patches:\n%s", tc.reason, diff)
+				}
+			}
 			if !errors.Is(err, tc.want.err) {
 				t.Errorf("\n%s\nr.Reconcile(...): want error: %v, got error: %v", tc.reason, tc.want.err, err)
 			}
