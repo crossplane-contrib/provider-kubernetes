@@ -423,6 +423,102 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"ObserveOnlyResourceDeletedMarksUnavailable": {
+			reason: "An observe-only Object that was Ready must stop being Ready when the resource it observes is deleted, as nothing will create it again.",
+			args: args{
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
+					obj.Status.SetConditions(xpv2.Available())
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{}, "")),
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: false},
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
+					obj.Status.SetConditions(xpv2.Unavailable())
+				}),
+			},
+		},
+		"ObserveAndUpdateResourceDeletedMarksUnavailable": {
+			reason: "Without the Create policy nothing recreates the resource, so the Object is not Ready even if it may update the resource.",
+			args: args{
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve, xpv2.ManagementActionUpdate}
+					obj.Status.SetConditions(xpv2.Available())
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{}, "")),
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: false},
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve, xpv2.ManagementActionUpdate}
+					obj.Status.SetConditions(xpv2.Unavailable())
+				}),
+			},
+		},
+		"ObserveAndCreateResourceDeletedKeepsConditions": {
+			reason: "An Object that may create the resource recreates it, and the managed reconciler reports the Creating condition, so Observe leaves the conditions alone.",
+			args: args{
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve, xpv2.ManagementActionCreate}
+					obj.Status.SetConditions(xpv2.Available())
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{}, "")),
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: false},
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve, xpv2.ManagementActionCreate}
+					obj.Status.SetConditions(xpv2.Available())
+				}),
+			},
+		},
+		"ObserveOnlyResourceReappearsMarksAvailable": {
+			reason: "An observe-only Object that was marked unavailable becomes Ready again once the resource it observes exists.",
+			args: args{
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
+					obj.Status.SetConditions(xpv2.Unavailable())
+				}),
+				client: resource.ClientApplicator{
+					Client: &test.MockClient{
+						MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+							*obj.(*unstructured.Unstructured) = *externalResource()
+							return nil
+						}),
+					},
+				},
+				syncer: &fake.ResourceSyncer{
+					GetObservedStateFn: func(ctx context.Context, obj *objv1alpha1.Object, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return current, nil
+					},
+					GetDesiredStateFn: func(ctx context.Context, obj *objv1alpha1.Object, manifest *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+						return manifest, nil
+					},
+				},
+			},
+			want: want{
+				out: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true, ConnectionDetails: managed.ConnectionDetails{}},
+				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
+					obj.Spec.ManagementPolicies = xpv2.ManagementPolicies{xpv2.ManagementActionObserve}
+					obj.Status.AtProvider.Manifest.Raw = externalResourceRaw
+					obj.Status.SetConditions(xpv2.Available())
+				}),
+			},
+		},
 		"NotAValidManifest": {
 			args: args{
 				mg: kubernetesObject(func(obj *objv1alpha1.Object) {
