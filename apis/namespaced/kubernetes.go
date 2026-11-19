@@ -22,6 +22,7 @@ import (
 
 	objectv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/object/v1alpha1"
 	observedobjectcollectionv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/observedobjectcollection/v1alpha1"
+	serviceaccounttokenv1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/serviceaccounttoken/v1alpha1"
 	templatev1alpha1 "github.com/crossplane-contrib/provider-kubernetes/apis/namespaced/v1alpha1"
 )
 
@@ -31,6 +32,7 @@ func init() {
 		templatev1alpha1.SchemeBuilder.AddToScheme,
 		objectv1alpha1.SchemeBuilder.AddToScheme,
 		observedobjectcollectionv1alpha1.SchemeBuilder.AddToScheme,
+		serviceaccounttokenv1alpha1.SchemeBuilder.AddToScheme,
 	)
 }
 

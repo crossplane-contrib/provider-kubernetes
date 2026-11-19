@@ -25,6 +25,7 @@ import (
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/namespaced/config"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/namespaced/object"
 	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/namespaced/observedobjectcollection"
+	"github.com/crossplane-contrib/provider-kubernetes/internal/controller/namespaced/serviceaccounttoken"
 )
 
 // Setup creates all Kubernetes controllers with the supplied logger and adds them to
@@ -34,6 +35,9 @@ func Setup(mgr ctrl.Manager, o controller.Options, po pcontroller.Options) error
 		return err
 	}
 	if err := object.Setup(mgr, o, po.ClientBuilder, po.SanitizeSecrets, po.RemoveManagedFields, po.PollJitterPercentage, po.LegacyCSAFieldManagers); err != nil {
+		return err
+	}
+	if err := serviceaccounttoken.Setup(mgr, o, po.ClientBuilder); err != nil {
 		return err
 	}
 	if err := observedobjectcollection.Setup(mgr, o, po.ClientBuilder, po.PollJitter); err != nil {
@@ -50,6 +54,9 @@ func SetupGated(mgr ctrl.Manager, o controller.Options, po pcontroller.Options) 
 		return err
 	}
 	if err := object.SetupGated(mgr, o, po.ClientBuilder, po.SanitizeSecrets, po.RemoveManagedFields, po.PollJitterPercentage, po.LegacyCSAFieldManagers); err != nil {
+		return err
+	}
+	if err := serviceaccounttoken.SetupGated(mgr, o, po.ClientBuilder); err != nil {
 		return err
 	}
 	if err := observedobjectcollection.SetupGated(mgr, o, po.ClientBuilder, po.PollJitter); err != nil {
