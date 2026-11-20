@@ -205,7 +205,67 @@ func newParserFromOpenAPIGroupVersion(ctx context.Context, oapiGV OpenAPIGroupVe
 	// use the forked version of the new GVK parser
 	// accepting a map of components to OpenAPI schemas
 	// instead of proto.Models
-	return NewGVKParser(specs, false)
+	return newGVKParser(specs, false, pathReferencedSchemas(&oapi))
+}
+
+// pathReferencedSchemas returns the names of the component schemas that
+// the request and response bodies of the OpenAPI document's paths reference
+// directly. These are the schemas the API server actually serves for its
+// resources, and the only ones used to resolve a GroupVersionKind that more
+// than one schema declares.
+func pathReferencedSchemas(oapi *spec3.OpenAPI) map[string]bool {
+	names := map[string]bool{}
+	addContent := func(content map[string]*spec3.MediaType) {
+		for _, mt := range content {
+			if mt == nil || mt.Schema == nil {
+				continue
+			}
+			if name, ok := localSchemaName(&mt.Schema.Ref); ok {
+				names[name] = true
+			}
+		}
+	}
+	if oapi.Paths == nil {
+		return names
+	}
+	for _, p := range oapi.Paths.Paths {
+		if p == nil {
+			continue
+		}
+		for _, op := range []*spec3.Operation{p.Get, p.Put, p.Post, p.Delete, p.Patch} {
+			if op == nil {
+				continue
+			}
+			if op.RequestBody != nil {
+				addContent(op.RequestBody.Content)
+			}
+			if op.Responses == nil {
+				continue
+			}
+			if op.Responses.Default != nil {
+				addContent(op.Responses.Default.Content)
+			}
+			for _, r := range op.Responses.StatusCodeResponses {
+				if r != nil {
+					addContent(r.Content)
+				}
+			}
+		}
+	}
+	return names
+}
+
+// localSchemaName returns the component name of a
+// "#/components/schemas/{componentName}" reference.
+func localSchemaName(ref *spec.Ref) (string, bool) {
+	if ref == nil || ref.String() == "" || !ref.HasFragmentOnly || ref.GetPointer() == nil {
+		return "", false
+	}
+	tokens := ref.GetPointer().DecodedTokens()
+	if len(tokens) != 3 || tokens[0] != "components" || tokens[1] != "schemas" {
+		return "", false
+	}
+	return tokens[2], true
 }
 
 func (e *cachingUnstructuredExtractor) extractUnstructured(object *unstructured.Unstructured, fieldManager string, subresource string) (*unstructured.Unstructured, error) {
@@ -215,7 +275,10 @@ func (e *cachingUnstructuredExtractor) extractUnstructured(object *unstructured.
 		return nil, err
 	}
 
-	objectType := parser.Type(gvk)
+	objectType, err := parser.TypeOrError(gvk)
+	if err != nil {
+		return nil, err
+	}
 	result := &unstructured.Unstructured{}
 
 	err = managedfields.ExtractInto(object, *objectType, fieldManager, result, subresource) //nolint:forbidigo
