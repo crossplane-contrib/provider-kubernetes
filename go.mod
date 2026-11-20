@@ -11,16 +11,16 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.25
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.3
 	github.com/aws/smithy-go v1.27.2
-	github.com/crossplane/crossplane-runtime/v2 v2.5.0-rc.0.0.20260922181840-9d02af3667a0
+	github.com/crossplane/crossplane-runtime/v2 v2.5.0-rc.1
 	github.com/crossplane/crossplane-tools v0.0.0-20260719180100-659f1dc036c5
-	github.com/crossplane/crossplane/apis/v2 v2.4.3
+	github.com/crossplane/crossplane/apis/v2 v2.5.0-rc.0.0.20261029180807-76a72bee8a19
 	github.com/go-logr/logr v1.4.4
 	github.com/google/cel-go v0.30.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/nebius/gosdk v0.2.28
-	github.com/prometheus/client_golang v1.24.1
-	github.com/prometheus/client_model v0.6.2
+	github.com/prometheus/client_golang v1.25.0
+	github.com/prometheus/client_model v0.6.3
 	github.com/spf13/pflag v1.0.10
 	github.com/upbound/up-sdk-go v1.13.0
 	go.uber.org/zap v1.28.0
@@ -113,8 +113,8 @@ require (
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/prometheus/common v0.70.1 // indirect
-	github.com/prometheus/procfs v0.21.1 // indirect
+	github.com/prometheus/common v0.72.0 // indirect
+	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
