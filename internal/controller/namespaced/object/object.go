@@ -432,6 +432,14 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (_ managed.
 	}, current)
 
 	if kerrors.IsNotFound(err) {
+		if !sets.New[xpv2.ManagementAction](obj.GetManagementPolicies()...).
+			HasAny(xpv2.ManagementActionCreate, xpv2.ManagementActionAll) {
+			// Nothing will create the resource, so it is not available. Without
+			// this a previously Ready Object stays Ready after the resource it
+			// observes is deleted.
+			obj.Status.SetConditions(xpv2.Unavailable())
+		}
+
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
