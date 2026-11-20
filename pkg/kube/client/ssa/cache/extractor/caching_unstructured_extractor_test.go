@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/kube-openapi/pkg/handler3"
+	"k8s.io/kube-openapi/pkg/validation/spec"
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 
@@ -88,6 +89,7 @@ func mockServeOAPISchema(path string, w http.ResponseWriter) {
 		"/openapi/v3/apis/pkg.crossplane.io/v1beta1":  "pkg.crossplane.io.v1beta1.json",
 		"/openapi/v3/apis/pkg.crossplane.io/v1":       "pkg.crossplane.io.v1.json",
 		"/openapi/v3/apis/nop.example.org/v1alpha1":   "nop.example.org.v1alpha1.json",
+		"/openapi/v3/apis/security.openshift.io/v1":   "security.openshift.io.v1.json",
 	}
 	respFile, ok := responses[path]
 	if !ok {
@@ -117,6 +119,7 @@ var discoveryDataInitial = map[string]string{
 	"apis/pkg.crossplane.io/v1beta1":  "111",
 	"apis/pkg.crossplane.io/v1":       "",
 	"apis/nop.example.org/v1alpha1":   "111",
+	"apis/security.openshift.io/v1":   "111",
 }
 
 var discoveryDataChangedRemoval = map[string]string{
@@ -441,6 +444,21 @@ func TestNewParser(t *testing.T) {
 				},
 			},
 		},
+		{
+			// OpenShift declares SecurityContextConstraints twice in this
+			// group version, see TestNewParserDuplicateGVK.
+			name: "security.openshift.io/v1",
+			args: newParserTestArgs{
+				gvpath: "apis/security.openshift.io/v1",
+			},
+			want: newParserTestWant{
+				gvks: []schema.GroupVersionKind{
+					{Group: "security.openshift.io", Version: "v1", Kind: "SecurityContextConstraints"},
+					{Group: "security.openshift.io", Version: "v1", Kind: "SecurityContextConstraintsList"},
+					{Group: "security.openshift.io", Version: "v1", Kind: "RangeAllocation"},
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -482,6 +500,209 @@ func TestNewParser(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func gvkSchema(gvk schema.GroupVersionKind) *spec.Schema {
+	s := &spec.Schema{}
+	s.Type = spec.StringOrArray{"object"}
+	s.AddExtension(groupVersionKindExtensionKey, []interface{}{
+		map[string]interface{}{"group": gvk.Group, "version": gvk.Version, "kind": gvk.Kind},
+	})
+	return s
+}
+
+func TestNewParserDuplicateGVK(t *testing.T) {
+	widget := schema.GroupVersionKind{Group: "example.org", Version: "v1", Kind: "Widget"}
+	gadget := schema.GroupVersionKind{Group: "example.org", Version: "v1", Kind: "Gadget"}
+	specs := map[string]*spec.Schema{
+		"org.example.v1.Widget":        gvkSchema(widget),
+		"com.example.legacy.v1.Widget": gvkSchema(widget),
+		"org.example.v1.Gadget":        gvkSchema(gadget),
+	}
+	errAmbiguous := "ambiguous schemas for example.org/v1, Kind=Widget: com.example.legacy.v1.Widget, org.example.v1.Widget"
+
+	tests := map[string]struct {
+		pathReferenced map[string]bool
+		wantSchema     string
+		wantErr        string
+	}{
+		"OneReferencedCandidateIsUsed": {
+			pathReferenced: map[string]bool{"org.example.v1.Widget": true},
+			wantSchema:     "org.example.v1.Widget",
+		},
+		"NoReferencedCandidateIsAmbiguous": {
+			wantErr: errAmbiguous,
+		},
+		"TwoReferencedCandidatesAreAmbiguous": {
+			pathReferenced: map[string]bool{"org.example.v1.Widget": true, "com.example.legacy.v1.Widget": true},
+			wantErr:        errAmbiguous,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			parser, err := newGVKParser(specs, false, tc.pathReferenced)
+			if err != nil {
+				t.Fatalf("unexpected error when creating parser: %v", err)
+			}
+
+			typ, err := parser.TypeOrError(widget)
+			gotErr := ""
+			if err != nil {
+				gotErr = err.Error()
+			}
+			if diff := cmp.Diff(tc.wantErr, gotErr); diff != "" {
+				t.Fatalf("TypeOrError(%s) error: -want +got\n%s", widget, diff)
+			}
+			if diff := cmp.Diff(tc.wantSchema, parser.gvks[widget]); diff != "" {
+				t.Fatalf("schema for %s: -want +got\n%s", widget, diff)
+			}
+			if (typ == nil) != (tc.wantSchema == "") {
+				t.Fatalf("TypeOrError(%s) type: got %v, want schema %q", widget, typ, tc.wantSchema)
+			}
+			if parser.Type(widget) == nil && tc.wantSchema != "" {
+				t.Fatalf("Type(%s) returned nil, want schema %q", widget, tc.wantSchema)
+			}
+
+			if _, err := parser.TypeOrError(gadget); err != nil {
+				t.Fatalf("TypeOrError(%s) for a non-duplicated kind: unexpected error: %v", gadget, err)
+			}
+		})
+	}
+
+	t.Run("UnknownKind", func(t *testing.T) {
+		parser, err := newGVKParser(specs, false, nil)
+		if err != nil {
+			t.Fatalf("unexpected error when creating parser: %v", err)
+		}
+		unknown := schema.GroupVersionKind{Group: "example.org", Version: "v1", Kind: "Unknown"}
+		_, err = parser.TypeOrError(unknown)
+		if diff := cmp.Diff("no schema for example.org/v1, Kind=Unknown", fmt.Sprint(err)); diff != "" {
+			t.Fatalf("-want +got\n%s", diff)
+		}
+	})
+}
+
+func TestExtractAmbiguousGVK(t *testing.T) {
+	mockK8sAPIServer, err := newMockAPIServer()
+	if err != nil {
+		t.Fatalf("cannot initialize mock API server: %v", err)
+	}
+	rc := &rest.Config{
+		Host: mockK8sAPIServer.server.URL,
+		ContentConfig: rest.ContentConfig{
+			NegotiatedSerializer: scheme.Codecs,
+			GroupVersion:         &appsv1.SchemeGroupVersion,
+		},
+	}
+	dc, err := discovery.NewDiscoveryClientForConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	widget := nopExampleV1alpha1GroupVersion.WithKind("Widget")
+	parser, err := newGVKParser(map[string]*spec.Schema{
+		"a.Widget": gvkSchema(widget),
+		"b.Widget": gvkSchema(widget),
+	}, false, nil)
+	if err != nil {
+		t.Fatalf("unexpected error when creating parser: %v", err)
+	}
+	// Seed the cache with the discovery ETag so the ambiguous parser is used.
+	cache := &GVKParserCache{
+		store: map[schema.GroupVersion]*gvkParserCacheEntry{
+			nopExampleV1alpha1GroupVersion: {parser: parser, etag: discoveryDataInitial["apis/nop.example.org/v1alpha1"]},
+		},
+	}
+	ext, err := NewCachingUnstructuredExtractor(context.TODO(), dc, cache)
+	if err != nil {
+		t.Fatalf("cannot initialize caching unstructured extractor: %v", err)
+	}
+
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(widget)
+	u.SetName("test")
+	_, err = ext.Extract(u, "provider-kubernetes/test")
+	want := "ambiguous schemas for nop.example.org/v1alpha1, Kind=Widget: a.Widget, b.Widget"
+	if diff := cmp.Diff(want, fmt.Sprint(err)); diff != "" {
+		t.Fatalf("-want +got\n%s", diff)
+	}
+}
+
+func TestExtractOpenShiftSecurityContextConstraints(t *testing.T) {
+	mockK8sAPIServer, err := newMockAPIServer()
+	if err != nil {
+		t.Fatalf("cannot initialize mock API server: %v", err)
+	}
+	rc := &rest.Config{
+		Host: mockK8sAPIServer.server.URL,
+		ContentConfig: rest.ContentConfig{
+			NegotiatedSerializer: scheme.Codecs,
+			GroupVersion:         &appsv1.SchemeGroupVersion,
+		},
+	}
+	dc, err := discovery.NewDiscoveryClientForConfig(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := &GVKParserCache{
+		store: map[schema.GroupVersion]*gvkParserCacheEntry{},
+	}
+	ext, err := NewCachingUnstructuredExtractor(context.TODO(), dc, cache)
+	if err != nil {
+		t.Fatalf("cannot initialize caching unstructured extractor: %v", err)
+	}
+
+	sccGVK := schema.GroupVersionKind{Group: "security.openshift.io", Version: "v1", Kind: "SecurityContextConstraints"}
+	parser, err := ext.(*cachingUnstructuredExtractor).getParserForGV(context.TODO(), sccGVK.GroupVersion())
+	if err != nil {
+		t.Fatalf("unexpected error when getting parser: %v", err)
+	}
+	if diff := cmp.Diff("io.openshift.security.v1.SecurityContextConstraints", parser.gvks[sccGVK]); diff != "" {
+		t.Fatalf("schema for %s: -want +got\n%s", sccGVK, diff)
+	}
+
+	// userNamespaceLevel only exists in the io.openshift schema that the
+	// API paths reference, not in the legacy com.github.openshift one.
+	u := &unstructured.Unstructured{}
+	if err := u.UnmarshalJSON([]byte(`{
+		"apiVersion": "security.openshift.io/v1",
+		"kind": "SecurityContextConstraints",
+		"metadata": {
+			"name": "test-scc",
+			"managedFields": [{
+				"apiVersion": "security.openshift.io/v1",
+				"fieldsType": "FieldsV1",
+				"fieldsV1": {"f:allowHostIPC": {}, "f:userNamespaceLevel": {}},
+				"manager": "provider-kubernetes/test",
+				"operation": "Apply"
+			}]
+		},
+		"allowHostIPC": false,
+		"allowHostDirVolumePlugin": false,
+		"allowHostNetwork": false,
+		"allowHostPID": false,
+		"allowHostPorts": false,
+		"allowPrivilegedContainer": false,
+		"readOnlyRootFilesystem": false,
+		"userNamespaceLevel": "AllowHostLevel",
+		"volumes": ["secret"]
+	}`)); err != nil {
+		t.Fatal(err)
+	}
+	extracted, err := ext.Extract(u, "provider-kubernetes/test")
+	if err != nil {
+		t.Fatalf("unexpected error when extracting: %v", err)
+	}
+	want := map[string]interface{}{
+		"apiVersion":         "security.openshift.io/v1",
+		"kind":               "SecurityContextConstraints",
+		"metadata":           map[string]interface{}{"name": "test-scc"},
+		"allowHostIPC":       false,
+		"userNamespaceLevel": "AllowHostLevel",
+	}
+	if diff := cmp.Diff(want, extracted.Object); diff != "" {
+		t.Fatalf("-want +got\n%s", diff)
 	}
 }
 
