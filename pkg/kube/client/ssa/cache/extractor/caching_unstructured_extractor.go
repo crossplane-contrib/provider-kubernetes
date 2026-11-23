@@ -215,16 +215,6 @@ func newParserFromOpenAPIGroupVersion(ctx context.Context, oapiGV OpenAPIGroupVe
 // than one schema declares.
 func pathReferencedSchemas(oapi *spec3.OpenAPI) map[string]bool {
 	names := map[string]bool{}
-	addContent := func(content map[string]*spec3.MediaType) {
-		for _, mt := range content {
-			if mt == nil || mt.Schema == nil {
-				continue
-			}
-			if name, ok := localSchemaName(&mt.Schema.Ref); ok {
-				names[name] = true
-			}
-		}
-	}
 	if oapi.Paths == nil {
 		return names
 	}
@@ -233,26 +223,49 @@ func pathReferencedSchemas(oapi *spec3.OpenAPI) map[string]bool {
 			continue
 		}
 		for _, op := range []*spec3.Operation{p.Get, p.Put, p.Post, p.Delete, p.Patch} {
-			if op == nil {
-				continue
-			}
-			if op.RequestBody != nil {
-				addContent(op.RequestBody.Content)
-			}
-			if op.Responses == nil {
-				continue
-			}
-			if op.Responses.Default != nil {
-				addContent(op.Responses.Default.Content)
-			}
-			for _, r := range op.Responses.StatusCodeResponses {
-				if r != nil {
-					addContent(r.Content)
-				}
+			for _, content := range operationContents(op) {
+				addReferencedSchemas(names, content)
 			}
 		}
 	}
 	return names
+}
+
+// operationContents returns the request body and response contents of the
+// operation.
+func operationContents(op *spec3.Operation) []map[string]*spec3.MediaType {
+	if op == nil {
+		return nil
+	}
+	var contents []map[string]*spec3.MediaType
+	if op.RequestBody != nil {
+		contents = append(contents, op.RequestBody.Content)
+	}
+	if op.Responses == nil {
+		return contents
+	}
+	if op.Responses.Default != nil {
+		contents = append(contents, op.Responses.Default.Content)
+	}
+	for _, r := range op.Responses.StatusCodeResponses {
+		if r != nil {
+			contents = append(contents, r.Content)
+		}
+	}
+	return contents
+}
+
+// addReferencedSchemas adds the names of the component schemas that the
+// media types reference directly.
+func addReferencedSchemas(names map[string]bool, content map[string]*spec3.MediaType) {
+	for _, mt := range content {
+		if mt == nil || mt.Schema == nil {
+			continue
+		}
+		if name, ok := localSchemaName(&mt.Schema.Ref); ok {
+			names[name] = true
+		}
+	}
 }
 
 // localSchemaName returns the component name of a

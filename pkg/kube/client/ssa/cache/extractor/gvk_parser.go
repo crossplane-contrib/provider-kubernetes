@@ -95,17 +95,17 @@ func NewGVKParser(componentNameToSchema map[string]*spec.Schema, preserveUnknown
 	return newGVKParser(componentNameToSchema, preserveUnknownFields, nil)
 }
 
-// newGVKParser is NewGVKParser with the set of schema names that the OpenAPI
-// document's paths reference. A GroupVersionKind that more than one schema
-// declares resolves to the one candidate in that set. If no candidate, or
-// more than one, is in the set, the GroupVersionKind is ambiguous.
+// newGVKParser is NewGVKParser, but resolves a GroupVersionKind that several
+// schemas declare to the single one among them in pathReferenced, the schemas
+// the document's paths reference. Otherwise the GroupVersionKind is ambiguous.
+// OpenShift, for example, declares SecurityContextConstraints in both
+// io.openshift.security.v1 (referenced) and
+// com.github.openshift.api.security.v1.
 //
-// OpenShift, for example, publishes security.openshift.io/v1
-// SecurityContextConstraints under both
-// io.openshift.security.v1.SecurityContextConstraints, which its paths
-// reference, and the unreferenced
-// com.github.openshift.api.security.v1.SecurityContextConstraints. The two
-// schemas differ.
+// note: the upstream managedfields.NewGVKParserFromOpenAPIV3
+// (kubernetes/kubernetes#142048) keeps an arbitrary schema for a duplicated
+// GroupVersionKind, which breaks SecurityContextConstraints. Keep this
+// resolution when switching to it.
 func newGVKParser(componentNameToSchema map[string]*spec.Schema, preserveUnknownFields bool, pathReferenced map[string]bool) (*GvkParser, error) {
 	typeSchema, err := schemaconv.ToSchemaFromOpenAPI(componentNameToSchema, preserveUnknownFields)
 	if err != nil {
