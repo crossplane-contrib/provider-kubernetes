@@ -37,6 +37,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/aws"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/azure"
+	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/coreweave"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/gke"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/nebius"
 	"github.com/crossplane-contrib/provider-kubernetes/pkg/kube/client/token"
@@ -56,6 +57,8 @@ const (
 	errInjectAWSCredentials      = "failed to wrap REST client with AWS credentials"
 	errExtractNebiusCredentials  = "failed to extract Nebius service account credentials"
 	errInjectNebiusCredentials   = "failed to wrap REST client with Nebius service account credentials"
+	errExtractCoreWeaveToken     = "failed to extract CoreWeave API token"
+	errInjectCoreWeaveToken      = "failed to wrap REST client with CoreWeave API token"
 	errParseProxyURL             = "cannot parse proxy URL from kubeconfig"
 )
 
@@ -409,6 +412,21 @@ func (b *IdentityAwareBuilder) identityInjector(ctx context.Context, id *kconfig
 			digestWrite(digest, creds)
 			return func(ctx context.Context, rc *rest.Config) error {
 				return errors.Wrap(nebius.WrapRESTConfig(ctx, rc, creds, b.nebiusStore), errInjectNebiusCredentials)
+			}, nil
+		}
+	case kconfig.IdentityTypeCoreWeaveAPIToken:
+		switch id.Source { //nolint:exhaustive
+		case xpv2.CredentialsSourceInjectedIdentity:
+			return nil, errors.Errorf("%s is not supported as identity source for identity type %s",
+				xpv2.CredentialsSourceInjectedIdentity, kconfig.IdentityTypeCoreWeaveAPIToken)
+		default:
+			creds, err := resource.CommonCredentialExtractor(ctx, id.Source, b.local, id.CommonCredentialSelectors)
+			if err != nil {
+				return nil, errors.Wrap(err, errExtractCoreWeaveToken)
+			}
+			digestWrite(digest, creds)
+			return func(_ context.Context, rc *rest.Config) error {
+				return errors.Wrap(coreweave.WrapRESTConfig(rc, creds), errInjectCoreWeaveToken)
 			}, nil
 		}
 	default:

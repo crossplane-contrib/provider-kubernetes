@@ -22,7 +22,7 @@ package config
 import xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 // IdentityType used to authenticate to the Kubernetes API.
-// +kubebuilder:validation:Enum=GoogleApplicationCredentials;AzureServicePrincipalCredentials;AzureWorkloadIdentityCredentials;UpboundTokens;AWSWebIdentityCredentials;NebiusServiceAccountCredentials
+// +kubebuilder:validation:Enum=GoogleApplicationCredentials;AzureServicePrincipalCredentials;AzureWorkloadIdentityCredentials;UpboundTokens;AWSWebIdentityCredentials;NebiusServiceAccountCredentials;CoreWeaveAPIToken
 type IdentityType string
 
 // Supported identity types.
@@ -38,6 +38,8 @@ const (
 	IdentityTypeAWSWebIdentityCredentials = "AWSWebIdentityCredentials"
 
 	IdentityTypeNebiusServiceAccountCredentials = "NebiusServiceAccountCredentials"
+
+	IdentityTypeCoreWeaveAPIToken = "CoreWeaveAPIToken"
 )
 
 // ProviderCredentials required to authenticate.
